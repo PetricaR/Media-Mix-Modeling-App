@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Fitted Meridian models (30 MB+; regenerate with notebooks/03_meridian_mmm.ipynb)
+outputs/*.binpb

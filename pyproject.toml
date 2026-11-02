@@ -1,0 +1,46 @@
+[project]
+name = "tchibo-marketing-sales-prediction"
+version = "0.1.0"
+description = "Tchibo case study: forecast daily total sales from marketing spend (MAE / mean sales <= 15%)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pandas>=2.2,<3",
+    "numpy>=2.0,<2.4",
+    "openpyxl>=3.1",
+    "matplotlib>=3.9,<3.11",
+    "seaborn>=0.13",
+    "scikit-learn>=1.5",
+    "statsmodels>=0.14.5,<0.15",
+    "lightgbm>=4.5",
+    "holidays>=0.60",
+]
+
+[project.scripts]
+tchibo-forecast = "tchibo_mmm.forecast:main"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29",
+    "jupyterlab>=4.2",
+    "nbconvert>=7.16",
+    "ruff>=0.6",
+    "pytest>=8.0",
+]
+# Bayesian MMM (Google Meridian) - heavy: pulls TensorFlow + JAX.
+mmm = [
+    "google-meridian[schema]==2.1.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tchibo_mmm"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
