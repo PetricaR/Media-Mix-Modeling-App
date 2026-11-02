@@ -13,7 +13,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from mmm_studio.pipeline.stages import run_full_pipeline
     from mmm_studio.storage import LocalStorage
 
-    input_path = Path(args.input).resolve()
+    raw_input = args.input or args.workbook
+    if not raw_input:
+        print("Error: --input (or --workbook) is required.", file=sys.stderr)
+        return 1
+    input_path = Path(raw_input).resolve()
     if not input_path.exists():
         print(f"Error: Input file not found: {input_path}", file=sys.stderr)
         return 1
@@ -22,7 +26,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     storage = LocalStorage(out_dir)
 
-    profile = "smoke" if args.smoke else ("quick" if args.fast else "full")
+    if args.profile:
+        profile = args.profile
+    elif args.smoke:
+        profile = "smoke"
+    elif args.fast:
+        profile = "quick"
+    else:
+        profile = "full"
     ctx = RunContext(
         run_id=args.run_id,
         storage=storage,
@@ -79,9 +90,16 @@ def main(argv: list[str] | None = None) -> int:
 
     # run
     p_run = sub.add_parser("run", help="Run the offline MMM pipeline on an Excel workbook")
-    p_run.add_argument("--input", required=True, help="Path to input .xlsx workbook")
-    p_run.add_argument("--out", required=True, help="Output directory for run artifacts")
+    p_run.add_argument("--input", default=None, help="Path to input .xlsx workbook")
+    p_run.add_argument("--workbook", default=None, help="Alias for --input")
+    p_run.add_argument("--out", default="./data", help="Output directory for run artifacts (default: ./data)")
     p_run.add_argument("--run-id", default="offline", help="Run identifier (default: offline)")
+    p_run.add_argument(
+        "--profile",
+        choices=["full", "quick", "smoke"],
+        default=None,
+        help="Sampling profile: full, quick, or smoke",
+    )
     p_run.add_argument("--fast", action="store_true", help="Use Quick MCMC sampling profile")
     p_run.add_argument("--smoke", action="store_true", help="Use tiny Smoke MCMC sampling profile")
     p_run.add_argument("--skip-meridian", action="store_true", help="Run only fast analysis & OLS stages")

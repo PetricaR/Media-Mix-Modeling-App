@@ -6,9 +6,9 @@ import re
 from typing import Any, Literal
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-ChannelRole = Literal["paid", "print_event", "unpaid", "ignored"]
+ChannelRole = Literal["paid", "print_event", "commission", "unpaid", "ignored", "digital_paid", "control"]
 
 
 def slugify_channel(name: str) -> str:
@@ -32,14 +32,62 @@ class ChannelConfig(BaseModel):
     """Per-channel role classification and metadata."""
 
     name: str
-    slug: str
+    slug: str = ""
     role: ChannelRole
+    enabled: bool = True
     row_count: int = 0
     cost_days: int = 0
     total_sales: float = 0.0
     total_cost: float = 0.0
     has_impressions: bool = False
     has_clicks: bool = False
+    cost_column: str | None = None
+    exposure_column: str | None = None
+    exposure_type: str | None = None
+    rationale: str | None = None
+    adstock_decay: float | None = None
+    in_home_shift_days: int | None = None
+
+    @model_validator(mode="after")
+    def _populate_channel_defaults(self) -> ChannelConfig:
+        if not self.slug:
+            self.slug = slugify_channel(self.name)
+        if self.role == "ignored":
+            self.enabled = False
+        if self.cost_column is None and (
+            self.role in ("paid", "print_event", "commission", "digital_paid", "control") or self.total_cost > 0
+        ):
+            self.cost_column = f"cost_{self.slug}"
+        if self.exposure_column is None:
+            if self.role == "print_event":
+                self.exposure_column = f"{self.slug}_sendout"
+                self.exposure_type = self.exposure_type or "sendout"
+            elif self.has_impressions:
+                self.exposure_column = f"impr_{self.slug}"
+                self.exposure_type = self.exposure_type or "impressions"
+            elif self.has_clicks:
+                self.exposure_column = f"clicks_{self.slug}"
+                self.exposure_type = self.exposure_type or "clicks"
+        if self.rationale is None:
+            if self.role == "print_event":
+                self.rationale = f"Episodic print drop ({self.cost_days} send-out days); in-home shift + slow adstock"
+            elif self.role in ("commission", "control") or (self.role == "paid" and self.slug == "affiliate"):
+                self.rationale = "Commission-per-order (~6.5%); treated as non-media control in Meridian"
+            elif self.role in ("paid", "digital_paid"):
+                self.rationale = f"Continuous paid media ({self.cost_days} active spend days)"
+            elif self.role == "unpaid":
+                self.rationale = "Organic / baseline demand channel (€0 media spend)"
+            else:
+                self.rationale = "Excluded from modelling"
+        if self.adstock_decay is None:
+            self.adstock_decay = (
+                0.85
+                if self.role == "print_event"
+                else (0.50 if self.role in ("paid", "digital_paid", "commission", "control") else 0.0)
+            )
+        if self.in_home_shift_days is None:
+            self.in_home_shift_days = 2 if self.role == "print_event" else 0
+        return self
 
 
 class DataRoleConfig(BaseModel):
@@ -50,46 +98,117 @@ class DataRoleConfig(BaseModel):
     channels: list[ChannelConfig] = Field(default_factory=list)
     drop_trailing_isolated_days: bool = True
     holdout_days: int = 92
+    structural_break_year: int = 2023
+    target_column: str = "total_sales"
+    date_column: str = "date"
+    allow_single_year: bool = False
 
     @property
     def paid_channels(self) -> list[str]:
-        """All paid media channels (including print_event channels like Catalog)."""
-        return [c.name for c in self.channels if c.role in ("paid", "print_event")]
+        """All paid media channels (including print_event and commission/control channels)."""
+        return [
+            c.name
+            for c in self.channels
+            if c.enabled and c.role in ("paid", "print_event", "commission", "digital_paid", "control")
+        ]
+
+    @property
+    def paid_slugs(self) -> list[str]:
+        """Canonical snake_case slugs for all active paid/print/commission channels."""
+        return [
+            c.slug
+            for c in self.channels
+            if c.enabled and c.role in ("paid", "print_event", "commission", "digital_paid", "control")
+        ]
+
+    @property
+    def commission_channels(self) -> list[str]:
+        """Slugs of commission/control channels (e.g. affiliate) treated as non-media controls."""
+        return [
+            c.slug
+            for c in self.channels
+            if c.enabled and (c.role in ("commission", "control") or c.slug == "affiliate")
+        ]
 
     @property
     def digital_paid_channels(self) -> list[str]:
         """Continuous paid media channels (excluding print_event channels)."""
-        return [c.name for c in self.channels if c.role == "paid"]
+        return [
+            c.name
+            for c in self.channels
+            if c.enabled and c.role in ("paid", "digital_paid", "commission", "control")
+        ]
 
     @property
     def print_event_channels(self) -> list[str]:
         """Episodic print/event channels (e.g. Catalog)."""
-        return [c.name for c in self.channels if c.role == "print_event"]
+        return [c.name for c in self.channels if c.enabled and c.role == "print_event"]
 
     @property
     def unpaid_channels(self) -> list[str]:
         """Organic / unpaid channels."""
-        return [c.name for c in self.channels if c.role == "unpaid"]
+        return [c.name for c in self.channels if c.enabled and c.role == "unpaid"]
 
     @property
     def active_channels(self) -> list[str]:
         """All non-ignored channels."""
-        return [c.name for c in self.channels if c.role != "ignored"]
+        return [c.name for c in self.channels if c.enabled and c.role != "ignored"]
 
     def slug_map(self) -> dict[str, str]:
-        return {c.name: c.slug for c in self.channels if c.role != "ignored"}
+        return {c.name: c.slug for c in self.channels if c.enabled and c.role != "ignored"}
+
+
+def default_role_config() -> DataRoleConfig:
+    """Return a default `DataRoleConfig` with the canonical 11 Tchibo channels."""
+    return DataRoleConfig(
+        channels=[
+            ChannelConfig(name="SEA", role="paid"),
+            ChannelConfig(name="Catalog", role="print_event"),
+            ChannelConfig(name="Display", role="paid"),
+            ChannelConfig(name="Affiliate", role="paid"),
+            ChannelConfig(name="Display Network", role="paid"),
+            ChannelConfig(name="Social Media", role="paid"),
+            ChannelConfig(name="PSM", role="paid"),
+            ChannelConfig(name="Direct", role="unpaid"),
+            ChannelConfig(name="Email", role="unpaid"),
+            ChannelConfig(name="TV", role="unpaid"),
+            ChannelConfig(name="Organic Search", role="unpaid"),
+        ]
+    )
+
+
+def extract_role_config(raw: dict[str, Any] | DataRoleConfig | None) -> DataRoleConfig:
+    """Safely extract and validate a `DataRoleConfig` from a stored run config dict or instance."""
+    if isinstance(raw, DataRoleConfig):
+        return raw if raw.channels else default_role_config()
+    if not raw or not isinstance(raw, dict):
+        return default_role_config()
+    inner = raw.get("role_config")
+    target = inner if isinstance(inner, dict) else raw
+    if not target:
+        return default_role_config()
+    cfg = DataRoleConfig.model_validate(target)
+    if not cfg.channels:
+        cfg.channels = default_role_config().channels
+    return cfg
 
 
 class DataProfile(BaseModel):
     """Summary profile produced after inspecting an uploaded workbook."""
 
     filename: str
+    sha256: str = ""
     sheet_names: list[str]
     selected_sheet: str | None
     raw_row_count: int
+    n_rows: int = 0
+    n_columns: int = 0
     calendar_days: int
     start_date: str
     end_date: str
+    date_min: str = ""
+    date_max: str = ""
+    years_present: list[int] = Field(default_factory=list)
     modelling_end_date: str
     modelling_days: int
     trailing_isolated_dates: list[str]
@@ -97,11 +216,31 @@ class DataProfile(BaseModel):
     sample_rows: list[dict[str, Any]]
     role_config: DataRoleConfig
     missing_channel_days: dict[str, int]
+    missing_dates_count: int = 0
+    duplicate_rows_count: int = 0
+    negative_values_count: int = 0
     tv_low_sales_days: int
     catalog_sendout_days: int
     total_sales_sum: float
     total_cost_sum: float
+    total_media_spend_sum: float = 0.0
     warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _sync_frontend_aliases(self) -> DataProfile:
+        if not self.n_rows:
+            self.n_rows = self.raw_row_count
+        if not self.n_columns:
+            self.n_columns = len(self.available_columns)
+        if not self.date_min:
+            self.date_min = self.start_date
+        if not self.date_max:
+            self.date_max = self.end_date
+        if not self.total_media_spend_sum:
+            self.total_media_spend_sum = self.total_cost_sum
+        if not self.missing_dates_count and self.missing_channel_days:
+            self.missing_dates_count = sum(self.missing_channel_days.values())
+        return self
 
 
 def detect_column_mapping(columns: list[str]) -> ColumnMapping:

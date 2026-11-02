@@ -21,9 +21,9 @@ def job_resource_name(queue: str) -> str:
 
 
 def wake_worker(queue: str) -> None:
-    """Trigger a Cloud Run Job execution for `queue` if `WAKE_WORKERS == 'cloudrun'`."""
+    """Trigger a Cloud Run Job execution for `queue` if `WAKE_WORKERS` is enabled."""
     settings = get_settings()
-    if settings.wake_workers != "cloudrun" or not settings.gcp_project_id:
+    if settings.wake_workers.strip().lower() not in ("cloudrun", "true", "1", "yes") or not settings.gcp_project_id:
         return
     try:
         from google.cloud import run_v2

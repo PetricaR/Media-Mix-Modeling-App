@@ -170,42 +170,46 @@ export const OptimizerPage: React.FC<{ runId: string | null }> = ({ runId }) => 
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {optDetail.result.channels.map((ch) => (
-                      <TableRow key={ch.channel} hover>
-                        <TableCell sx={{ fontWeight: 600 }}>{ch.channel}</TableCell>
-                        <TableCell align="right">
-                          {ch.historical_spend.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                        </TableCell>
-                        <TableCell align="right">
-                          {ch.optimised_spend.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                        </TableCell>
-                        <TableCell align="right">{ch.multiplier.toFixed(2)}×</TableCell>
-                        <TableCell
-                          align="right"
-                          sx={{
-                            color:
-                              ch.delta_pct > 1
-                                ? PALETTE.semanticGood
-                                : ch.delta_pct < -1
-                                ? PALETTE.semanticBad
-                                : "inherit",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {ch.delta_pct >= 0 ? `+${ch.delta_pct.toFixed(1)}%` : `${ch.delta_pct.toFixed(1)}%`}
-                        </TableCell>
-                        <TableCell align="right">
-                          {ch.historical_incremental.toLocaleString(undefined, {
-                            maximumFractionDigits: 0,
-                          })}
-                        </TableCell>
-                        <TableCell align="right">
-                          {ch.optimised_incremental.toLocaleString(undefined, {
-                            maximumFractionDigits: 0,
-                          })}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {(optDetail.result.channels || optDetail.result.allocations || []).map((ch) => {
+                      const histSpend = ch.historical_spend ?? ch.current_spend ?? 0;
+                      const histInc = ch.historical_incremental ?? ch.current_incremental ?? 0;
+                      return (
+                        <TableRow key={ch.channel} hover>
+                          <TableCell sx={{ fontWeight: 600 }}>{ch.label || ch.channel}</TableCell>
+                          <TableCell align="right">
+                            {histSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </TableCell>
+                          <TableCell align="right">
+                            {ch.optimised_spend.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </TableCell>
+                          <TableCell align="right">{ch.multiplier.toFixed(2)}×</TableCell>
+                          <TableCell
+                            align="right"
+                            sx={{
+                              color:
+                                ch.delta_pct > 1
+                                  ? PALETTE.semanticGood
+                                  : ch.delta_pct < -1
+                                  ? PALETTE.semanticBad
+                                  : "inherit",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {ch.delta_pct >= 0 ? `+${ch.delta_pct.toFixed(1)}%` : `${ch.delta_pct.toFixed(1)}%`}
+                          </TableCell>
+                          <TableCell align="right">
+                            {histInc.toLocaleString(undefined, {
+                              maximumFractionDigits: 0,
+                            })}
+                          </TableCell>
+                          <TableCell align="right">
+                            {ch.optimised_incremental.toLocaleString(undefined, {
+                              maximumFractionDigits: 0,
+                            })}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </TableContainer>

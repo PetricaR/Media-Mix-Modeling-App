@@ -14,7 +14,8 @@ DB_NAME="${DB_NAME:-mmm_studio}"
 DB_USER="${DB_USER:-mmm_user}"
 IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo latest)}"
 
-BACKEND_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/backend:${IMAGE_TAG}"
+API_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/api:${IMAGE_TAG}"
+WORKER_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/worker:${IMAGE_TAG}"
 FRONTEND_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/frontend:${IMAGE_TAG}"
 
 API_SA="mmm-studio-api@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -86,18 +87,26 @@ for SECRET_NAME in mmm-studio-db-url mmm-studio-access-code; do
   fi
 done
 
-echo "==> [6/9] Building and pushing Backend image (${BACKEND_IMAGE})..."
-gcloud builds submit . \
-  --dockerfile=src/app/backend/Dockerfile \
-  --tag="${BACKEND_IMAGE}"
+echo "==> [6/9] Building and pushing Backend API (${API_IMAGE}) and Worker (${WORKER_IMAGE}) images..."
+gcloud builds submit src/app/backend \
+  --config=/dev/stdin <<EOF
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '--target', 'api', '-t', '${API_IMAGE}', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '--target', 'worker', '-t', '${WORKER_IMAGE}', '.']
+images:
+  - '${API_IMAGE}'
+  - '${WORKER_IMAGE}'
+EOF
 
 echo "==> [7/9] Deploying Cloud Run Worker Jobs (analysis, meridian, interactive)..."
-COMMON_ENV="MMM_STORAGE_BACKEND=gcs,MMM_GCS_BUCKET=${BUCKET_NAME},MMM_GCP_PROJECT_ID=${PROJECT_ID},MMM_GCP_REGION=${REGION}"
+COMMON_ENV="MMM_STORAGE_BACKEND=gcs,MMM_GCS_BUCKET=${BUCKET_NAME},MMM_GCP_PROJECT_ID=${PROJECT_ID},MMM_GCP_REGION=${REGION},MMM_WORKER_ANALYSIS_JOB=mmm-studio-worker-analysis,MMM_WORKER_MERIDIAN_JOB=mmm-studio-worker-meridian,MMM_WORKER_INTERACTIVE_JOB=mmm-studio-worker-interactive"
 COMMON_SECRETS="MMM_DATABASE_URL=mmm-studio-db-url:latest,MMM_APP_ACCESS_CODE=mmm-studio-access-code:latest"
 SQL_CONN="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
 
 gcloud run jobs deploy mmm-studio-worker-analysis \
-  --image="${BACKEND_IMAGE}" \
+  --image="${WORKER_IMAGE}" \
   --region="${REGION}" \
   --service-account="${WORKER_SA}" \
   --set-cloudsql-instances="${SQL_CONN}" \
@@ -110,7 +119,7 @@ gcloud run jobs deploy mmm-studio-worker-analysis \
   --args="run,python,-m,mmm_studio.cli,worker,--queue,analysis,--burst"
 
 gcloud run jobs deploy mmm-studio-worker-meridian \
-  --image="${BACKEND_IMAGE}" \
+  --image="${WORKER_IMAGE}" \
   --region="${REGION}" \
   --service-account="${WORKER_SA}" \
   --set-cloudsql-instances="${SQL_CONN}" \
@@ -123,7 +132,7 @@ gcloud run jobs deploy mmm-studio-worker-meridian \
   --args="run,python,-m,mmm_studio.cli,worker,--queue,meridian,--burst"
 
 gcloud run jobs deploy mmm-studio-worker-interactive \
-  --image="${BACKEND_IMAGE}" \
+  --image="${WORKER_IMAGE}" \
   --region="${REGION}" \
   --service-account="${WORKER_SA}" \
   --set-cloudsql-instances="${SQL_CONN}" \
@@ -144,11 +153,11 @@ done
 
 echo "==> [8/9] Deploying Cloud Run API Service (mmm-studio-api)..."
 gcloud run deploy mmm-studio-api \
-  --image="${BACKEND_IMAGE}" \
+  --image="${API_IMAGE}" \
   --region="${REGION}" \
   --service-account="${API_SA}" \
   --set-cloudsql-instances="${SQL_CONN}" \
-  --set-env-vars="${COMMON_ENV},MMM_WAKE_WORKERS=true" \
+  --set-env-vars="${COMMON_ENV},MMM_WAKE_WORKERS=cloudrun" \
   --set-secrets="${COMMON_SECRETS}" \
   --cpu=1 --memory=2Gi \
   --min-instances=0 --max-instances=4 \
@@ -160,9 +169,14 @@ API_URL="$(gcloud run services describe mmm-studio-api --region="${REGION}" --fo
 echo "API Service URL: ${API_URL}"
 
 echo "==> [9/9] Building Frontend image (${FRONTEND_IMAGE}) and deploying mmm-studio-web..."
-gcloud builds submit . \
-  --dockerfile=src/app/frontend/Dockerfile \
-  --tag="${FRONTEND_IMAGE}"
+gcloud builds submit src/app \
+  --config=/dev/stdin <<EOF
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'frontend/Dockerfile', '-t', '${FRONTEND_IMAGE}', '.']
+images:
+  - '${FRONTEND_IMAGE}'
+EOF
 
 gcloud run deploy mmm-studio-web \
   --image="${FRONTEND_IMAGE}" \

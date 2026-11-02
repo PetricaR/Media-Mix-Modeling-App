@@ -1,6 +1,6 @@
 # MMM Studio — Standalone Marketing Mix Modelling Web Application
 
-**MMM Studio** (`src/app/`) is a self-contained, full-stack web application and CLI pipeline for Bayesian Marketing Mix Modelling (Google Meridian v1.5.4), OLS benchmarking, exploratory data analysis, constrained budget optimisation, and out-of-sample budget-plan forecasting.
+**MMM Studio** (`src/app/`) is a self-contained, full-stack web application and CLI pipeline for Bayesian Marketing Mix Modelling (Google Meridian v2.1.0), OLS benchmarking, exploratory data analysis, constrained budget optimisation, and out-of-sample budget-plan forecasting.
 
 ## Architectural Isolation
 
@@ -17,21 +17,22 @@ You can execute the full 15-stage pipeline directly from the command line agains
 
 ```bash
 cd src/app/backend
-uv sync
+uv sync --extra worker
 
 # Fast EDA + Feature Preparation + OLS Benchmarks (~5 seconds)
 uv run python -m mmm_studio.cli run \
-  --workbook ../../../data/DataScienceMarketingUseCase.xlsx \
+  --input ../../../data/DataScienceMarketingUseCase.xlsx \
   --out ../../.app_data/runs/cli_demo \
   --profile quick \
   --skip-meridian
 
 # Full Pipeline including Google Meridian Bayesian MCMC + 3 HTML Reports + 42d Forecast
 uv run python -m mmm_studio.cli run \
-  --workbook ../../../data/DataScienceMarketingUseCase.xlsx \
+  --input ../../../data/DataScienceMarketingUseCase.xlsx \
   --out ../../.app_data/runs/cli_full \
   --profile quick
 ```
+*(Both `--input` / `--workbook` and `--profile {full,quick,smoke}` / `--fast` / `--smoke` are supported.)*
 
 ---
 
@@ -90,7 +91,7 @@ uv run pytest tests/test_meridian_smoke.py -v
 
 ## 4. Google Cloud Run Deployment (`formare-dev` / `europe-west3`)
 
-The idempotent deployment script [`src/app/deploy/deploy.sh`](deploy/deploy.sh) provisions and deploys:
+The idempotent deployment script [`src/app/deploy/deploy.sh`](deploy/deploy.sh) can be run to provision and deploy:
 - **Cloud SQL PostgreSQL 16** (`mmm-studio-pg`, `db-f1-micro`)
 - **Cloud Storage Bucket** (`gs://formare-dev-mmm-studio-artifacts`)
 - **Artifact Registry** (`mmm-studio`) & **Secret Manager** (`mmm-studio-db-url`, `mmm-studio-access-code`)

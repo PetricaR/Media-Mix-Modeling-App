@@ -62,10 +62,16 @@ def api_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     client, _ = api_env
 
-    # 1. Health check
+    # 1. Health & auth check
     r_health = client.get("/api/v1/health")
     assert r_health.status_code == 200
     assert r_health.json()["status"] == "ok"
+
+    r_auth_chk = client.post("/api/v1/auth/check")
+    assert r_auth_chk.status_code == 200
+    assert r_auth_chk.json()["ok"] is True
+    assert r_auth_chk.json()["protected"] is False
+    assert r_auth_chk.json()["required"] is False
 
     # 2. Upload workbook (creates draft run)
     with FIXTURE_XLSX.open("rb") as fh:
@@ -79,6 +85,9 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     run_id = run_data["id"]
     assert run_data["status"] == "draft"
     assert run_data["schema"]["sheet_names"] == ["data", "info"]
+    assert run_data["schema"]["years_present"] == [2023, 2024, 2025]
+    assert run_data["schema"]["duplicate_rows_count"] == 0
+    assert run_data["schema"]["negative_values_count"] == 0
     assert len(run_data["config"]["role_config"]["channels"]) == 12
 
     # 3. Confirm roles via PATCH
@@ -107,14 +116,19 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
 
     r_secs = client.get(f"/api/v1/runs/{run_id}/sections")
     assert r_secs.status_code == 200
-    sec_ids = {s["id"] for s in r_secs.json()["sections"]}
+    secs_json = r_secs.json()
+    assert secs_json["status"] == "succeeded"
+    assert secs_json["run_status"] == "succeeded"
+    sec_ids = {s["id"] for s in secs_json["sections"]}
     assert {"overview", "data_quality", "explore_correlations", "preparation", "benchmark", "brief"}.issubset(sec_ids)
 
     r_ov = client.get(f"/api/v1/runs/{run_id}/sections/overview")
     assert r_ov.status_code == 200
     ov = r_ov.json()
     assert len(ov["blocks"]) >= 3
-    assert any(b["type"] == "kpis" for b in ov["blocks"])
+    kpi_blocks = [b for b in ov["blocks"] if b["type"] == "kpis"]
+    assert kpi_blocks
+    assert all("tone" in item and "status" in item for item in kpi_blocks[0]["items"])
     assert any(b["type"] == "chart" for b in ov["blocks"])
 
     # 6. Plan template & interactive scenario
@@ -157,6 +171,17 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     opt_payload = r_opt_done.json()
     assert opt_payload["status"] == "succeeded"
     assert len(opt_payload["result"]["channels"]) == 6
+    assert len(opt_payload["result"]["allocations"]) == 6
+    first_alloc = opt_payload["result"]["allocations"][0]
+    for key in ("channel_label", "current_spend", "optimal_spend", "delta_pct", "expected_incremental_sales", "roi", "mroi"):
+        assert key in first_alloc
+    assert "expected_uplift_sales" in opt_payload["result"]
+    assert "expected_uplift_pct" in opt_payload["result"]
+
+    r_opts_list = client.get(f"/api/v1/runs/{run_id}/optimisations")
+    assert r_opts_list.status_code == 200
+    assert r_opts_list.json()["run_id"] == run_id
+    assert len(r_opts_list.json()["optimisations"]) == 1
 
     # 8. Artifacts listing & streaming
     r_arts = client.get(f"/api/v1/runs/{run_id}/artifacts")

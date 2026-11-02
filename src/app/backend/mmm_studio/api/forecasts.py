@@ -18,6 +18,8 @@ from mmm_studio.core.meridian.forecast import (
     fast_forecast_from_multipliers,
     validate_plan,
 )
+from mmm_studio.core.meridian.spec import MeridianSpecConfig
+from mmm_studio.core.schema import extract_role_config
 from mmm_studio.db.models import ForecastRun, Run, ScenarioRun
 from mmm_studio.jobs.app import count_active_queue_jobs, defer_task, get_queue_position, sweep_stale_runs
 from mmm_studio.jobs.tasks import run_forecast_job, run_scenario_job
@@ -31,6 +33,13 @@ class ScenarioCreateRequest(BaseModel):
     name: str = "What-If Scenario"
     multipliers: dict[str, float] = Field(default_factory=dict)
     horizon_days: int = Field(default=42, ge=1, le=90)
+
+
+def _paid_channels_for_run(run: Run | None, wide_df: pd.DataFrame) -> list[str]:
+    cfg_dict = (run.config if run else None) or {}
+    cfg_obj = extract_role_config(cfg_dict)
+    spec_cfg = MeridianSpecConfig.from_role_config(cfg_obj, index=wide_df.index)
+    return spec_cfg.paid_slugs
 
 
 def _load_wide_df(storage: StorageBackend, run_id: str) -> pd.DataFrame:
@@ -63,7 +72,9 @@ def _ensure_default_forecast(db: Session, storage: StorageBackend, run_id: str) 
         base_plan = pd.read_parquet(io.BytesIO(storage.read_bytes(fc_plan_key)))
     else:
         wide_df = pd.read_parquet(io.BytesIO(storage.read_bytes(wide_key)))
-        base_plan = build_example_plan(wide_df, days=42)
+        run_rec = db.get(Run, run_id)
+        paid_channels = _paid_channels_for_run(run_rec, wide_df)
+        base_plan = build_example_plan(wide_df, days=42, paid_channels=paid_channels)
         mean_sales = float(wide_df["total_sales"].mean())
         base_daily = pd.DataFrame(
             {
@@ -153,7 +164,8 @@ def get_plan_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
 
     wide_df = _load_wide_df(storage, run_id)
-    plan_df = build_example_plan(wide_df, days=days)
+    paid_channels = _paid_channels_for_run(run, wide_df)
+    plan_df = build_example_plan(wide_df, days=days, paid_channels=paid_channels)
     csv_bytes = plan_df.reset_index().to_csv(index=False).encode("utf-8")
     return Response(
         content=csv_bytes,
@@ -181,7 +193,10 @@ def list_forecasts(
         .order_by(ForecastRun.created_at.desc())
         .all()
     )
-    return {"forecasts": [_serialize_forecast(f, storage, include_result=False) for f in items]}
+    return {
+        "run_id": run_id,
+        "forecasts": [_serialize_forecast(f, storage, include_result=False) for f in items],
+    }
 
 
 @router.post(
@@ -204,11 +219,16 @@ async def create_forecast(
 
     wide_df = _load_wide_df(storage, run_id)
     last_history_date = pd.Timestamp(wide_df.index.max())
+    paid_channels = _paid_channels_for_run(run, wide_df)
 
     raw_bytes = await file.read()
     try:
         raw_df = pd.read_csv(io.BytesIO(raw_bytes))
-        clean_df = validate_plan(raw_df, last_history_date=last_history_date)
+        clean_df = validate_plan(
+            raw_df,
+            last_history_date=last_history_date,
+            paid_channels=paid_channels,
+        )
     except PlanValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except Exception as exc:

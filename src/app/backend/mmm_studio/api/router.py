@@ -45,7 +45,7 @@ def verify_access_code(
 
     expected = (settings.app_access_code or "").strip()
     if not expected:
-        return {"ok": True, "required": False}
+        return {"ok": True, "required": False, "protected": False}
 
     provided = (x_access_code or (payload.access_code if payload else "") or "").strip()
     if not provided:
@@ -58,7 +58,7 @@ def verify_access_code(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid access code.",
         )
-    return {"ok": True, "required": True}
+    return {"ok": True, "required": True, "protected": True}
 
 
 api_router.include_router(runs.router)

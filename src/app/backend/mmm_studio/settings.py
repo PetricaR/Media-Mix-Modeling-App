@@ -48,20 +48,20 @@ class Settings(BaseSettings):
         default="europe-west3",
         validation_alias=AliasChoices("GCP_REGION", "MMM_GCP_REGION"),
     )
-    wake_workers: Literal["none", "cloudrun", "false", "true"] = Field(
+    wake_workers: Literal["none", "cloudrun", "false", "true", "0", "1", "no", "yes"] = Field(
         default="none",
         validation_alias=AliasChoices("WAKE_WORKERS", "MMM_WAKE_WORKERS"),
     )
     worker_analysis_job: str = Field(
-        default="mmm-worker-analysis",
+        default="mmm-studio-worker-analysis",
         validation_alias=AliasChoices("WORKER_ANALYSIS_JOB", "MMM_WORKER_ANALYSIS_JOB"),
     )
     worker_meridian_job: str = Field(
-        default="mmm-worker-meridian",
+        default="mmm-studio-worker-meridian",
         validation_alias=AliasChoices("WORKER_MERIDIAN_JOB", "MMM_WORKER_MERIDIAN_JOB"),
     )
     worker_interactive_job: str = Field(
-        default="mmm-worker-interactive",
+        default="mmm-studio-worker-interactive",
         validation_alias=AliasChoices("WORKER_INTERACTIVE_JOB", "MMM_WORKER_INTERACTIVE_JOB"),
     )
 

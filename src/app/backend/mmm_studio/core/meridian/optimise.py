@@ -6,8 +6,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.interpolate import PchipInterpolator
-from scipy.optimize import minimize
 
 from mmm_studio.charts.builders import bar_figure
 from mmm_studio.charts.theme import SLATE, TEAL
@@ -65,7 +63,25 @@ def optimise_hill_response_curves(
     """
     channels = list(response_curves.keys())
     if not channels:
-        return {"total_budget": 0.0, "current_inc_sales": 0.0, "optimised_inc_sales": 0.0, "lift_pct": 0.0, "allocations": []}
+        return {
+            "total_budget": 0.0,
+            "historical_budget": 0.0,
+            "historical_spend_total": 0.0,
+            "current_inc_sales": 0.0,
+            "optimised_inc_sales": 0.0,
+            "historical_incremental_revenue": 0.0,
+            "optimised_incremental_revenue": 0.0,
+            "lift_eur": 0.0,
+            "lift_pct": 0.0,
+            "uplift_eur": 0.0,
+            "uplift_pct": 0.0,
+            "include_catalog": True,
+            "allocations": [],
+            "channels": [],
+        }
+
+    from scipy.interpolate import PchipInterpolator
+    from scipy.optimize import minimize
 
     cur_sp_map: dict[str, float] = {}
     interpolators: dict[str, PchipInterpolator] = {}
@@ -145,34 +161,64 @@ def optimise_hill_response_curves(
         o_inc = float(interpolators[ch](o_sp))
         o_lo = float(lo_interpolators[ch](o_sp))
         o_hi = float(hi_interpolators[ch](o_sp))
+        delta_sp = round(o_sp - c_sp, 0)
+        delta_pct = round(100.0 * (o_sp / max(c_sp, 1.0) - 1.0), 1)
+        delta_inc = round(o_inc - c_inc, 0)
+        # Numerical derivative at optimal spend for mROI
+        eps = max(o_sp * 0.01, 100.0)
+        mroi_val = (float(interpolators[ch](o_sp + eps)) - float(interpolators[ch](max(0.0, o_sp - eps)))) / (
+            (o_sp + eps) - max(0.0, o_sp - eps)
+        )
+        opt_roi = round(o_inc / max(o_sp, 1.0), 2)
         allocations.append(
             {
                 "channel": ch,
                 "label": CHANNEL_DISPLAY_NAMES.get(ch, ch),
+                "channel_label": CHANNEL_DISPLAY_NAMES.get(ch, ch),
                 "current_spend": round(c_sp, 0),
+                "historical_spend": round(c_sp, 0),
                 "optimised_spend": round(o_sp, 0),
-                "spend_delta": round(o_sp - c_sp, 0),
-                "spend_delta_pct": round(100.0 * (o_sp / max(c_sp, 1.0) - 1.0), 1),
+                "optimal_spend": round(o_sp, 0),
+                "spend_delta": delta_sp,
+                "delta_spend": delta_sp,
+                "spend_delta_pct": delta_pct,
+                "delta_pct": delta_pct,
+                "multiplier": round(o_sp / max(c_sp, 1.0), 3),
+                "min_bound": round(bounds[i][0] / max(c_sp, 1.0), 2),
+                "max_bound": round(bounds[i][1] / max(c_sp, 1.0), 2),
                 "current_inc_sales": round(c_inc, 0),
+                "historical_incremental": round(c_inc, 0),
                 "optimised_inc_sales": round(o_inc, 0),
+                "optimised_incremental": round(o_inc, 0),
+                "expected_incremental_sales": round(o_inc, 0),
                 "optimised_inc_lo": round(o_lo, 0),
                 "optimised_inc_hi": round(o_hi, 0),
-                "inc_sales_delta": round(o_inc - c_inc, 0),
-                "optimised_roi": round(o_inc / max(o_sp, 1.0), 2),
+                "inc_sales_delta": delta_inc,
+                "delta_incremental": delta_inc,
+                "historical_roi": round(c_inc / max(c_sp, 1.0), 2),
+                "optimised_roi": opt_roi,
+                "roi": opt_roi,
+                "mroi": round(mroi_val, 2),
             }
         )
 
     return {
         "total_budget": round(budget, 0),
         "historical_budget": round(float(x0.sum()), 0),
+        "historical_spend_total": round(float(x0.sum()), 0),
         "current_inc_sales": round(cur_inc_total, 0),
         "optimised_inc_sales": round(opt_inc_total, 0),
         "historical_incremental_revenue": round(cur_inc_total, 0),
         "optimised_incremental_revenue": round(opt_inc_total, 0),
+        "historical_total_sales": round(cur_inc_total, 0),
+        "optimal_total_sales": round(opt_inc_total, 0),
         "lift_eur": round(lift_eur, 0),
         "lift_pct": round(lift_pct, 2),
         "uplift_eur": round(lift_eur, 0),
         "uplift_pct": round(lift_pct, 2),
+        "expected_uplift_sales": round(lift_eur, 0),
+        "expected_uplift_pct": round(lift_pct, 2),
+        "include_catalog": True,
         "min_pct": min_pct,
         "max_pct": max_pct,
         "allocations": allocations,
@@ -206,7 +252,7 @@ def solve_constrained_optimisation(
         else:
             abs_bounds[ch] = (c_sp * default_bounds[0], c_sp * default_bounds[1])
 
-    return optimise_hill_response_curves(
+    res = optimise_hill_response_curves(
         response_curves=response_curves,
         current_spend=cur_spend_map,
         total_budget=total_budget,
@@ -214,6 +260,8 @@ def solve_constrained_optimisation(
         max_pct=default_bounds[1],
         channel_bounds=abs_bounds,
     )
+    res["include_catalog"] = include_catalog
+    return res
 
 
 def build_optimiser_section(
@@ -241,34 +289,61 @@ def build_optimiser_section(
             o_sp = float(r["optimised_spend"])
             c_inc = float(r["current_inc_sales"])
             o_inc = float(r["optimised_inc_sales"])
+            delta_sp = round(o_sp - c_sp, 0)
+            delta_pct = round(100.0 * (o_sp / max(c_sp, 1.0) - 1.0), 1)
+            delta_inc = round(o_inc - c_inc, 0)
             allocs.append(
                 {
                     "channel": str(ch),
                     "label": CHANNEL_DISPLAY_NAMES.get(str(ch), str(ch)),
                     "current_spend": round(c_sp, 0),
+                    "historical_spend": round(c_sp, 0),
                     "optimised_spend": round(o_sp, 0),
-                    "spend_delta": round(o_sp - c_sp, 0),
-                    "spend_delta_pct": round(100.0 * (o_sp / max(c_sp, 1.0) - 1.0), 1),
+                    "spend_delta": delta_sp,
+                    "delta_spend": delta_sp,
+                    "spend_delta_pct": delta_pct,
+                    "delta_pct": delta_pct,
+                    "multiplier": round(o_sp / max(c_sp, 1.0), 3),
+                    "min_bound": 0.7,
+                    "max_bound": 1.3,
                     "current_inc_sales": round(c_inc, 0),
+                    "historical_incremental": round(c_inc, 0),
                     "optimised_inc_sales": round(o_inc, 0),
-                    "inc_sales_delta": round(o_inc - c_inc, 0),
+                    "optimised_incremental": round(o_inc, 0),
+                    "inc_sales_delta": delta_inc,
+                    "delta_incremental": delta_inc,
+                    "historical_roi": round(c_inc / max(c_sp, 1.0), 2),
                     "optimised_roi": round(o_inc / max(o_sp, 1.0), 2),
                 }
             )
         if allocs:
             opt_res["allocations"] = allocs
+            opt_res["channels"] = allocs
             opt_res["total_budget"] = round(sum(a["optimised_spend"] for a in allocs), 0)
+            opt_res["historical_budget"] = round(sum(a["current_spend"] for a in allocs), 0)
+            opt_res["historical_spend_total"] = opt_res["historical_budget"]
             opt_res["current_inc_sales"] = round(sum(a["current_inc_sales"] for a in allocs), 0)
             opt_res["optimised_inc_sales"] = round(sum(a["optimised_inc_sales"] for a in allocs), 0)
+            opt_res["historical_incremental_revenue"] = opt_res["current_inc_sales"]
+            opt_res["optimised_incremental_revenue"] = opt_res["optimised_inc_sales"]
             opt_res["lift_eur"] = round(opt_res["optimised_inc_sales"] - opt_res["current_inc_sales"], 0)
             opt_res["lift_pct"] = round(
                 100.0 * (opt_res["optimised_inc_sales"] / max(opt_res["current_inc_sales"], 1.0) - 1.0), 2
             )
+            opt_res["uplift_eur"] = opt_res["lift_eur"]
+            opt_res["uplift_pct"] = opt_res["lift_pct"]
 
     allocs_sorted = sorted(opt_res["allocations"], key=lambda a: a["current_spend"])
     labels = [a["label"] for a in allocs_sorted]
     cur_m = [round(a["current_spend"] / 1e6, 2) for a in allocs_sorted]
     opt_m = [round(a["optimised_spend"] / 1e6, 2) for a in allocs_sorted]
+
+    reallocation_vector = "Balanced allocation"
+    if opt_res["allocations"]:
+        donor = min(opt_res["allocations"], key=lambda a: a["spend_delta"])
+        recipient = max(opt_res["allocations"], key=lambda a: a["spend_delta"])
+        if donor["spend_delta"] < 0 and recipient["spend_delta"] > 0 and donor["channel"] != recipient["channel"]:
+            reallocation_vector = f"{donor['label']} → {recipient['label']}"
 
     fig_opt = bar_figure(
         categories=labels,
@@ -319,7 +394,7 @@ def build_optimiser_section(
                 ),
                 KpiItem(
                     label="Primary Reallocation Vector",
-                    value="Display → SEA",
+                    value=reallocation_vector,
                     delta="Subject to SEA geo-lift check",
                     status="warn",
                 ),

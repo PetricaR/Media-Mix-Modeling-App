@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -12,7 +13,7 @@ from typing import Any
 import pandas as pd
 from procrastinate import JobContext
 
-from mmm_studio.core.schema import DataProfile, DataRoleConfig
+from mmm_studio.core.schema import DataProfile, DataRoleConfig, default_role_config, extract_role_config
 from mmm_studio.db.models import ForecastRun, OptimisationRun, Run, ScenarioRun, StageProgress, utcnow
 from mmm_studio.db.session import get_session_factory
 from mmm_studio.pipeline.context import RunContext
@@ -184,6 +185,10 @@ def _build_run_context(
                 st.error = err_msg
                 sdb.commit()
 
+    spawn_child = (
+        hb.job_context is not None
+        and os.environ.get("MMM_SPAWN_MERIDIAN_CHILD", "true").lower() in ("1", "true", "yes")
+    )
     return RunContext(
         run_id=run_id,
         storage=storage,
@@ -196,6 +201,7 @@ def _build_run_context(
         on_stage_error=on_stage_error,
         on_heartbeat=hb.touch,
         is_cancelled=lambda: hb.cancelled,
+        spawn_meridian_child=spawn_child,
     )
 
 
@@ -235,14 +241,22 @@ def execute_analysis_job(
             "n_sections": len(sections),
             "sections": [s["id"] for s in sections],
         }
-        ctx.save_json("meta/summary.json", summary)
 
         with SessionLocal() as db:
             run_rec = db.get(Run, run_id)
+            s15 = (
+                db.query(StageProgress)
+                .filter(StageProgress.run_id == run_id, StageProgress.key == "s15_finalize")
+                .first()
+            )
+            meridian_done = s15 is not None and s15.status == "succeeded"
+            if not meridian_done:
+                ctx.save_json("meta/summary.json", summary)
             if run_rec and run_rec.status != "cancelled":
-                run_rec.summary = summary
+                if not meridian_done:
+                    run_rec.summary = summary
                 run_rec.heartbeat_at = utcnow()
-                if skip_meridian:
+                if skip_meridian or meridian_done:
                     run_rec.status = "succeeded"
                     has_active = db.query(Run).filter(Run.is_active.is_(True)).first() is not None
                     if not has_active:
@@ -287,9 +301,36 @@ def execute_meridian_job(
     t0 = time.monotonic()
     try:
         ctx = _build_run_context(run_id, hb, sqlalchemy_url=sqlalchemy_url)
-        # Ensure analysis stages completed first if wide_2023_2024 is not yet in storage
+        # Ensure analysis stages completed first if wide_2023_2024 is not yet in storage.
+        # When analysis and meridian jobs are queued together on separate workers, wait briefly
+        # for an active analysis stage to produce wide_2023_2024.parquet before running it here.
         if not ctx.storage.exists(ctx.key("data/wide_2023_2024.parquet")):
-            run_analysis_stages(ctx)
+            wait_deadline = time.monotonic() + 60.0
+            while not ctx.storage.exists(ctx.key("data/wide_2023_2024.parquet")):
+                with SessionLocal() as db:
+                    prep_stage = (
+                        db.query(StageProgress)
+                        .filter(StageProgress.run_id == run_id, StageProgress.key == "s10_preparation")
+                        .first()
+                    )
+                    any_running_analysis = (
+                        db.query(StageProgress)
+                        .filter(
+                            StageProgress.run_id == run_id,
+                            StageProgress.queue == "analysis",
+                            StageProgress.status == "running",
+                        )
+                        .first()
+                        is not None
+                    )
+                if not any_running_analysis and (prep_stage is None or prep_stage.status in ("pending", "failed")):
+                    break
+                if time.monotonic() >= wait_deadline:
+                    break
+                hb.touch()
+                time.sleep(0.5)
+            if not ctx.storage.exists(ctx.key("data/wide_2023_2024.parquet")):
+                run_analysis_stages(ctx)
 
         run_meridian_stages(ctx)
         elapsed = round(time.monotonic() - t0, 2)
@@ -367,23 +408,30 @@ def execute_forecast_job(
         plan_path = fc.plan_path
         run_rec = db.get(Run, run_id)
         run_profile = run_rec.profile if run_rec else "quick"
+        config_dict = (run_rec.config if run_rec else None) or {}
         fc.status = "running"
         fc.heartbeat_at = utcnow()
         db.commit()
 
+    config_obj = extract_role_config(config_dict)
+
     hb = _HeartbeatMonitor(ForecastRun, forecast_id, job_context=job_context, sqlalchemy_url=sqlalchemy_url)
     hb.start()
     try:
-        raw_plan = storage.read_bytes(plan_path)
-        plan_df = pd.read_csv(io.BytesIO(raw_plan))
-        plan_clean = validate_plan(plan_df)
-
         wide_bytes = storage.read_bytes(f"runs/{run_id}/data/wide_2023_2024.parquet")
         wide_2023_2024 = pd.read_parquet(io.BytesIO(wide_bytes))
 
         # Check if user requested fast multiplier mode or full refit
         sampling = SMOKE_SAMPLING if run_profile == "smoke" else FAST_SAMPLING
-        spec_cfg = MeridianSpecConfig()
+        spec_cfg = MeridianSpecConfig.from_role_config(config_obj, index=wide_2023_2024.index)
+
+        raw_plan = storage.read_bytes(plan_path)
+        plan_df = pd.read_csv(io.BytesIO(raw_plan))
+        plan_clean = validate_plan(
+            plan_df,
+            last_history_date=pd.Timestamp(wide_2023_2024.index.max()),
+            paid_channels=spec_cfg.paid_slugs,
+        )
 
         # If a default forecast already exists on the exact same date index, or if we refit:
         default_fc_key = f"runs/{run_id}/data/forecast_2025_01_daily.parquet"
@@ -493,6 +541,13 @@ def execute_scenario_job(
         db.commit()
 
     try:
+        cfg_key = f"runs/{run_id}/meta/config.json"
+        if storage.exists(cfg_key):
+            config_obj = extract_role_config(storage.read_json(cfg_key))
+        else:
+            config_obj = default_role_config()
+        paid_channels = config_obj.paid_slugs or None
+
         cache_key = f"{run_id}:{forecast_id}"
         cached = _cache_get(cache_key)
         if cached is None:
@@ -512,7 +567,7 @@ def execute_scenario_job(
                 wide_df = pd.read_parquet(
                     io.BytesIO(storage.read_bytes(f"runs/{run_id}/data/wide_2023_2024.parquet"))
                 )
-                base_plan = build_example_plan(wide_df, days=42)
+                base_plan = build_example_plan(wide_df, days=42, paid_channels=paid_channels)
                 mean_sales = float(wide_df["total_sales"].mean())
                 base_daily = pd.DataFrame(
                     {
@@ -529,7 +584,9 @@ def execute_scenario_job(
             _cache_put(cache_key, cached)
 
         multipliers = {str(k): float(v) for k, v in (inputs.get("multipliers") or {}).items()}
-        # Commission channels (affiliate) are locked at 1.0 because they are controls
+        # Commission channels (e.g. affiliate) are locked at 1.0 because they are controls
+        for comm_ch in config_obj.commission_channels:
+            multipliers.pop(comm_ch, None)
         multipliers.pop("affiliate", None)
         horizon_days = int(inputs.get("horizon_days", len(cached["base_plan"])))
 
@@ -600,13 +657,40 @@ def execute_optimiser_job(
                 wide_df = pd.read_parquet(
                     io.BytesIO(storage.read_bytes(f"runs/{run_id}/data/wide_2023_2024.parquet"))
                 )
-                channels = ["sea", "catalog", "display", "psm", "display_network", "social_media"]
-                ref_rois = {"sea": 8.04, "social_media": 1.85, "psm": 1.42, "catalog": 1.01, "display_network": 0.65, "display": 0.42}
+                cfg_key = f"runs/{run_id}/meta/config.json"
+                if storage.exists(cfg_key):
+                    config_obj = extract_role_config(storage.read_json(cfg_key))
+                    channels = [
+                        s for s in config_obj.paid_slugs if s not in config_obj.commission_channels
+                    ] or [
+                        "sea",
+                        "catalog",
+                        "display",
+                        "psm",
+                        "display_network",
+                        "social_media",
+                    ]
+                else:
+                    channels = ["sea", "catalog", "display", "psm", "display_network", "social_media"]
+                ref_rois = {
+                    "sea": 8.04,
+                    "social_media": 1.85,
+                    "psm": 1.42,
+                    "catalog": 1.01,
+                    "display_network": 0.65,
+                    "display": 0.42,
+                }
                 rows = []
                 response_curves = {}
                 for ch in channels:
                     sp = float(wide_df[f"cost_{ch}"].sum()) if f"cost_{ch}" in wide_df.columns else 1_000_000.0
-                    roi_val = ref_rois.get(ch, 1.2)
+                    if ch in ref_rois:
+                        roi_val = ref_rois[ch]
+                    elif f"cost_{ch}" in wide_df.columns and "total_sales" in wide_df.columns:
+                        corr = float(wide_df[f"cost_{ch}"].corr(wide_df["total_sales"]))
+                        roi_val = round(max(0.3, min(10.0, 1.0 + max(0.0, corr) * 3.0)), 2)
+                    else:
+                        roi_val = 1.2
                     inc = sp * roi_val
                     rows.append(
                         {

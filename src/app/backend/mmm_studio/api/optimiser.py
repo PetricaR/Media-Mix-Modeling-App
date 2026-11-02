@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from mmm_studio.api.deps import get_app_storage, get_db, require_access_code
 from mmm_studio.db.models import OptimisationRun, Run
-from mmm_studio.jobs.app import defer_task
+from mmm_studio.jobs.app import defer_task, sweep_stale_runs
 from mmm_studio.jobs.tasks import run_optimiser_job
 from mmm_studio.storage import StorageBackend
 
@@ -19,6 +19,7 @@ router = APIRouter(tags=["optimisations"])
 
 
 class OptimisationCreateRequest(BaseModel):
+    name: str = "Constrained Budget Optimisation"
     total_budget: float | None = Field(default=None, gt=0)
     min_multiplier: float = Field(default=0.7, ge=0.0, le=2.0)
     max_multiplier: float = Field(default=1.3, ge=0.1, le=5.0)
@@ -27,10 +28,12 @@ class OptimisationCreateRequest(BaseModel):
 
 
 def _serialize_optimisation(opt: OptimisationRun, storage: StorageBackend) -> dict[str, Any]:
+    inputs = opt.inputs or {}
     out: dict[str, Any] = {
         "id": opt.id,
         "run_id": opt.run_id,
-        "inputs": opt.inputs or {},
+        "name": str(inputs.get("name") or "Constrained Budget Optimisation"),
+        "inputs": inputs,
         "status": opt.status,
         "summary": opt.summary,
         "error": opt.error,
@@ -49,6 +52,7 @@ def list_optimisations(
     storage: StorageBackend = Depends(get_app_storage),
 ) -> dict[str, Any]:
     """List all interactive budget optimisation runs for `run_id`."""
+    sweep_stale_runs()
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
@@ -59,7 +63,10 @@ def list_optimisations(
         .order_by(OptimisationRun.created_at.desc())
         .all()
     )
-    return {"optimisations": [_serialize_optimisation(o, storage) for o in items]}
+    return {
+        "run_id": run_id,
+        "optimisations": [_serialize_optimisation(o, storage) for o in items],
+    }
 
 
 @router.post(

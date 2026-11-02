@@ -30,23 +30,52 @@ from mmm_studio.report.sections import (
 )
 
 
-def compute_preparation_ols_ladder(panel: pd.DataFrame) -> list[dict[str, Any]]:
+def compute_preparation_ols_ladder(
+    panel: pd.DataFrame,
+    config: DataRoleConfig | None = None,
+) -> list[dict[str, Any]]:
     """Run the 4-step explanatory R² ladder from 02_data_preparation.ipynb."""
-    raw_costs = (
-        "cost_sea + cost_catalog + cost_display + cost_affiliate + "
-        "cost_display_network + cost_social_media + cost_psm"
-    )
+    default_raw = [
+        "cost_sea",
+        "cost_catalog",
+        "cost_display",
+        "cost_affiliate",
+        "cost_display_network",
+        "cost_social_media",
+        "cost_psm",
+    ]
+    if config is not None:
+        cfg_slugs = [
+            ch.slug
+            for ch in config.channels
+            if ch.enabled and ch.role in ("paid", "print_event", "commission", "digital_paid", "control")
+        ]
+        if cfg_slugs and set(cfg_slugs) != {c.replace("cost_", "") for c in default_raw}:
+            raw_list = [f"cost_{s}" for s in cfg_slugs if f"cost_{s}" in panel.columns]
+        else:
+            raw_list = [c for c in default_raw if c in panel.columns]
+    else:
+        raw_list = [c for c in default_raw if c in panel.columns]
+    if not raw_list:
+        raw_list = [c for c in panel.columns if c.startswith("cost_") and not c.endswith("_adstock") and not c.endswith("_sat")]
+    raw_costs = " + ".join(raw_list) or "1"
+
     cal_terms = (
         "dow_mon + dow_tue + dow_wed + dow_thu + dow_fri + dow_sat + "
         "is_de_holiday + is_christmas_window + is_post_christmas + "
         "is_black_week + is_cyber_week + is_pre_easter"
     )
     seas_terms = "t_norm + sin_1 + cos_1 + sin_2 + cos_2 + sin_3 + cos_3 + tv_anomaly + social_post_aug2024"
-    adstock_costs = (
-        "cost_sea_adstock + cost_catalog_adstock + catalog_in_home_7d + catalog_sendout + "
-        "cost_display_adstock + cost_affiliate_adstock + cost_display_network_adstock + "
-        "cost_social_media_adstock + cost_psm_adstock"
-    )
+    adstock_list: list[str] = []
+    for rc in raw_list:
+        ad_col = f"{rc}_adstock"
+        if ad_col in panel.columns:
+            adstock_list.append(ad_col)
+        if rc == "cost_catalog":
+            for extra in ("catalog_in_home_7d", "catalog_sendout"):
+                if extra in panel.columns:
+                    adstock_list.append(extra)
+    adstock_costs = " + ".join(adstock_list) or raw_costs
 
     specs = [
         ("1. Raw costs only (7 channels)", f"total_sales ~ {raw_costs}"),
@@ -237,7 +266,7 @@ def build_preparation_section(
     )
 
     # 6. Explanatory OLS R² Progression Ladder (0.74 -> 0.76 -> 0.83 -> 0.90)
-    ladder = compute_preparation_ols_ladder(panel)
+    ladder = compute_preparation_ols_ladder(panel, config=config)
     fig_ladder = bar_figure(
         categories=[r["step"] for r in ladder],
         series=[

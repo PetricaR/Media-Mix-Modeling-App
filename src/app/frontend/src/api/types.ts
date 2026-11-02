@@ -1,8 +1,17 @@
-export type ChannelRole = "paid" | "print_event" | "unpaid" | "ignored";
+export type ChannelRole =
+  | "paid"
+  | "print_event"
+  | "commission"
+  | "unpaid"
+  | "ignored"
+  | "digital_paid"
+  | "control";
 
 export interface ChannelConfig {
   name: string;
+  slug?: string;
   role: ChannelRole;
+  enabled?: boolean;
   cost_column?: string | null;
   exposure_column?: string | null;
   exposure_type?: string | null;
@@ -67,10 +76,13 @@ export interface RunDetail extends RunSummaryItem {
     skip_meridian?: boolean;
     seed?: number;
   } | null;
-  queue_position: {
-    analysis?: number | null;
-    meridian?: number | null;
-  };
+  queue_position?:
+    | number
+    | null
+    | {
+        analysis?: number | null;
+        meridian?: number | null;
+      };
   stages: StageStatus[];
 }
 
@@ -78,8 +90,10 @@ export interface KpiCard {
   label: string;
   value: string;
   delta?: string | null;
-  tone?: "neutral" | "good" | "warn" | "bad" | "info";
+  tone?: "neutral" | "good" | "warn" | "bad" | "info" | "success" | "danger";
+  status?: "neutral" | "good" | "warn" | "bad" | "info" | "success" | "danger" | null;
   help?: string | null;
+  note?: string | null;
 }
 
 export interface KpisBlock {
@@ -89,7 +103,7 @@ export interface KpisBlock {
 
 export interface CalloutBlock {
   type: "callout";
-  tone: "info" | "good" | "warn" | "bad";
+  tone: "info" | "good" | "warn" | "bad" | "success" | "danger";
   title: string;
   body: string;
 }
@@ -108,10 +122,12 @@ export interface PlotlySpec {
 
 export interface ChartBlock {
   type: "chart";
+  id?: string;
   chart_id: string;
   title: string;
   subtitle?: string | null;
   caption?: string | null;
+  note?: string | null;
   height?: number;
   figure: PlotlySpec;
 }
@@ -125,10 +141,12 @@ export interface TableColumn {
 
 export interface TableBlock {
   type: "table";
+  id?: string;
   table_id: string;
   title: string;
   subtitle?: string | null;
   caption?: string | null;
+  note?: string | null;
   columns: TableColumn[];
   rows: Record<string, unknown>[];
 }
@@ -189,10 +207,30 @@ export interface ScenarioDetail {
   result?: ForecastItem["result"];
 }
 
+export interface OptimisationChannelRow {
+  channel: string;
+  label?: string;
+  historical_spend?: number;
+  current_spend?: number;
+  optimised_spend: number;
+  delta_spend: number;
+  delta_pct: number;
+  multiplier: number;
+  min_bound: number;
+  max_bound: number;
+  historical_incremental?: number;
+  current_incremental?: number;
+  optimised_incremental: number;
+  delta_incremental: number;
+  historical_roi?: number;
+  current_roi?: number;
+  optimised_roi: number;
+}
+
 export interface OptimisationDetail {
   id: string;
   run_id: string;
-  name: string;
+  name?: string;
   status: string;
   inputs?: Record<string, unknown> | null;
   summary?: Record<string, unknown> | null;
@@ -200,27 +238,15 @@ export interface OptimisationDetail {
   created_at?: string | null;
   result?: {
     total_budget: number;
-    historical_spend_total: number;
+    historical_spend_total?: number;
+    historical_budget?: number;
     historical_incremental_revenue: number;
     optimised_incremental_revenue: number;
     uplift_eur: number;
     uplift_pct: number;
     include_catalog: boolean;
-    channels: {
-      channel: string;
-      historical_spend: number;
-      optimised_spend: number;
-      delta_spend: number;
-      delta_pct: number;
-      multiplier: number;
-      min_bound: number;
-      max_bound: number;
-      historical_incremental: number;
-      optimised_incremental: number;
-      delta_incremental: number;
-      historical_roi: number;
-      optimised_roi: number;
-    }[];
+    channels?: OptimisationChannelRow[];
+    allocations?: OptimisationChannelRow[];
   } | null;
 }
 

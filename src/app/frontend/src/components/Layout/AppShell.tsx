@@ -155,6 +155,10 @@ export const AppShell: React.FC<{
   const completedStages = currentRun?.stages?.filter((s) => s.status === "succeeded").length || 0;
   const totalStages = currentRun?.stages?.filter((s) => s.status !== "skipped").length || 0;
   const runningStage = currentRun?.stages?.find((s) => s.status === "running");
+  const queuePos =
+    typeof currentRun?.queue_position === "number"
+      ? currentRun.queue_position
+      : currentRun?.queue_position?.meridian ?? currentRun?.queue_position?.analysis ?? null;
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", backgroundColor: PALETTE.bgCanvas }}>
@@ -204,10 +208,8 @@ export const AppShell: React.FC<{
                 label={
                   currentRun.status === "running" && runningStage
                     ? `Running: ${runningStage.label} (${completedStages}/${totalStages})`
-                    : currentRun.status === "queued" &&
-                      currentRun.queue_position?.meridian &&
-                      currentRun.queue_position.meridian > 0
-                    ? `Queued (#${currentRun.queue_position.meridian} in Meridian queue)`
+                    : currentRun.status === "queued" && queuePos && queuePos > 0
+                    ? `Queued (#${queuePos} in queue)`
                     : `${currentRun.status.toUpperCase()}`
                 }
               />

@@ -152,7 +152,7 @@ def fit_meridian_isolated(
                 proc.join(timeout=5.0)
                 if proc.is_alive():
                     proc.kill()
-                raise RuntimeError("Meridian MCMC fit cancelled by user.")
+                raise InterruptedError("Meridian MCMC fit cancelled by user.")
             if (now - t0) > timeout_seconds:
                 proc.terminate()
                 proc.join(timeout=5.0)

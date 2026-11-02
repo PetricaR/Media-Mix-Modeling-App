@@ -254,8 +254,8 @@ src/app/
 ├── backend/
 │   ├── pyproject.toml              # own uv project; base = API, extra "worker" = Meridian, statsmodels, scipy, plotly
 │   ├── uv.lock
-│   ├── Dockerfile                  # targets: api (slim) and worker (Meridian); build context is src/app/
-│   ├── src/mmm_studio/
+│   ├── Dockerfile                  # targets: api (slim) and worker (Meridian); build context is src/app/backend
+│   ├── mmm_studio/
 │   │   ├── settings.py             # pydantic-settings: STORAGE=local|gcs, WAKE_WORKERS=none|cloudrun, …
 │   │   ├── cli.py                  # mmm-studio api | worker | migrate | run --input x.xlsx --out dir (offline)
 │   │   ├── core/                   # analytics, ported from notebooks 01–05 and tchibo_mmm (section 6)
@@ -267,8 +267,8 @@ src/app/
 │   │   │   ├── eda/                # quality, target, channels, spend, efficiency, correlations, catalog, readiness
 │   │   │   ├── preparation.py      # cost handling, shift scan, saturation, features, OLS importance (HAC)
 │   │   │   ├── ols.py              # OLS ladder, two hold-outs, walk-forward CV
-│   │   │   └── meridian/           # imported only by the worker image
-│   │   │       ├── spec.py         # MMMConfig, input data, priors, model
+│   │   │   └── meridian/           # imported lazily only by the worker image
+│   │   │       ├── spec.py         # MeridianSpecConfig, input data, priors, model
 │   │   │       ├── fit.py          # sampling profiles; fit in a spawned child process
 │   │   │       ├── analysis.py     # fit table, ROI, contribution, adstock, response curves, R-hat, health card
 │   │   │       ├── optimise.py     # BudgetOptimizer, catalog what-if
@@ -293,14 +293,11 @@ src/app/
 │   ├── package.json, vite.config.ts, tsconfig*.json, index.html
 │   └── src/
 │       ├── main.tsx, App.tsx, theme.ts
-│       ├── api/                    # client.ts (axios), runs, sections, forecasts, scenarios, optimiser, types
+│       ├── api/                    # client.ts (native fetch), hooks.ts (TanStack Query), types.ts
 │       ├── components/
-│       │   ├── Layout.tsx          # app bar (run switcher, status chip) + left navigation
-│       │   ├── RunProgress.tsx     # queue position, stage stepper with timings and errors
-│       │   ├── UploadDropzone.tsx
-│       │   ├── DataRoles.tsx       # confirm inferred channel roles, windows and breaks
-│       │   └── blocks/             # SectionRenderer, KpiRow, ChartBlock (lazy Plotly, renders on scroll),
-│       │                           # TableBlock, MarkdownBlock, Callout, ChannelChip
+│       │   ├── Layout/AppShell.tsx # app bar (run switcher, status chip) + left navigation
+│       │   ├── Charts/PlotlyChart.tsx
+│       │   └── Sections/SectionRenderer.tsx # KpiRow, ChartBlock (lazy Plotly), TableBlock, MarkdownBlock, Callout
 │       └── pages/
 │           ├── Import.tsx          # wizard: upload → confirm data roles → profile + start; run history
 │           ├── Overview.tsx

@@ -293,6 +293,14 @@ def build_meridian_model_section(
         "holdout_q4_2024": m_test,
         "holdout_q3_2024": m_q3,
         "max_rhat": max_rhat,
+        "q4_mae_over_mean": float(m_test["MAE_over_mean"]),
+        "q4_r2": float(m_test["R2"]),
+        "q4_rmse": float(m_test["RMSE"]),
+        "q4_mape": float(m_test["MAPE"]),
+        "q3_mae_over_mean": float(m_q3["MAE_over_mean"]),
+        "q3_r2": float(m_q3["R2"]),
+        "q3_rmse": float(m_q3["RMSE"]),
+        "q3_mape": float(m_q3["MAPE"]),
     }
 
     # 1. Full period fit chart (`03_fit_full_period`)

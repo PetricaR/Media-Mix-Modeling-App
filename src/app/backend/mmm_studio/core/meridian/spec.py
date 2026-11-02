@@ -6,11 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import holidays
 import numpy as np
 import pandas as pd
 
-from mmm_studio.core.schema import slugify_channel
+from mmm_studio.core.schema import DataRoleConfig, slugify_channel
 
 HOLDOUT_Q4_2024: tuple[str, str] = ("2024-10-01", "2025-01-01")
 DEFAULT_PAID_CHANNELS: list[str] = [
@@ -38,6 +37,74 @@ class MeridianSpecConfig:
     n_fourier: int = 2
     paid_channels: list[str] = field(default_factory=lambda: list(DEFAULT_PAID_CHANNELS))
 
+    @property
+    def paid_slugs(self) -> list[str]:
+        """Canonical snake_case slugs for `self.paid_channels`."""
+        return [slugify_channel(c) for c in self.paid_channels]
+
+    @classmethod
+    def from_role_config(
+        cls,
+        role_config: DataRoleConfig | None = None,
+        index: pd.DatetimeIndex | None = None,
+    ) -> MeridianSpecConfig:
+        """Construct a `MeridianSpecConfig` dynamically from a `DataRoleConfig` and optional date index."""
+        if role_config is None:
+            return cls()
+
+        active_paid_or_ctrl = [
+            ch
+            for ch in role_config.channels
+            if ch.enabled and ch.role in ("paid", "print_event", "commission", "digital_paid", "control")
+        ]
+        for ch in active_paid_or_ctrl:
+            CHANNEL_DISPLAY_NAMES.setdefault(ch.slug, ch.name)
+
+        paid_names = [ch.name for ch in active_paid_or_ctrl] or list(DEFAULT_PAID_CHANNELS)
+        # Preserve canonical ordering when the channels match the default Tchibo set
+        if set(paid_names) == set(DEFAULT_PAID_CHANNELS):
+            paid_names = list(DEFAULT_PAID_CHANNELS)
+
+        as_controls = tuple(
+            ch.slug
+            for ch in active_paid_or_ctrl
+            if ch.role in ("commission", "control") or ch.slug == "affiliate"
+        )
+        adstock_decay: dict[str, str] = {}
+        catalog_shift = 2
+        for ch in active_paid_or_ctrl:
+            if ch.role in ("paid", "digital_paid", "print_event"):
+                if isinstance(ch.adstock_decay, str) and ch.adstock_decay in ("binomial", "geometric"):
+                    decay = ch.adstock_decay
+                elif ch.role == "print_event" or ch.slug == "catalog":
+                    decay = "binomial"
+                else:
+                    decay = "geometric"
+                if decay != "geometric":
+                    adstock_decay[ch.slug] = decay
+            if ch.role == "print_event" and ch.in_home_shift_days is not None:
+                catalog_shift = int(ch.in_home_shift_days)
+
+        holdout: tuple[str, str] | None = HOLDOUT_Q4_2024
+        if role_config.holdout_days <= 0:
+            holdout = None
+        elif index is not None and len(index) > role_config.holdout_days * 2:
+            idx = pd.DatetimeIndex(index)
+            end_dt = idx.max()
+            start_dt = end_dt - pd.Timedelta(days=int(role_config.holdout_days) - 1)
+            holdout = (
+                start_dt.strftime("%Y-%m-%d"),
+                (end_dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+            )
+
+        return cls(
+            catalog_shift=catalog_shift,
+            as_controls=as_controls,
+            adstock_decay=adstock_decay or {"catalog": "binomial"},
+            holdout=holdout,
+            paid_channels=paid_names,
+        )
+
 
 def _black_friday(year: int) -> pd.Timestamp:
     nov1 = pd.Timestamp(year=year, month=11, day=1)
@@ -46,6 +113,8 @@ def _black_friday(year: int) -> pd.Timestamp:
 
 
 def _calendar_controls(index: pd.DatetimeIndex) -> pd.DataFrame:
+    import holidays
+
     out = pd.DataFrame(index=index)
     for d, name in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
         if d:

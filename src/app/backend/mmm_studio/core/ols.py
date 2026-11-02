@@ -12,6 +12,7 @@ from mmm_studio.charts.builders import bar_figure, line_figure, small_multiples_
 from mmm_studio.charts.theme import COPPER, NAVY, SLATE, STATUS_DANGER, STATUS_SUCCESS, TEAL
 from mmm_studio.core.calendar import add_calendar_and_adstock_features
 from mmm_studio.core.metrics import naive_baselines, regression_metrics
+from mmm_studio.core.schema import DataRoleConfig
 from mmm_studio.report.narrative import fmt_eur, fmt_pct
 from mmm_studio.report.sections import (
     CalloutBlock,
@@ -68,13 +69,21 @@ def fit_and_predict_ols_spec(
 def evaluate_ols_suite(
     panel: pd.DataFrame,
     meridian_metrics: dict[str, Any] | None = None,
+    config: DataRoleConfig | None = None,
 ) -> dict[str, Any]:
     """Evaluate all 5 OLS specs on in-sample, Q4 2024 holdout, Q3 2024 holdout, and 4-fold walk-forward CV."""
     train_q4 = panel.loc[:"2024-09-30"]
     test_q4 = panel.loc["2024-10-01":"2024-12-31"]
+    if len(train_q4) == 0 or len(test_q4) == 0:
+        h_days = int(config.holdout_days) if config and config.holdout_days > 0 else min(92, max(14, len(panel) // 5))
+        train_q4 = panel.iloc[:-h_days]
+        test_q4 = panel.iloc[-h_days:]
 
     train_q3 = panel.loc[:"2024-06-30"]
     test_q3 = panel.loc["2024-07-01":"2024-09-30"]
+    if len(train_q3) == 0 or len(test_q3) == 0:
+        train_q3 = train_q4
+        test_q3 = test_q4
 
     spec_rows: list[dict[str, Any]] = []
     q4_predictions: dict[str, np.ndarray] = {}
@@ -188,16 +197,21 @@ def evaluate_ols_suite(
 def build_benchmark_section(
     wide_2023_2024: pd.DataFrame,
     meridian_summary: dict[str, Any] | None = None,
+    config: DataRoleConfig | None = None,
 ) -> Section:
     """Build the `benchmark` section comparing OLS specifications, naive baselines, and Bayesian Meridian."""
     panel = add_calendar_and_adstock_features(wide_2023_2024)
-    ols_res = evaluate_ols_suite(panel, meridian_metrics=meridian_summary)
+    ols_res = evaluate_ols_suite(panel, meridian_metrics=meridian_summary, config=config)
     spec_rows = ols_res["spec_rows"]
     cv_rows = ols_res["cv_rows"]
     coef_rows = ols_res["coef_rows"]
 
     train_q4 = panel.loc[:"2024-09-30"]
     test_q4 = panel.loc["2024-10-01":"2024-12-31"]
+    if len(train_q4) == 0 or len(test_q4) == 0:
+        h_days = int(config.holdout_days) if config and config.holdout_days > 0 else min(92, max(14, len(panel) // 5))
+        train_q4 = panel.iloc[:-h_days]
+        test_q4 = panel.iloc[-h_days:]
     nb_q4 = naive_baselines(
         train_q4["total_sales"],
         test_q4["total_sales"],
@@ -206,9 +220,15 @@ def build_benchmark_section(
     )
 
     # Meridian reference metrics (from live run or reference fallback)
-    mer_q4_mae_pct = 100.0 * float((meridian_summary or {}).get("holdout_q4_2024", {}).get("MAE_over_mean", 0.0853))
-    mer_q4_r2 = float((meridian_summary or {}).get("holdout_q4_2024", {}).get("R2", 0.8885))
-    mer_q3_mae_pct = 100.0 * float((meridian_summary or {}).get("holdout_q3_2024", {}).get("MAE_over_mean", 0.1098))
+    ms = meridian_summary or {}
+    q4_dict = ms.get("holdout_q4_2024", {})
+    q3_dict = ms.get("holdout_q3_2024", {})
+    tr_dict = ms.get("train", {})
+    mer_q4_mae_pct = 100.0 * float(ms.get("q4_mae_over_mean", q4_dict.get("MAE_over_mean", 0.0853)))
+    mer_q4_r2 = float(ms.get("q4_r2", q4_dict.get("R2", 0.8885)))
+    mer_q3_mae_pct = 100.0 * float(ms.get("q3_mae_over_mean", q3_dict.get("MAE_over_mean", 0.1098)))
+    mer_tr_r2 = float(tr_dict.get("R2", 0.869))
+    mer_tr_mae_pct = 100.0 * float(tr_dict.get("MAE_over_mean", 0.0834))
 
     m4_row = next(r for r in spec_rows if r["model"].startswith("M4:"))
     m5_row = next(r for r in spec_rows if r["model"].startswith("M5:"))
@@ -364,10 +384,10 @@ def build_benchmark_section(
     table_spec_rows.append(
         {
             "model": "Bayesian Meridian MMM (Primary)",
-            "in_r2": "0.869",
+            "in_r2": f"{mer_tr_r2:.3f}",
             "in_adj_r2": "— (Bayesian)",
-            "in_mae_pct": "8.34%",
-            "q4_mae": fmt_eur(float((meridian_summary or {}).get("holdout_q4_2024", {}).get("MAE", 84427.0))),
+            "in_mae_pct": fmt_pct(mer_tr_mae_pct),
+            "q4_mae": fmt_eur(float(q4_dict.get("MAE", 84427.0))),
             "q4_mae_pct": fmt_pct(mer_q4_mae_pct),
             "q4_r2": f"{mer_q4_r2:.3f}",
             "q3_mae_pct": fmt_pct(mer_q3_mae_pct),

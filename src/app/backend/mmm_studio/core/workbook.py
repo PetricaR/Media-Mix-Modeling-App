@@ -190,6 +190,11 @@ def profile_workbook(
 
     total_sales_sum = float(pd.to_numeric(df_active[col_mapping.sales], errors="coerce").fillna(0.0).sum())
     total_cost_sum = float(pd.to_numeric(df_active[col_mapping.costs], errors="coerce").fillna(0.0).sum())
+    years_present = sorted({int(y) for y in dates.dt.year.dropna().unique()})
+    duplicate_rows_count = int(df.duplicated(subset=[col_mapping.date, col_mapping.channel]).sum())
+    raw_sales = pd.to_numeric(df[col_mapping.sales], errors="coerce").fillna(0.0)
+    raw_costs = pd.to_numeric(df[col_mapping.costs], errors="coerce").fillna(0.0)
+    negative_values_count = int((raw_sales < 0).sum() + (raw_costs < 0).sum())
 
     warnings: list[str] = []
     if missing_by_ch:
@@ -227,6 +232,9 @@ def profile_workbook(
         catalog_sendout_days=catalog_sendouts,
         total_sales_sum=round(total_sales_sum, 2),
         total_cost_sum=round(total_cost_sum, 2),
+        years_present=years_present,
+        duplicate_rows_count=duplicate_rows_count,
+        negative_values_count=negative_values_count,
         warnings=warnings,
     )
     return df, profile

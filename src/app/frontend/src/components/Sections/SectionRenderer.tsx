@@ -37,13 +37,15 @@ import { PALETTE } from "../../theme";
 const LazyPlotlyChart = React.lazy(() => import("../Charts/PlotlyChart"));
 
 const KpisRenderer: React.FC<{ block: KpisBlock }> = ({ block }) => {
-  const toneColor = (tone?: string) => {
+  const toneColor = (tone?: string | null) => {
     switch (tone) {
       case "good":
+      case "success":
         return PALETTE.semanticGood;
       case "warn":
         return PALETTE.semanticWarn;
       case "bad":
+      case "danger":
         return PALETTE.semanticBad;
       case "info":
         return PALETTE.semanticInfo;
@@ -54,57 +56,61 @@ const KpisRenderer: React.FC<{ block: KpisBlock }> = ({ block }) => {
 
   return (
     <Grid container spacing={2} sx={{ mb: 3 }}>
-      {block.items.map((kpi, idx) => (
-        <Grid item xs={12} sm={6} md={3} key={`${kpi.label}-${idx}`}>
-          <Paper
-            sx={{
-              p: 2.25,
-              height: "100%",
-              borderTop: `3px solid ${toneColor(kpi.tone)}`,
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-            }}
-          >
-            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
-              <Typography
-                variant="caption"
-                sx={{
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.04em",
-                  color: PALETTE.inkSecondary,
-                }}
-              >
-                {kpi.label}
-              </Typography>
-              {kpi.help && (
-                <Tooltip title={kpi.help}>
-                  <HelpOutlineIcon sx={{ fontSize: 15, color: PALETTE.inkMuted, cursor: "help" }} />
-                </Tooltip>
-              )}
-            </Stack>
-            <Typography
+      {block.items.map((kpi, idx) => {
+        const effectiveTone = kpi.tone || kpi.status || "neutral";
+        const effectiveHelp = kpi.help || kpi.note;
+        return (
+          <Grid item xs={12} sm={6} md={3} key={`${kpi.label}-${idx}`}>
+            <Paper
               sx={{
-                fontFamily: '"JetBrains Mono", monospace',
-                fontSize: "1.45rem",
-                fontWeight: 600,
-                color: PALETTE.inkPrimary,
-                mt: 1,
-                mb: 0.5,
-                fontVariantNumeric: "tabular-nums",
+                p: 2.25,
+                height: "100%",
+                borderTop: `3px solid ${toneColor(effectiveTone)}`,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
               }}
             >
-              {kpi.value}
-            </Typography>
-            {kpi.delta && (
-              <Typography variant="caption" sx={{ color: toneColor(kpi.tone), fontWeight: 500 }}>
-                {kpi.delta}
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    color: PALETTE.inkSecondary,
+                  }}
+                >
+                  {kpi.label}
+                </Typography>
+                {effectiveHelp && (
+                  <Tooltip title={effectiveHelp}>
+                    <HelpOutlineIcon sx={{ fontSize: 15, color: PALETTE.inkMuted, cursor: "help" }} />
+                  </Tooltip>
+                )}
+              </Stack>
+              <Typography
+                sx={{
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: "1.45rem",
+                  fontWeight: 600,
+                  color: PALETTE.inkPrimary,
+                  mt: 1,
+                  mb: 0.5,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {kpi.value}
               </Typography>
-            )}
-          </Paper>
-        </Grid>
-      ))}
+              {kpi.delta && (
+                <Typography variant="caption" sx={{ color: toneColor(effectiveTone), fontWeight: 500 }}>
+                  {kpi.delta}
+                </Typography>
+              )}
+            </Paper>
+          </Grid>
+        );
+      })}
     </Grid>
   );
 };
@@ -113,8 +119,10 @@ const CalloutRenderer: React.FC<{ block: CalloutBlock }> = ({ block }) => {
   const severityMap: Record<string, "info" | "success" | "warning" | "error"> = {
     info: "info",
     good: "success",
+    success: "success",
     warn: "warning",
     bad: "error",
+    danger: "error",
   };
   return (
     <Alert
@@ -213,7 +221,7 @@ const ChartRenderer: React.FC<{ block: ChartBlock }> = ({ block }) => {
         />
       </Suspense>
 
-      {block.caption && (
+      {(block.caption || block.note) && (
         <Typography
           variant="caption"
           sx={{
@@ -224,7 +232,7 @@ const ChartRenderer: React.FC<{ block: ChartBlock }> = ({ block }) => {
             color: PALETTE.inkSecondary,
           }}
         >
-          {block.caption}
+          {block.caption || block.note}
         </Typography>
       )}
     </Paper>
@@ -273,22 +281,42 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${block.table_id || "table"}.csv`;
+    a.download = `${block.table_id || block.id || "table"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const formatCell = (val: unknown) => {
+  const formatCell = (val: unknown, fmt?: string | null) => {
     if (val === null || val === undefined) return "—";
     if (typeof val === "number") {
-      if (Number.isInteger(val)) return val.toLocaleString();
-      return val.toLocaleString(undefined, { maximumFractionDigits: 3 });
+      switch (fmt) {
+        case "eur":
+        case "eur_0":
+          return `€${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+        case "pct":
+        case "pct_1":
+          return `${val.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+        case "roas":
+        case "ratio_2":
+          return `${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        case "int":
+          return Math.round(val).toLocaleString();
+        case "float_1":
+          return val.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        case "float_2":
+          return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        case "float_3":
+          return val.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+        default:
+          if (Number.isInteger(val)) return val.toLocaleString();
+          return val.toLocaleString(undefined, { maximumFractionDigits: 3 });
+      }
     }
     return String(val);
   };
 
   return (
-    <Paper sx={{ p: 2.5, mb: 3 }} id={block.table_id}>
+    <Paper sx={{ p: 2.5, mb: 3 }} id={block.table_id || block.id}>
       <Stack
         direction="row"
         justifyContent="space-between"
@@ -341,7 +369,7 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
                           : "inherit",
                     }}
                   >
-                    {formatCell(row[col.key])}
+                    {formatCell(row[col.key], col.format)}
                   </TableCell>
                 ))}
               </TableRow>
@@ -350,9 +378,9 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
         </Table>
       </TableContainer>
 
-      {block.caption && (
+      {(block.caption || block.note) && (
         <Typography variant="caption" sx={{ display: "block", mt: 1.5, color: PALETTE.inkSecondary }}>
-          {block.caption}
+          {block.caption || block.note}
         </Typography>
       )}
     </Paper>

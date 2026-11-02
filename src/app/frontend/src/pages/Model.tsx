@@ -7,7 +7,9 @@ export const ModelPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const { data: currentRun } = useRun(runId);
   const { data: section, isLoading, error } = useSection(runId, "meridian_model");
 
-  const meridianStage = currentRun?.stages?.find((s) => s.key === "s11_meridian_fit");
+  const meridianStage = currentRun?.stages?.find(
+    (s) => s.key === "s12_meridian_fit" || s.key === "s11_meridian_fit"
+  );
 
   return (
     <Box>

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Multi-target Dockerfile for MMM Studio backend (`api` slim and `worker` with Meridian)
 
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/mmm_studio_mpl \
@@ -28,8 +28,8 @@ CMD ["uv", "run", "uvicorn", "mmm_studio.main:app", "--host", "0.0.0.0", "--port
 
 # --- Target 2: Heavy Worker (includes google-meridian + TensorFlow Probability) ---
 FROM base AS worker
-RUN uv sync --frozen --no-dev --extra meridian --no-install-project
+RUN uv sync --frozen --no-dev --extra worker --no-install-project
 COPY mmm_studio ./mmm_studio
-RUN uv sync --frozen --no-dev --extra meridian
+RUN uv sync --frozen --no-dev --extra worker
 ENTRYPOINT ["uv", "run", "mmm-studio"]
 CMD ["worker", "--queue", "all"]

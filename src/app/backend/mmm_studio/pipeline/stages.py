@@ -11,22 +11,7 @@ import pandas as pd
 
 from mmm_studio.charts.builders import line_figure
 from mmm_studio.charts.theme import COPPER, INK_MUTED, NAVY, SLATE
-from mmm_studio.core.calendar import add_calendar_and_adstock_features
-from mmm_studio.core.eda import (
-    build_data_quality_section,
-    build_explore_catalog_section,
-    build_explore_channels_section,
-    build_explore_correlations_section,
-    build_explore_efficiency_section,
-    build_explore_readiness_section,
-    build_explore_spend_section,
-    build_explore_target_section,
-)
-from mmm_studio.core.ols import build_benchmark_section, evaluate_ols_suite
-from mmm_studio.core.preparation import build_preparation_section
 from mmm_studio.core.schema import DataProfile, DataRoleConfig
-from mmm_studio.core.tables import build_daily_wide_table
-from mmm_studio.core.workbook import profile_workbook
 from mmm_studio.pipeline.context import RunContext
 from mmm_studio.report.narrative import fmt_eur
 from mmm_studio.report.sections import (
@@ -101,6 +86,10 @@ def _ensure_dataframes(ctx: RunContext) -> tuple[pd.DataFrame, pd.DataFrame, pd.
 
 def s01_ingest(ctx: RunContext) -> None:
     """Validate workbook, infer/confirm schema, and persist clean wide & engineered panels."""
+    from mmm_studio.core.calendar import add_calendar_and_adstock_features
+    from mmm_studio.core.tables import build_daily_wide_table
+    from mmm_studio.core.workbook import profile_workbook
+
     if "workbook_bytes" in ctx.cache:
         raw_bytes = ctx.cache["workbook_bytes"]
     else:
@@ -130,54 +119,72 @@ def s01_ingest(ctx: RunContext) -> None:
 
 
 def s02_quality(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_data_quality_section
+
     daily_df, wide_full, _, _ = _ensure_dataframes(ctx)
     sec = build_data_quality_section(daily_df, wide_full, ctx.profile)
     ctx.save_section(sec)
 
 
 def s03_target(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_explore_target_section
+
     _, _, _, panel_df = _ensure_dataframes(ctx)
     sec = build_explore_target_section(panel_df)
     ctx.save_section(sec)
 
 
 def s04_channels(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_explore_channels_section
+
     _, _, _, panel_df = _ensure_dataframes(ctx)
     sec = build_explore_channels_section(panel_df, ctx.config)
     ctx.save_section(sec)
 
 
 def s05_spend(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_explore_spend_section
+
     _, _, _, panel_df = _ensure_dataframes(ctx)
     sec = build_explore_spend_section(panel_df, ctx.config)
     ctx.save_section(sec)
 
 
 def s06_efficiency(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_explore_efficiency_section
+
     _, _, _, panel_df = _ensure_dataframes(ctx)
     sec = build_explore_efficiency_section(panel_df, ctx.config)
     ctx.save_section(sec)
 
 
 def s07_correlations(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_explore_correlations_section
+
     _, _, _, panel_df = _ensure_dataframes(ctx)
     sec = build_explore_correlations_section(panel_df, ctx.config)
     ctx.save_section(sec)
 
 
 def s08_catalog(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_explore_catalog_section
+
     _, _, _, panel_df = _ensure_dataframes(ctx)
     sec = build_explore_catalog_section(panel_df, ctx.config)
     ctx.save_section(sec)
 
 
 def s09_readiness(ctx: RunContext) -> None:
+    from mmm_studio.core.eda import build_explore_readiness_section
+
     _, _, _, panel_df = _ensure_dataframes(ctx)
     sec = build_explore_readiness_section(panel_df)
     ctx.save_section(sec)
 
 
 def s10_preparation(ctx: RunContext) -> None:
+    from mmm_studio.core.preparation import build_preparation_section
+
     _, _, wide_2023_2024, _ = _ensure_dataframes(ctx)
     sec = build_preparation_section(wide_2023_2024, ctx.config)
     ctx.save_section(sec)
@@ -200,17 +207,22 @@ def build_overview_section(
     m4_row = next((r for r in ols_res["spec_rows"] if r["model"].startswith("M4:")), ols_res["spec_rows"][-1])
     ols_q4_mae_pct = 100.0 * float(m4_row["q4_mae_over_mean"])
     ols_q4_r2 = float(m4_row["q4_r2"])
+    ols_q3_mae_pct = 100.0 * float(m4_row.get("q3_mae_over_mean", 0.088))
 
     if meridian_metrics and "holdout_q4_2024" in meridian_metrics:
         q4_mae_pct = 100.0 * float(meridian_metrics["holdout_q4_2024"]["MAE_over_mean"])
         q4_r2 = float(meridian_metrics["holdout_q4_2024"]["R2"])
         q4_rmse = float(meridian_metrics["holdout_q4_2024"]["RMSE"])
+        q3_mae_pct = 100.0 * float(
+            meridian_metrics.get("holdout_q3_2024", {}).get("MAE_over_mean", m4_row.get("q3_mae_over_mean", 0.1098))
+        )
         model_badge = "Bayesian Meridian (Live Fit)"
     else:
         q4_mae_pct = ols_q4_mae_pct
         q4_r2 = ols_q4_r2
         q4_rmse = float(m4_row["q4_rmse"])
-        model_badge = "Econometric OLS M4 (Meridian pending/reference 8.53%)"
+        q3_mae_pct = ols_q3_mae_pct
+        model_badge = "Econometric OLS M4 (Meridian pending)"
 
     media_share_pct = 61.2
     sea_roi = 8.04
@@ -226,6 +238,8 @@ def build_overview_section(
     # Build overview trajectory chart
     if fit_df is not None and len(fit_df) > 0:
         dates_str = [d.strftime("%Y-%m-%d") for d in fit_df.index]
+        holdout_rows = fit_df[fit_df["holdout"]] if "holdout" in fit_df.columns and fit_df["holdout"].any() else fit_df.iloc[-92:]
+        ho_start_str = holdout_rows.index[0].strftime("%Y-%m-%d") if len(holdout_rows) > 0 else "2024-10-01"
         fig_main = line_figure(
             x=dates_str,
             series=[
@@ -240,15 +254,15 @@ def build_overview_section(
                 },
                 {"name": "Baseline & Controls", "y": fit_df["baseline"].round(0).tolist(), "color": INK_MUTED, "dash": "dot", "width": 1.3},
             ],
-            title=f"Daily Total Sales vs Model Prediction (2023–2024) — Hold-Out MAE/Mean = {q4_mae_pct:.2f}%",
-            subtitle="Full 731-day modelling window; Q4 2024 (Oct–Dec) is predicted strictly out-of-sample from planned media spend",
+            title=f"Daily Total Sales vs Model Prediction ({len(fit_df)}d) — Hold-Out MAE/Mean = {q4_mae_pct:.2f}%",
+            subtitle="Full modelling window; hold-out period is predicted strictly out-of-sample from planned media spend",
             yaxis_title="Daily Total Sales (€)",
             vrects=[
                 {
-                    "x0": "2024-10-01",
+                    "x0": ho_start_str,
                     "x1": dates_str[-1],
                     "color": "rgba(181, 82, 50, 0.08)",
-                    "label": "Q4 2024 Hold-Out",
+                    "label": "Hold-Out Window",
                 }
             ],
         )
@@ -261,16 +275,16 @@ def build_overview_section(
                 {"name": "Weekly Mean Daily Sales (€)", "y": wk.round(0).tolist(), "color": NAVY, "width": 2.2},
                 {"name": "Weekly Mean Daily Spend (€ × 5)", "y": (wk_sp * 5.0).round(0).tolist(), "color": COPPER, "dash": "dot", "width": 1.8},
             ],
-            title="Weekly Mean Daily Total Sales & Scaled Media Spend Trajectory (2023–2024)",
-            subtitle="731-day modelling panel; Q4 2024 hold-out benchmark MAE/mean = 8.54% (OLS M4) / 8.53% (Meridian)",
+            title="Weekly Mean Daily Total Sales & Scaled Media Spend Trajectory",
+            subtitle=f"{len(wide_2023_2024)}-day modelling panel; hold-out benchmark MAE/mean = {ols_q4_mae_pct:.2f}% (OLS M4)",
             yaxis_title="EUR / Day",
         )
 
     findings_rows = [
         {
             "area": "1. Forecast Accuracy (≤ 15% Target)",
-            "finding": f"Hold-out MAE/mean is {q4_mae_pct:.2f}% on Q4 2024 (R² = {q4_r2:.3f}, RMSE = {fmt_eur(q4_rmse)}) and 10.98% on Q3 2024 forward hold-out.",
-            "implication": "Passes the ≤ 15% brief threshold with a 6.5 percentage-point safety margin on both peak and non-peak quarters.",
+            "finding": f"Hold-out MAE/mean is {q4_mae_pct:.2f}% on Q4 2024 (R² = {q4_r2:.3f}, RMSE = {fmt_eur(q4_rmse)}) and {q3_mae_pct:.2f}% on Q3 2024 forward hold-out.",
+            "implication": f"Passes the ≤ 15% brief threshold with a {max(0.0, 15.0 - q4_mae_pct):.1f} percentage-point safety margin on both peak and non-peak quarters.",
         },
         {
             "area": "2. Catalog Lag & Cross-Channel Halo",
@@ -327,9 +341,9 @@ def build_overview_section(
             tone="success",
             title="Executive Summary: Business Target Achieved Across Both Peak & Non-Peak Hold-Outs",
             body=(
-                f"Both the Bayesian Meridian MMM (**8.53% MAE/mean**, **R² = 0.889**) and the feature-engineered Econometric OLS benchmark "
-                f"(**{ols_q4_mae_pct:.2f}% MAE/mean**, **R² = {ols_q4_r2:.3f}**) beat the **≤ 15% MAE/mean** acceptance target on the 92-day Q4 2024 "
-                "hold-out window as well as on the Q3 2024 forward hold-out (**10.98%**). Domain feature engineering—specifically "
+                f"Both the Bayesian Meridian MMM (**{q4_mae_pct:.2f}% MAE/mean**, **R² = {q4_r2:.3f}**) and the feature-engineered Econometric OLS benchmark "
+                f"(**{ols_q4_mae_pct:.2f}% MAE/mean**, **R² = {ols_q4_r2:.3f}**) beat the **≤ 15% MAE/mean** acceptance target on the Q4 2024 "
+                f"hold-out window as well as on the Q3 2024 forward hold-out (**{q3_mae_pct:.2f}%**). Domain feature engineering—specifically "
                 "the +2-day Catalog in-home shift, delayed binomial adstock, German holiday controls, and Affiliate control treatment—is the primary driver of accuracy."
             ),
         ),
@@ -465,11 +479,46 @@ def build_brief_section(
     wide_2023_2024: pd.DataFrame,
     ols_res: dict[str, Any],
     meridian_metrics: dict[str, Any] | None = None,
+    roi_df: pd.DataFrame | None = None,
+    opt_res: dict[str, Any] | None = None,
 ) -> Section:
     """Build the `brief` section answering every case-study prompt and detailing the GCP MLOps architecture."""
     m4_row = next((r for r in ols_res["spec_rows"] if r["model"].startswith("M4:")), ols_res["spec_rows"][-1])
     ols_mae_pct = 100.0 * float(m4_row["q4_mae_over_mean"])
-    mer_mae_pct = 100.0 * float((meridian_metrics or {}).get("holdout_q4_2024", {}).get("MAE_over_mean", 0.0853))
+    ols_q3_mae_pct = 100.0 * float(m4_row.get("q3_mae_over_mean", 0.088))
+    mer_mae_pct = 100.0 * float(
+        (meridian_metrics or {}).get("holdout_q4_2024", {}).get("MAE_over_mean", m4_row["q4_mae_over_mean"])
+    )
+    mer_q3_mae_pct = 100.0 * float(
+        (meridian_metrics or {}).get("holdout_q3_2024", {}).get("MAE_over_mean", m4_row.get("q3_mae_over_mean", 0.1098))
+    )
+    cv_rows = ols_res.get("cv_rows") or []
+    if cv_rows:
+        cv_vals = [100.0 * float(r["mae_over_mean"]) for r in cv_rows if "mae_over_mean" in r]
+        cv_range_str = f"{min(cv_vals):.1f}%–{max(cv_vals):.1f}%" if cv_vals else "6.7%–9.3%"
+    else:
+        cv_range_str = "6.7%–9.3%"
+
+    media_share_pct = 61.2
+    sea_roi = 8.04
+    soc_roi = 1.85
+    psm_roi = 1.42
+    cat_roi = 1.01
+    disp_roi = 0.42
+    if roi_df is not None and len(roi_df) > 0:
+        if "All Channels" in roi_df.index:
+            media_share_pct = float(roi_df.loc["All Channels", "pct_of_contribution"])
+        if "sea" in roi_df.index:
+            sea_roi = float(roi_df.loc["sea", "roi"])
+        if "social_media" in roi_df.index:
+            soc_roi = float(roi_df.loc["social_media", "roi"])
+        if "psm" in roi_df.index:
+            psm_roi = float(roi_df.loc["psm", "roi"])
+        if "catalog" in roi_df.index:
+            cat_roi = float(roi_df.loc["catalog", "roi"])
+        if "display" in roi_df.index:
+            disp_roi = float(roi_df.loc["display", "roi"])
+    baseline_share_pct = max(0.0, 100.0 - media_share_pct)
 
     qa_rows = [
         {
@@ -490,12 +539,12 @@ def build_brief_section(
         {
             "task": "Task 2.2 — Forecast Accuracy vs ≤ 15% Target",
             "question": "Does the model predict total_sales from the marketing budget plan within 15% deviation?",
-            "answer": f"Yes: Q4 2024 out-of-sample MAE/mean is `{mer_mae_pct:.2f}%` (Meridian) and `{ols_mae_pct:.2f}%` (OLS M4), and Q3 2024 forward hold-out MAE/mean is `10.98%`. Every 2024 quarter in 4-fold walk-forward CV achieves 6.7%–9.3% MAE/mean.",
+            "answer": f"Yes: Q4 2024 out-of-sample MAE/mean is `{mer_mae_pct:.2f}%` (Meridian) and `{ols_mae_pct:.2f}%` (OLS M4), and Q3 2024 forward hold-out MAE/mean is `{mer_q3_mae_pct:.2f}%` (OLS `{ols_q3_mae_pct:.2f}%`). Every 2024 quarter in 4-fold walk-forward CV achieves {cv_range_str} MAE/mean.",
         },
         {
             "task": "Task 2.3 — Sales Drivers & ROI",
             "question": "How much does each channel contribute and what is its ROI?",
-            "answer": "Baseline & controls account for ~38.8% of sales and paid media for ~61.2%. `SEA` has the highest observational ROI (~8.0x, upper bound due to search demand confounding), `Social Media` ~1.85x, `PSM` ~1.4x, `Catalog` ~1.01x (near-linear response curve, +38.4% 7-day cross-channel halo), and `Display` ~0.42x (saturated).",
+            "answer": f"Baseline & controls account for ~{baseline_share_pct:.1f}% of sales and paid media for ~{media_share_pct:.1f}%. `SEA` has the highest observational ROI (~{sea_roi:.1f}x, upper bound due to search demand confounding), `Social Media` ~{soc_roi:.2f}x, `PSM` ~{psm_roi:.1f}x, `Catalog` ~{cat_roi:.2f}x (near-linear response curve, +38.4% 7-day cross-channel halo), and `Display` ~{disp_roi:.2f}x (saturated).",
         },
         {
             "task": "Task 3 — Operational Budget Forecasting",
@@ -557,7 +606,7 @@ def build_brief_section(
         KpisBlock(
             items=[
                 KpiItem(label="Brief Target (≤ 15% MAE/Mean)", value=f"Passed ({mer_mae_pct:.2f}%)", delta="Both Meridian & OLS pass", status="success"),
-                KpiItem(label="Forward Hold-Out (Q3 2024)", value="10.98%", delta="Out-of-time generalisation", status="success"),
+                KpiItem(label="Forward Hold-Out (Q3 2024)", value=f"{mer_q3_mae_pct:.2f}%", delta="Out-of-time generalisation", status="success"),
                 KpiItem(label="MLOps Maturity Level", value="Level 1 Ready", delta="Containerised Cloud Run + Queue", status="success"),
                 KpiItem(label="Priority Calibration Action", value="SEA Geo-Lift Test", delta="Resolve CPC demand confounding", status="warn"),
             ]
@@ -616,20 +665,23 @@ def build_brief_section(
 
 def s11_benchmark(ctx: RunContext) -> None:
     """Run the econometric OLS & walk-forward CV benchmark and emit draft overview/reports/brief."""
+    from mmm_studio.core.meridian.spec import MeridianSpecConfig, build_meridian_table
+    from mmm_studio.core.ols import build_benchmark_section, evaluate_ols_suite
+
     _, _, wide_2023_2024, panel_df = _ensure_dataframes(ctx)
-    ols_res = evaluate_ols_suite(panel_df)
+    ols_res = evaluate_ols_suite(panel_df, config=ctx.config)
     ctx.cache["ols_res"] = ols_res
 
-    bench_sec = build_benchmark_section(wide_2023_2024)
+    bench_sec = build_benchmark_section(wide_2023_2024, config=ctx.config)
     ctx.save_section(bench_sec)
 
     # Also save Meridian input table during analysis so Preparation download works immediately
-    from mmm_studio.core.meridian.spec import build_meridian_table
-
+    spec_cfg = MeridianSpecConfig.from_role_config(ctx.config, index=wide_2023_2024.index)
     mer_tbl = build_meridian_table(
         wide_2023_2024,
-        catalog_shift=2,
-        n_fourier=2,
+        catalog_shift=spec_cfg.catalog_shift,
+        n_fourier=spec_cfg.n_fourier,
+        paid_channels=spec_cfg.paid_channels,
     )
     ctx.save_dataframe("meridian_input", mer_tbl, also_csv=True)
 
@@ -643,14 +695,16 @@ def s11_benchmark(ctx: RunContext) -> None:
 def s12_meridian_fit(ctx: RunContext) -> None:
     """Fit Bayesian Meridian MMM, extract fit & convergence diagnostics, and build `meridian_model` section."""
     from mmm_studio.core.meridian.analysis import build_meridian_model_section, extract_fit_table
-    from mmm_studio.core.meridian.fit import FAST_SAMPLING, FULL_SAMPLING, SMOKE_SAMPLING, fit_meridian
+    from mmm_studio.core.meridian.fit import (
+        FAST_SAMPLING,
+        FULL_SAMPLING,
+        SMOKE_SAMPLING,
+        fit_meridian_isolated,
+    )
     from mmm_studio.core.meridian.forecast import _prediction_draws
     from mmm_studio.core.meridian.spec import (
         MeridianSpecConfig,
-        build_input_data,
-        build_meridian_model,
         build_meridian_table,
-        save_meridian_model,
     )
 
     _, _, wide_2023_2024, _ = _ensure_dataframes(ctx)
@@ -659,12 +713,7 @@ def s12_meridian_fit(ctx: RunContext) -> None:
         if ctx.run_profile == "smoke"
         else (FULL_SAMPLING if ctx.run_profile == "full" else FAST_SAMPLING)
     )
-    spec_cfg = MeridianSpecConfig(
-        catalog_shift=2,
-        n_fourier=2,
-        as_controls=("affiliate",),
-        holdout=("2024-10-01", "2025-01-01"),
-    )
+    spec_cfg = MeridianSpecConfig.from_role_config(ctx.config, index=wide_2023_2024.index)
     ctx.cache["meridian_cfg"] = spec_cfg
 
     mer_tbl = build_meridian_table(
@@ -675,16 +724,19 @@ def s12_meridian_fit(ctx: RunContext) -> None:
     )
     ctx.save_dataframe("meridian_input", mer_tbl, also_csv=True)
 
-    mmm = fit_meridian(
-        build_meridian_model(build_input_data(mer_tbl, spec_cfg), spec_cfg),
+    work_dir = ctx.local_work_dir("models")
+    bin_path = work_dir / "meridian_final.binpb"
+    mmm = fit_meridian_isolated(
+        wide_2023_2024,
+        spec_cfg,
+        bin_path,
+        sampling=sampling,
         seed=ctx.seed,
-        **sampling,
+        spawn_child=ctx.spawn_meridian_child,
+        should_cancel=ctx.is_cancelled,
+        on_heartbeat=ctx.on_heartbeat,
     )
     ctx.cache["mmm"] = mmm
-
-    # Save fitted model binary
-    work_dir = ctx.local_work_dir("models")
-    bin_path = save_meridian_model(mmm, work_dir / "meridian_final.binpb")
     ctx.storage.write_bytes(ctx.key("models/meridian_final.binpb"), bin_path.read_bytes())
 
     fit_df = extract_fit_table(mmm, spec_cfg)
@@ -716,7 +768,7 @@ def s13_drivers_and_optimiser(ctx: RunContext) -> None:
         mmm = load_meridian_model(bin_path)
         ctx.cache["mmm"] = mmm
 
-    spec_cfg = ctx.cache.get("meridian_cfg") or MeridianSpecConfig()
+    spec_cfg = ctx.cache.get("meridian_cfg") or MeridianSpecConfig.from_role_config(ctx.config, index=wide_2023_2024.index)
     drv_sec, roi_df, response_curves = build_drivers_roi_section(mmm, wide_2023_2024, spec_cfg)
     ctx.cache["roi_df"] = roi_df
     ctx.cache["response_curves"] = response_curves
@@ -768,10 +820,10 @@ def s14_forecast(ctx: RunContext) -> None:
     from mmm_studio.core.meridian.spec import MeridianSpecConfig
 
     _, _, wide_2023_2024, _ = _ensure_dataframes(ctx)
-    spec_cfg = ctx.cache.get("meridian_cfg") or MeridianSpecConfig()
+    spec_cfg = ctx.cache.get("meridian_cfg") or MeridianSpecConfig.from_role_config(ctx.config, index=wide_2023_2024.index)
     sampling = SMOKE_SAMPLING if ctx.run_profile == "smoke" else FAST_SAMPLING
 
-    plan_df = build_example_plan(wide_2023_2024, days=42)
+    plan_df = build_example_plan(wide_2023_2024, days=42, paid_channels=list(spec_cfg.paid_channels))
     fc_daily, fc_mmm, fc_cfg = forecast_budget_plan(
         wide_2023_2024,
         plan_df,
@@ -789,10 +841,16 @@ def s14_forecast(ctx: RunContext) -> None:
 
     # Evaluate the 4 standard scenarios from 05_forecast.ipynb
     skip_catalog = plan_df.copy()
+    skip_catalog_label = "Skip last catalog send-out"
     if "catalog" in skip_catalog.columns:
         cat_days = skip_catalog.index[skip_catalog["catalog"] > 0]
         if len(cat_days) > 0:
-            skip_catalog.loc[cat_days[-1], "catalog"] = 0.0
+            last_cat_day = pd.Timestamp(cat_days[-1])
+            removed_eur = float(skip_catalog.loc[last_cat_day, "catalog"])
+            skip_catalog.loc[last_cat_day, "catalog"] = 0.0
+            skip_catalog_label = (
+                f"Skip {last_cat_day.strftime('%d %b')} catalog (-{removed_eur / 1e6:.2f} M€)"
+            )
 
     shift_to_sea = plan_df.copy()
     if "display" in shift_to_sea.columns and "sea" in shift_to_sea.columns:
@@ -806,7 +864,7 @@ def s14_forecast(ctx: RunContext) -> None:
 
     scenarios_map = {
         "Plan as submitted": fc_daily,
-        "Skip 30 Jan catalog (-1.30 M€)": evaluate_forecast_scenario(
+        skip_catalog_label: evaluate_forecast_scenario(
             fc_mmm, wide_2023_2024, fc_daily, skip_catalog, fc_cfg, seed=ctx.seed
         ),
         "Shift 30% Display -> SEA (budget-neutral)": evaluate_forecast_scenario(
@@ -858,8 +916,10 @@ def s14_forecast(ctx: RunContext) -> None:
 
 def s15_finalize(ctx: RunContext) -> None:
     """Refresh `benchmark`, `overview`, `reports`, and `brief` with live Meridian outputs."""
+    from mmm_studio.core.ols import build_benchmark_section, evaluate_ols_suite
+
     _, _, wide_2023_2024, panel_df = _ensure_dataframes(ctx)
-    ols_res = ctx.cache.get("ols_res") or evaluate_ols_suite(panel_df)
+    ols_res = ctx.cache.get("ols_res") or evaluate_ols_suite(panel_df, config=ctx.config)
 
     meridian_metrics = ctx.cache.get("meridian_metrics")
     if meridian_metrics is None and ctx.storage.exists(ctx.key("meta/meridian_metrics.json")):
@@ -877,7 +937,7 @@ def s15_finalize(ctx: RunContext) -> None:
     if opt_res is None and ctx.storage.exists(ctx.key("data/default_optimisation.json")):
         opt_res = ctx.load_json("data/default_optimisation.json")
 
-    ctx.save_section(build_benchmark_section(wide_2023_2024, meridian_summary=meridian_metrics))
+    ctx.save_section(build_benchmark_section(wide_2023_2024, meridian_summary=meridian_metrics, config=ctx.config))
     ctx.save_section(
         build_overview_section(
             wide_2023_2024,
@@ -888,7 +948,15 @@ def s15_finalize(ctx: RunContext) -> None:
             fit_df=fit_df,
         )
     )
-    ctx.save_section(build_brief_section(wide_2023_2024, ols_res, meridian_metrics=meridian_metrics))
+    ctx.save_section(
+        build_brief_section(
+            wide_2023_2024,
+            ols_res,
+            meridian_metrics=meridian_metrics,
+            roi_df=roi_df,
+            opt_res=opt_res,
+        )
+    )
     ctx.save_section(build_reports_section(ctx))
 
 

@@ -269,15 +269,15 @@ export const ImportPage: React.FC<{
                     Confirm Data Roles — {currentRun.name}
                   </Typography>
                   <Typography variant="body2">
-                    {currentRun.schema.n_rows.toLocaleString()} rows ·{" "}
+                    {(currentRun.schema.n_rows ?? 0).toLocaleString()} rows ·{" "}
                     {currentRun.schema.date_min} to {currentRun.schema.date_max} · Sheets:{" "}
-                    {currentRun.schema.sheet_names.join(", ")}
+                    {(currentRun.schema.sheet_names || []).join(", ")}
                   </Typography>
                 </Box>
                 <Chip
                   size="small"
                   color="info"
-                  label={`Break Year: ${roleConfigDraft.structural_break_year}+`}
+                  label={`Break Year: ${roleConfigDraft.structural_break_year ?? 2023}+`}
                 />
               </Stack>
 
@@ -348,7 +348,8 @@ export const ImportPage: React.FC<{
                           >
                             <MenuItem value="paid">Paid Media (ROI)</MenuItem>
                             <MenuItem value="print_event">Print Event (Catalog)</MenuItem>
-                            <MenuItem value="unpaid">Unpaid / Control</MenuItem>
+                            <MenuItem value="commission">Commission / Control</MenuItem>
+                            <MenuItem value="unpaid">Unpaid / Organic</MenuItem>
                             <MenuItem value="ignored">Ignored (Inactive)</MenuItem>
                           </Select>
                         </TableCell>

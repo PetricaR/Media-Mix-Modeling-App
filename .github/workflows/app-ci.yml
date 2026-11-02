@@ -38,7 +38,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "src/app/backend/uv.lock"
       - name: Install Python 3.12 & dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --extra worker
       - name: Run Ruff check
         run: uv run ruff check mmm_studio tests
       - name: Run Fast Test Suite

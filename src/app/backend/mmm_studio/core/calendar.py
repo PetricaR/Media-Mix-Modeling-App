@@ -162,7 +162,11 @@ def add_calendar_and_adstock_features(
         df["catalog_in_home_7d"] = df["cost_catalog"].rolling(7, min_periods=1).sum()
         df["catalog_in_home_14d"] = df["cost_catalog"].rolling(14, min_periods=1).sum()
 
-    alphas = digital_alphas or DEFAULT_DIGITAL_ALPHAS
+    alphas = dict(digital_alphas or DEFAULT_DIGITAL_ALPHAS)
+    if config is not None and hasattr(config, "channels"):
+        for ch in getattr(config, "channels", []):
+            if getattr(ch, "role", None) in ("paid", "commission") and ch.slug != "catalog":
+                alphas.setdefault(ch.slug, float(getattr(ch, "adstock_decay", 0.3)))
     for slug, alpha in alphas.items():
         col = f"cost_{slug}"
         if col in df.columns:

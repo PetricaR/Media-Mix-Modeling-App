@@ -45,6 +45,7 @@ def validate_plan(
     plan_df: pd.DataFrame,
     last_history_date: pd.Timestamp | None = None,
     max_horizon_days: int = 90,
+    paid_channels: list[str] | None = None,
 ) -> pd.DataFrame:
     """Validate and normalise an uploaded future budget plan DataFrame."""
     df = plan_df.copy()
@@ -77,9 +78,10 @@ def validate_plan(
                 f"Budget plan must start on {expected_start.strftime('%Y-%m-%d')} (the day after history ends)."
             )
 
-    out = pd.DataFrame(0.0, index=df.index, columns=PLAN_COLUMNS)
+    target_cols = [slugify_channel(c) for c in paid_channels] if paid_channels else PLAN_COLUMNS
+    out = pd.DataFrame(0.0, index=df.index, columns=target_cols)
     col_map = {slugify_channel(c): c for c in df.columns}
-    for col in PLAN_COLUMNS:
+    for col in target_cols:
         if col in df.columns:
             vals = pd.to_numeric(df[col], errors="coerce")
         elif col in col_map:
@@ -107,6 +109,7 @@ def build_example_plan(
     days: int = 42,
     send_outs: list[str] | None = None,
     catalog_cost: float | None = None,
+    paid_channels: list[str] | None = None,
 ) -> pd.DataFrame:
     """Build a realistic future daily budget plan from historical weekday spend and YoY growth."""
     hist_end = pd.Timestamp(history.index[-1])
@@ -132,8 +135,9 @@ def build_example_plan(
             chosen_thu = [thursdays[0]]
         send_outs = [d.strftime("%Y-%m-%d") for d in chosen_thu]
 
-    plan = pd.DataFrame(0.0, index=dates, columns=PLAN_COLUMNS)
-    for col in PLAN_COLUMNS:
+    target_cols = [slugify_channel(c) for c in paid_channels] if paid_channels else PLAN_COLUMNS
+    plan = pd.DataFrame(0.0, index=dates, columns=target_cols)
+    for col in target_cols:
         cost_col = f"cost_{col}"
         if cost_col not in history.columns:
             continue
@@ -409,6 +413,8 @@ def build_forecast_scenarios_section(
 
     # 2. 42-day Jan–Feb 2025 forecast chart (`05_forecast_2025_01`)
     recent_hist = wide_df.loc["2024-11-15":, "total_sales"]
+    if len(recent_hist) == 0:
+        recent_hist = wide_df["total_sales"].iloc[-min(47, len(wide_df)) :]
     hist_dates = [d.strftime("%Y-%m-%d") for d in recent_hist.index]
     fc_dates = [d.strftime("%Y-%m-%d") for d in forecast_daily.index]
     all_dates = hist_dates + fc_dates

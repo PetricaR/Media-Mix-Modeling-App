@@ -30,6 +30,7 @@ class RunContext:
     on_stage_error: Callable[[str, str], None] | None = None
     on_heartbeat: Callable[[], None] | None = None
     is_cancelled: Callable[[], bool] | None = None
+    spawn_meridian_child: bool = False
     cache: dict[str, Any] = field(default_factory=dict)
 
     @property
