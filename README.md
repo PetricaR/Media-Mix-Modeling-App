@@ -35,3 +35,7 @@ See [PLAN.md](PLAN.md) for the project plan.
 
 - **A leak-free back-test:** a forecast of Q4 2024 from the budget alone scores 8.5 % MAE / mean.
 - **Budget scenarios:** `forecast.scenario(result, alt_plan)` evaluates alternative plans in seconds.
+
+## Standalone Web Application (MMM Studio)
+
+A self-contained full-stack web application (`FastAPI` + `PostgreSQL/Procrastinate` + `React/TypeScript/MUI/Plotly`) that reproduces all exploratory analyses, feature engineering, OLS benchmarks, Google Meridian Bayesian MMM fits, budget optimisations, and interactive 2025 scenario forecasts from a single uploaded `.xlsx` workbook is located in [`src/app/`](src/app/README.md).

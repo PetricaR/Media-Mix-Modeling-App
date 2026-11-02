@@ -1,0 +1,114 @@
+"""Command-line interface for MMM Studio (`run`, `api`, `worker`, `migrate`)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    from mmm_studio.pipeline.context import RunContext
+    from mmm_studio.pipeline.stages import run_full_pipeline
+    from mmm_studio.storage import LocalStorage
+
+    input_path = Path(args.input).resolve()
+    if not input_path.exists():
+        print(f"Error: Input file not found: {input_path}", file=sys.stderr)
+        return 1
+
+    out_dir = Path(args.out).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    storage = LocalStorage(out_dir)
+
+    profile = "smoke" if args.smoke else ("quick" if args.fast else "full")
+    ctx = RunContext(
+        run_id=args.run_id,
+        storage=storage,
+        run_profile=profile,
+        seed=args.seed,
+        on_stage_start=lambda s: print(f"[mmm-studio] Starting stage: {s}", flush=True),
+        on_stage_complete=lambda s: print(f"[mmm-studio] Completed stage: {s}", flush=True),
+        on_stage_error=lambda s, e: print(f"[mmm-studio] ERROR in stage {s}: {e}", file=sys.stderr, flush=True),
+    )
+    raw = input_path.read_bytes()
+    ctx.cache["workbook_bytes"] = raw
+    storage.write_bytes(ctx.key("input/workbook.xlsx"), raw)
+
+    summary = run_full_pipeline(ctx, skip_meridian=args.skip_meridian)
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+def _cmd_migrate(_args: argparse.Namespace) -> int:
+    from mmm_studio.db.session import init_db
+    from mmm_studio.jobs.app import ensure_procrastinate_schema
+
+    init_db()
+    ensure_procrastinate_schema()
+    print("[mmm-studio] Database & Procrastinate schemas initialized.")
+    return 0
+
+
+def _cmd_api(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    uvicorn.run(
+        "mmm_studio.main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
+    return 0
+
+
+def _cmd_worker(args: argparse.Namespace) -> int:
+    from mmm_studio.jobs.worker import run_worker_loop
+
+    return run_worker_loop(
+        queue=args.queue,
+        burst=args.burst,
+        idle_exit=args.idle_exit,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="mmm-studio", description="MMM Studio CLI")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # run
+    p_run = sub.add_parser("run", help="Run the offline MMM pipeline on an Excel workbook")
+    p_run.add_argument("--input", required=True, help="Path to input .xlsx workbook")
+    p_run.add_argument("--out", required=True, help="Output directory for run artifacts")
+    p_run.add_argument("--run-id", default="offline", help="Run identifier (default: offline)")
+    p_run.add_argument("--fast", action="store_true", help="Use Quick MCMC sampling profile")
+    p_run.add_argument("--smoke", action="store_true", help="Use tiny Smoke MCMC sampling profile")
+    p_run.add_argument("--skip-meridian", action="store_true", help="Run only fast analysis & OLS stages")
+    p_run.add_argument("--seed", type=int, default=0, help="Random seed")
+    p_run.set_defaults(func=_cmd_run)
+
+    # migrate
+    p_mig = sub.add_parser("migrate", help="Create database tables and Procrastinate schema")
+    p_mig.set_defaults(func=_cmd_migrate)
+
+    # api
+    p_api = sub.add_parser("api", help="Start the FastAPI server")
+    p_api.add_argument("--host", default="0.0.0.0")
+    p_api.add_argument("--port", type=int, default=8000)
+    p_api.add_argument("--reload", action="store_true")
+    p_api.set_defaults(func=_cmd_api)
+
+    # worker
+    p_wrk = sub.add_parser("worker", help="Start a queue worker")
+    p_wrk.add_argument("--queue", default="all", choices=["analysis", "meridian", "interactive", "all"])
+    p_wrk.add_argument("--burst", action="store_true", help="Exit as soon as the queue is empty")
+    p_wrk.add_argument("--idle-exit", type=int, default=0, help="Exit after N seconds of idle queue (0 = never)")
+    p_wrk.set_defaults(func=_cmd_worker)
+
+    parsed = parser.parse_args(argv)
+    return parsed.func(parsed)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

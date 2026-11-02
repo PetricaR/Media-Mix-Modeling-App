@@ -221,3 +221,9 @@ __marimo__/
 
 # Fitted Meridian models (30 MB+; regenerate with notebooks/03_meridian_mmm.ipynb)
 outputs/*.binpb
+
+# Standalone MMM Studio app local artifacts & frontend build
+.app_data/
+src/app/.env
+src/app/frontend/node_modules/
+src/app/frontend/dist/

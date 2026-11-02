@@ -1,0 +1,233 @@
+"""End-to-end FastAPI tests: upload -> confirm roles -> start -> sections -> scenarios -> optimiser -> auth & queue caps."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from mmm_studio.api.deps import reset_rate_limiter
+from mmm_studio.db.models import Base
+from mmm_studio.db.session import get_engine, get_session_factory, init_db
+from mmm_studio.jobs.app import ensure_procrastinate_schema, get_procrastinate_app
+from mmm_studio.jobs.worker import run_worker_loop
+from mmm_studio.main import create_app
+from mmm_studio.settings import get_settings
+from mmm_studio.storage import get_storage
+
+TEST_DB_URL = os.environ.get("TEST_DATABASE_URL", "postgresql:///mmm_studio_test?host=/tmp&port=5433")
+FIXTURE_XLSX = Path(__file__).parent / "fixtures" / "case_study.xlsx"
+
+
+@pytest.fixture()
+def api_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MMM_DATABASE_URL", TEST_DB_URL)
+    monkeypatch.setenv("MMM_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("MMM_LOCAL_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MMM_WAKE_WORKERS", "false")
+    monkeypatch.setenv("MMM_APP_ACCESS_CODE", "")
+    monkeypatch.setenv("MMM_MAX_MERIDIAN_QUEUED", "3")
+
+    get_settings.cache_clear()
+    get_storage.cache_clear()
+    get_engine.cache_clear()
+    get_session_factory.cache_clear()
+    get_procrastinate_app.cache_clear()
+    reset_rate_limiter()
+
+    init_db()
+    ensure_procrastinate_schema()
+
+    engine = get_engine()
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    with psycopg.connect(TEST_DB_URL, autocommit=True) as conn:
+        conn.execute("TRUNCATE TABLE procrastinate_events, procrastinate_jobs RESTART IDENTITY CASCADE")
+
+    app = create_app()
+    with TestClient(app) as client:
+        yield client, monkeypatch
+
+    get_settings.cache_clear()
+    get_storage.cache_clear()
+    get_engine.cache_clear()
+    get_session_factory.cache_clear()
+    get_procrastinate_app.cache_clear()
+    reset_rate_limiter()
+
+
+def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
+    client, _ = api_env
+
+    # 1. Health check
+    r_health = client.get("/api/v1/health")
+    assert r_health.status_code == 200
+    assert r_health.json()["status"] == "ok"
+
+    # 2. Upload workbook (creates draft run)
+    with FIXTURE_XLSX.open("rb") as fh:
+        r_create = client.post(
+            "/api/v1/runs",
+            files={"file": ("DataScienceMarketingUseCase.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            data={"name": "Case Study Evaluation", "profile": "quick"},
+        )
+    assert r_create.status_code == 201, r_create.text
+    run_data = r_create.json()
+    run_id = run_data["id"]
+    assert run_data["status"] == "draft"
+    assert run_data["schema"]["sheet_names"] == ["data", "info"]
+    assert len(run_data["config"]["role_config"]["channels"]) == 12
+
+    # 3. Confirm roles via PATCH
+    r_patch = client.patch(
+        f"/api/v1/runs/{run_id}",
+        json={"name": "Confirmed Case Study Run", "profile": "smoke", "skip_meridian": True},
+    )
+    assert r_patch.status_code == 200
+    assert r_patch.json()["name"] == "Confirmed Case Study Run"
+
+    # 4. Start run (skip_meridian=True for fast test)
+    r_start = client.post(
+        f"/api/v1/runs/{run_id}/start",
+        json={"profile": "smoke", "skip_meridian": True},
+    )
+    assert r_start.status_code == 202
+    assert r_start.json()["status"] == "queued"
+
+    # Execute queued analysis job with worker in burst mode
+    run_worker_loop(queue="analysis", burst=True)
+
+    # 5. Poll run & sections
+    r_get = client.get(f"/api/v1/runs/{run_id}")
+    assert r_get.status_code == 200
+    assert r_get.json()["status"] == "succeeded"
+
+    r_secs = client.get(f"/api/v1/runs/{run_id}/sections")
+    assert r_secs.status_code == 200
+    sec_ids = {s["id"] for s in r_secs.json()["sections"]}
+    assert {"overview", "data_quality", "explore_correlations", "preparation", "benchmark", "brief"}.issubset(sec_ids)
+
+    r_ov = client.get(f"/api/v1/runs/{run_id}/sections/overview")
+    assert r_ov.status_code == 200
+    ov = r_ov.json()
+    assert len(ov["blocks"]) >= 3
+    assert any(b["type"] == "kpis" for b in ov["blocks"])
+    assert any(b["type"] == "chart" for b in ov["blocks"])
+
+    # 6. Plan template & interactive scenario
+    r_tpl = client.get(f"/api/v1/runs/{run_id}/plan-template?days=42")
+    assert r_tpl.status_code == 200
+    assert "date,sea,catalog" in r_tpl.text
+
+    r_fcs = client.get(f"/api/v1/runs/{run_id}/forecasts")
+    assert r_fcs.status_code == 200
+    default_fc_id = f"default_{run_id}"
+    assert any(f["id"] == default_fc_id for f in r_fcs.json()["forecasts"])
+
+    r_sc = client.post(
+        f"/api/v1/forecasts/{default_fc_id}/scenarios",
+        json={"name": "SEA +20%", "multipliers": {"sea": 1.2, "affiliate": 2.0}, "horizon_days": 42},
+    )
+    assert r_sc.status_code == 202
+    sc_id = r_sc.json()["id"]
+
+    run_worker_loop(queue="interactive", burst=True)
+
+    r_sc_done = client.get(f"/api/v1/scenarios/{sc_id}")
+    assert r_sc_done.status_code == 200
+    sc_payload = r_sc_done.json()
+    assert sc_payload["status"] == "succeeded"
+    assert sc_payload["result"]["delta_sales"] > 0
+
+    # 7. Interactive budget optimiser
+    r_opt = client.post(
+        f"/api/v1/runs/{run_id}/optimisations",
+        json={"min_multiplier": 0.7, "max_multiplier": 1.3, "include_catalog": True},
+    )
+    assert r_opt.status_code == 202
+    opt_id = r_opt.json()["id"]
+
+    run_worker_loop(queue="interactive", burst=True)
+
+    r_opt_done = client.get(f"/api/v1/optimisations/{opt_id}")
+    assert r_opt_done.status_code == 200
+    opt_payload = r_opt_done.json()
+    assert opt_payload["status"] == "succeeded"
+    assert len(opt_payload["result"]["channels"]) == 6
+
+    # 8. Artifacts listing & streaming
+    r_arts = client.get(f"/api/v1/runs/{run_id}/artifacts")
+    assert r_arts.status_code == 200
+    assert len(r_arts.json()["artifacts"]) > 0
+
+    r_art_dl = client.get(f"/api/v1/runs/{run_id}/artifacts/meta/summary.json")
+    assert r_art_dl.status_code == 200
+
+
+def test_access_code_guard_rate_limiter_and_meridian_queue_cap(api_env) -> None:
+    client, monkeypatch = api_env
+
+    # Enable APP_ACCESS_CODE
+    monkeypatch.setenv("MMM_APP_ACCESS_CODE", "secret-studio-2026")
+    get_settings.cache_clear()
+
+    # Open read endpoints still return 200 without header
+    assert client.get("/api/v1/runs").status_code == 200
+
+    # Write endpoint without header -> 401
+    with FIXTURE_XLSX.open("rb") as fh:
+        r_no_auth = client.post(
+            "/api/v1/runs",
+            files={"file": ("case_study.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert r_no_auth.status_code == 401
+
+    # Write endpoint with wrong header -> 403
+    with FIXTURE_XLSX.open("rb") as fh:
+        r_bad_auth = client.post(
+            "/api/v1/runs",
+            headers={"X-Access-Code": "wrong-code"},
+            files={"file": ("case_study.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert r_bad_auth.status_code == 403
+
+    # Test Meridian queue cap (max 3 queued jobs)
+    headers = {"X-Access-Code": "secret-studio-2026"}
+    run_ids = []
+    for i in range(4):
+        with FIXTURE_XLSX.open("rb") as fh:
+            resp = client.post(
+                "/api/v1/runs",
+                headers=headers,
+                files={"file": ("case_study.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                data={"name": f"Run {i}"},
+            )
+        assert resp.status_code == 201
+        run_ids.append(resp.json()["id"])
+
+    for rid in run_ids[:3]:
+        r_st = client.post(f"/api/v1/runs/{rid}/start", headers=headers, json={"skip_meridian": False})
+        assert r_st.status_code == 202
+
+    # 4th Meridian start should return 429 Too Many Requests
+    r_fourth = client.post(f"/api/v1/runs/{run_ids[3]}/start", headers=headers, json={"skip_meridian": False})
+    assert r_fourth.status_code == 429
+
+    # Cancelling one frees a slot
+    r_cancel = client.post(f"/api/v1/runs/{run_ids[0]}/cancel", headers=headers)
+    assert r_cancel.status_code == 200
+    assert r_cancel.json()["status"] == "cancelled"
+
+    r_fourth_retry = client.post(f"/api/v1/runs/{run_ids[3]}/start", headers=headers, json={"skip_meridian": False})
+    assert r_fourth_retry.status_code == 202
+
+    # Rate limit on /api/v1/auth/check (5 attempts per minute)
+    reset_rate_limiter()
+    for _ in range(5):
+        r_chk = client.post("/api/v1/auth/check", headers=headers)
+        assert r_chk.status_code == 200
+    r_limited = client.post("/api/v1/auth/check", headers=headers)
+    assert r_limited.status_code == 429

@@ -1,0 +1,61 @@
+[project]
+name = "mmm-studio"
+version = "0.1.0"
+description = "MMM Studio — Standalone Marketing Mix Modeling & Sales Forecasting Web Application"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "google-cloud-run>=0.10",
+    "google-cloud-storage>=2.18",
+    "numpy>=2.0,<2.4",
+    "openpyxl>=3.1",
+    "pandas>=2.2,<3",
+    "procrastinate>=2.14,<4",
+    "psycopg[binary]>=3.1",
+    "pyarrow>=17.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "sqlalchemy>=2.0",
+    "uvicorn[standard]>=0.32",
+]
+
+[project.optional-dependencies]
+worker = [
+    "google-meridian[schema]==2.1.0",
+    "holidays>=0.60",
+    "plotly>=5.24,<7",
+    "scipy>=1.13",
+    "statsmodels>=0.14.5,<0.15",
+]
+
+[project.scripts]
+mmm-studio = "mmm_studio.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mmm_studio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: slow tests such as full Meridian MCMC smoke fits",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

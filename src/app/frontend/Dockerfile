@@ -1,0 +1,18 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY src/app/frontend/package.json ./
+RUN npm install
+
+COPY src/app/frontend/ ./
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY src/app/deploy/nginx.conf /etc/nginx/templates/default.conf.template
+
+ENV PORT=8080
+ENV API_ORIGIN=http://api:8000
+EXPOSE 8080
+
+CMD ["nginx", "-g", "daemon off;"]

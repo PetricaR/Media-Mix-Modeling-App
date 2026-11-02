@@ -1,0 +1,89 @@
+{
+  "raw_row_count": 8740,
+  "calendar_days": 732,
+  "start_date": "2023-01-01",
+  "end_date": "2025-01-01",
+  "channel_count": 12,
+  "paid_channel_count": 7,
+  "unpaid_channel_count": 5,
+  "paid_channels": [
+    "Affiliate",
+    "Catalog",
+    "Display",
+    "Display Network",
+    "PSM",
+    "SEA",
+    "Social Media"
+  ],
+  "unpaid_channels": [
+    "Direct Referred",
+    "Direct Type-in",
+    "Owned",
+    "SEO",
+    "TV"
+  ],
+  "missing_channel_days": {
+    "TV": 38,
+    "Catalog": 4,
+    "Owned": 2,
+    "total": 44
+  },
+  "tv_low_sales_days": 8,
+  "catalog_sendout_days": 28,
+  "catalog_sendout_weekdays": {
+    "Thursday": 26,
+    "Wednesday": 1,
+    "Friday": 1
+  },
+  "target_summary": {
+    "mean_daily_sales": 787292.0,
+    "std_daily_sales": 281843.0,
+    "min_daily_sales": 218492.0,
+    "max_daily_sales": 2753320.0
+  },
+  "yoy_growth": {
+    "sales_growth_2024_vs_2023_pct": 20.7,
+    "spend_growth_2024_vs_2023_pct": 12.4,
+    "paid_share_attributed_sales_pct": 63.9
+  },
+  "same_day_pearson_corr_cost_vs_total_sales": {
+    "Affiliate": 0.76,
+    "SEA": 0.72,
+    "Display": 0.56,
+    "PSM": 0.49,
+    "Display Network": 0.44,
+    "Social Media": 0.33,
+    "Catalog": -0.01
+  },
+  "catalog_lag_3_corr": 0.40,
+  "naive_baselines_mae_over_mean": {
+    "constant_mean": 0.261,
+    "weekday_mean": 0.249,
+    "lag_7": 0.260,
+    "lag_1": 0.191
+  },
+  "digital_vif_range": {
+    "min": 1.41,
+    "max": 2.41
+  },
+  "halo_uplift_7d_pct": {
+    "total_sales": 38.4,
+    "SEO": 20.0,
+    "Social Media": 20.0,
+    "Direct Type-in": 17.0,
+    "Affiliate": 14.0,
+    "SEA": 11.0
+  },
+  "ols_in_sample_adj_r2_ladder": {
+    "raw_costs": 0.74,
+    "plus_calendar": 0.76,
+    "plus_seasonality_trend": 0.83,
+    "catalog_in_home_adstock": 0.90
+  },
+  "meridian_reference": {
+    "holdout_q4_2024_mae_over_mean": 0.0853,
+    "holdout_q4_2024_r2": 0.8885,
+    "holdout_q3_2024_mae_over_mean": 0.1098,
+    "max_rhat": 1.0029
+  }
+}
