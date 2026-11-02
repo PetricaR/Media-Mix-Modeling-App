@@ -61,7 +61,13 @@ def build_explore_channels_section(
         summary_rows.append(
             {
                 "channel": ch,
-                "role": "Paid (Print Event)" if role == "print_event" else ("Paid Digital" if role == "paid" else "Organic / Unpaid"),
+                "role": {
+                    "print_event": "Paid (Print Event)",
+                    "paid": "Paid Digital",
+                    "digital_paid": "Paid Digital",
+                    "commission": "Paid (commission, model control)",
+                    "control": "Paid (model control)",
+                }.get(role, "Organic / Unpaid"),
                 "sales_2023": fmt_eur(s23),
                 "sales_2024": fmt_eur(s24),
                 "yoy_growth": fmt_pct(yoy, signed=True),

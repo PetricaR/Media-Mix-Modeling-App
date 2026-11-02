@@ -185,8 +185,9 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
   `core/features.complete_years()`.
 - **Checked against the notebooks' own outputs** (2026-11-02, full run `run_f1e8df83da`): `outputs/meridian_metrics.json`
   within 0.5 %, `outputs/meridian_holdout_forecast.csv` (93 days) within 0.6 %, `outputs/forecast_2025-01.csv` (42 days)
-  within 0.4 %, every table printed by notebooks 01–05, and every figure headline in `reports/figures` (verification
-  scripts only; the app never reads these files).
+  within 0.4 %, every figure headline in `reports/figures`, and every number printed by notebooks 01–05: 1,614 of
+  1,620 match; the other 6 are notebook 04's Meridian row (MCMC noise ≤ 0.1 %) and pandas' 7-digit display of three
+  raw cost values (verification scripts only; the app never reads these files).
 - **Reference numbers** live in `tests/golden/case_study.json` and are asserted by the fast tests (EDA, naive baselines,
   preparation ladder 0.74→0.90, OLS benchmark 34.8/10.7/9.6 % and walk-forward 9.5 %, example plan €8,008,549).
 - **Meridian (full profile, seed 0)** reproduces notebook 03 within MCMC noise: Q4 MAE/mean 8.54 % (nb 8.53 %), R² 0.888,
@@ -225,3 +226,10 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     adstock and response curves show the 90 % credible band (and the actual-spend dot), and the Meridian accuracy
     table has notebook 03's "All Data" row (R² 0.902). Captions that stated data facts as fixed text (catalog ROI ≈ 1,
     Affiliate CTR > 100 %, weekday peaks, "Thursday send-out") are computed.
+16. The last notebook tables the app lacked are computed: daily-sales quartiles (01), mean daily spend by weekday in €
+    (01), mean catalog sales by day since send-out (01), spend per channel and year (01b), metric ranges per channel
+    (01b), and the quarterly CPC / CPM / CTR / attributed-ROAS table plus the monthly ROAS panel (01b).
+17. Affiliate's role is "commission" (it was "paid", so the Import page said "gets an ROI" while Meridian always used it
+    as a control). `ChannelConfig` reads a stored "paid" Affiliate as commission and the run API returns the
+    re-validated role config, so older runs show the role the model uses. The Import page's channel-role table shows
+    each rationale under its role (the separate "Why" column was squeezed to one word per line).

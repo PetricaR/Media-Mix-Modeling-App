@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from mmm_studio import __version__
 from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db, require_access_code
-from mmm_studio.core.schema import DataRoleConfig
+from mmm_studio.core.schema import DataRoleConfig, extract_role_config
 from mmm_studio.core.workbook import WorkbookValidationError, profile_workbook
 from mmm_studio.db.models import ForecastRun, Run, utcnow
 from mmm_studio.jobs.app import (
@@ -58,6 +58,14 @@ def _capture_versions(settings: Settings) -> dict[str, str]:
     }
 
 
+def _normalised_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the stored config with its role config re-validated, so roles show what the pipeline will use."""
+    config = dict(config or {})
+    if isinstance(config.get("role_config"), dict):
+        config["role_config"] = extract_role_config(config).model_dump(mode="json")
+    return config
+
+
 def serialize_run(run: Run) -> dict[str, Any]:
     """Serialize a Run ORM instance (including ordered StageProgress rows and queue position)."""
     q_pos = get_queue_position(run.meridian_job_id, "meridian") if run.meridian_job_id else None
@@ -82,7 +90,7 @@ def serialize_run(run: Run) -> dict[str, Any]:
         "profile": run.profile,
         "status": run.status,
         "is_active": run.is_active,
-        "config": run.config or {},
+        "config": _normalised_config(run.config),
         "schema": run.schema_json or {},
         "summary": run.summary,
         "versions": run.versions or {},

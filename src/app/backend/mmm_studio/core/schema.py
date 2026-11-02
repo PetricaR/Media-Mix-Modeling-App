@@ -52,6 +52,10 @@ class ChannelConfig(BaseModel):
     def _populate_channel_defaults(self) -> ChannelConfig:
         if not self.slug:
             self.slug = slugify_channel(self.name)
+        # Affiliate's cost is a commission on its own sales, so the model always uses it as a control (as notebook 03
+        # does). Older configs stored it as "paid"; show the role the model actually uses instead of "gets an ROI".
+        if self.slug == "affiliate" and self.role == "paid":
+            self.role = "commission"
         if self.role == "ignored":
             self.enabled = False
         if self.cost_column is None and (
@@ -167,7 +171,7 @@ def default_role_config() -> DataRoleConfig:
             ChannelConfig(name="SEA", role="paid"),
             ChannelConfig(name="Catalog", role="print_event"),
             ChannelConfig(name="Display", role="paid"),
-            ChannelConfig(name="Affiliate", role="paid"),
+            ChannelConfig(name="Affiliate", role="commission"),
             ChannelConfig(name="Display Network", role="paid"),
             ChannelConfig(name="Social Media", role="paid"),
             ChannelConfig(name="PSM", role="paid"),

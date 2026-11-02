@@ -244,10 +244,16 @@ def build_explore_catalog_section(
     halo_top = sorted(((c, v) for c, v in uplifts_7d.items() if c not in ("total_sales", cat_name) and float(wide_df[f"sales_{config.slug_map()[c]}"].sum()) > 0.01 * float(wide_df["total_sales"].sum())), key=lambda t: -t[1])[:5]
     halo_txt = ", ".join(f"{c} {v:+.0f}%" for c, v in halo_top)
     peak_lift = float(study.loc[best_lag, "lift"]) if best_lag in study.index else float("nan")
+    cat_by_k = (
+        wide_df["sales_catalog"].groupby(wide_df["days_since_catalog"]).mean()
+        if "sales_catalog" in wide_df and "days_since_catalog" in wide_df
+        else pd.Series(dtype=float)
+    )
     study_rows = [
         {
             "k": int(k),
             "mean_sales": fmt_eur(float(r["mean"])),
+            "mean_catalog": fmt_eur(float(cat_by_k.get(k, float("nan")))) if k in cat_by_k.index else "–",
             "lift": f"{100 * float(r['lift']):+.0f}%",
             "n": int(r["n"]),
         }
@@ -509,6 +515,7 @@ def build_explore_catalog_section(
                 columns=[
                     TableColumn(key="k", label="Days since send-out", align="right"),
                     TableColumn(key="mean_sales", label="Mean total sales", align="right"),
+                    TableColumn(key="mean_catalog", label="Mean catalog sales", align="right"),
                     TableColumn(key="lift", label="Weekday-adjusted lift", align="right"),
                     TableColumn(key="n", label="Send-outs", align="right"),
                 ],

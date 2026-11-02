@@ -49,3 +49,14 @@ def test_upload_validation_rejects_invalid() -> None:
         validate_upload_bytes("malicious.exe", b"hello")
     with pytest.raises(WorkbookValidationError):
         validate_upload_bytes("corrupt.xlsx", b"not-a-zip")
+
+
+def test_affiliate_role_shows_what_the_model_uses() -> None:
+    """Affiliate is a commission channel and a Meridian control; a stored "paid" role (older runs) reads as commission."""
+    from mmm_studio.core.meridian.spec import MeridianSpecConfig
+    from mmm_studio.core.schema import extract_role_config
+
+    cfg = extract_role_config({"role_config": {"channels": [{"name": "Affiliate", "role": "paid"}, {"name": "SEA", "role": "paid"}]}})
+    roles = {c.name: c.role for c in cfg.channels}
+    assert roles == {"Affiliate": "commission", "SEA": "paid"}
+    assert MeridianSpecConfig.from_role_config(cfg).as_controls == ("affiliate",)

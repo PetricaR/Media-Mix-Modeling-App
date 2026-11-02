@@ -174,3 +174,29 @@ def test_eda_figures_match_notebook_01b_headlines(
 
     weekday = block(build_explore_spend_section(panel, cfg), "spend_weekday_index").subtitle
     assert "Social Media spends 1.7× its average on Mondays" in weekday and "Affiliate spends 1.6× its average on Sundays" in weekday
+
+
+def test_eda_reproduces_remaining_notebook_tables(
+    profiled_case_study: tuple[pd.DataFrame, DataProfile],
+    wide_model: pd.DataFrame,
+) -> None:
+    """Quartiles (01), weekday spend in € (01), spend per year (01b), metric ranges (01b) and quarterly KPIs (01b)."""
+    df_raw, profile = profiled_case_study
+    cfg = profile.role_config
+    panel = add_calendar_and_adstock_features(wide_model, config=cfg)
+
+    by_year = {r["stat"]: r for r in _table(build_explore_target_section(panel), "target_profile_by_year")}
+    assert (by_year["25th percentile"]["all"], by_year["75th percentile"]["all"]) == ("€602,239", "€923,461")
+
+    s_spend = build_explore_spend_section(panel, cfg)
+    monday = _table(s_spend, "spend_weekday_eur")[0]
+    assert (monday["sea"], monday["social_media"]) == ("€53,760", "€20,054")
+    catalog = next(r for r in _table(s_spend, "spend_by_year") if r["channel"] == "Catalog")
+    assert (catalog["spend_prev"], catalog["spend_last"], catalog["cv_active"]) == ("€20,359,517", "€18,197,781", "0.13")
+
+    ranges = {(r["channel"], r["metric"]): r for r in _table(build_data_quality_section(df_raw, panel, profile), "quality_metric_ranges")}
+    assert (ranges[("SEA", "Sales")]["median"], ranges[("Catalog", "Impressions")]["count"]) == ("194,296", 28)
+
+    quarterly = {r["series"]: r for r in _table(build_explore_efficiency_section(panel, cfg), "efficiency_quarterly")}
+    assert quarterly["CPM (€) · Affiliate"]["2024Q4"] == "2477.636"
+    assert quarterly["Attributed ROAS · SEA"]["2023Q1"] == "3.993"

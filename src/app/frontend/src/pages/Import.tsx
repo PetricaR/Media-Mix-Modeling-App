@@ -380,7 +380,6 @@ export const ImportPage: React.FC<{
                       <TableCell scope="col">Channel</TableCell>
                       <TableCell scope="col">Role</TableCell>
                       <TableCell scope="col">Cost column</TableCell>
-                      <TableCell scope="col">Why</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -404,13 +403,14 @@ export const ImportPage: React.FC<{
                             <MenuItem value="unpaid">Unpaid / organic</MenuItem>
                             <MenuItem value="ignored">Ignored</MenuItem>
                           </Select>
+                          {/* The rationale sits under its role: a separate column was squeezed to one word per line */}
+                          {ch.rationale && (
+                            <Typography variant="caption" component="p" sx={{ color: PALETTE.inkSecondary, mt: 0.75, maxWidth: 420 }}>
+                              {ch.rationale}
+                            </Typography>
+                          )}
                         </TableCell>
-                        <TableCell sx={{ fontFamily: FONT_MONO, fontSize: "0.78rem" }}>{ch.cost_column || "—"}</TableCell>
-                        <TableCell>
-                          <Typography variant="caption" sx={{ color: PALETTE.inkSecondary }}>
-                            {ch.rationale || "—"}
-                          </Typography>
-                        </TableCell>
+                        <TableCell sx={{ fontFamily: FONT_MONO, fontSize: "0.78rem", verticalAlign: "top", pt: 1.75 }}>{ch.cost_column || "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

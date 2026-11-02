@@ -226,6 +226,30 @@ def build_data_quality_section(
         else "No channel-days are missing."
     )
 
+    # Count, min, median and max of every metric per channel over the raw rows (01b §2)
+    metric_names = {
+        "sales_by_channel": "Sales",
+        "impressions_by_channel": "Impressions",
+        "clicks_by_channel": "Clicks",
+        "costs_by_channel": "Costs",
+    }
+    range_rows = []
+    for ch in avail_channels:
+        sub_df = clean[clean["channel"] == ch]
+        for col, metric in metric_names.items():
+            s = sub_df[col].dropna() if col in sub_df else pd.Series(dtype=float)
+            if len(s):
+                range_rows.append(
+                    {
+                        "channel": ch,
+                        "metric": metric,
+                        "count": len(s),
+                        "min": f"{s.min():,.0f}",
+                        "median": f"{s.median():,.0f}",
+                        "max": f"{s.max():,.0f}",
+                    }
+                )
+
     # Sales lost on missing channel-days: missing days × the channel's mean daily sales (01b §2)
     channel_mean = clean.groupby("channel")["sales_by_channel"].mean()
     raw_total = float(clean["sales_by_channel"].sum())
@@ -344,6 +368,20 @@ def build_data_quality_section(
                     TableColumn(key="total_cost", label="Total Spend", align="right"),
                 ],
                 rows=ch_rows,
+            ),
+            TableBlock(
+                id="quality_metric_ranges",
+                title="Metric ranges per channel (raw rows)",
+                subtitle="Non-missing count, minimum, median and maximum of each metric; a channel without a metric has no row for it.",
+                columns=[
+                    TableColumn(key="channel", label="Channel"),
+                    TableColumn(key="metric", label="Metric"),
+                    TableColumn(key="count", label="Count", align="right"),
+                    TableColumn(key="min", label="Min", align="right"),
+                    TableColumn(key="median", label="Median", align="right"),
+                    TableColumn(key="max", label="Max", align="right"),
+                ],
+                rows=range_rows,
             ),
             TableBlock(
                 id="quality_anomaly_inventory",

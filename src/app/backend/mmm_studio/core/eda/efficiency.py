@@ -39,6 +39,8 @@ def build_explore_efficiency_section(
     cpc_traces = []
     cpm_traces = []
     ctr_traces = []
+    roas_traces = []
+    monthly_kpi: dict[str, dict[str, pd.Series]] = {"CPC (€)": {}, "CPM (€)": {}, "CTR": {}, "Attributed ROAS": {}}
     for ch in digital_channels:
         slug = slug_map[ch]
         c_m = monthly[f"cost_{slug}"]
@@ -55,15 +57,34 @@ def build_explore_efficiency_section(
         if (im_m > 0).any() and (cl_m > 0).any():
             ctr = np.where(im_m > 0, 100.0 * cl_m / im_m, np.nan)
             ctr_traces.append({"type": "scatter", "mode": "lines", "name": ch, "x": m_labels, "y": ctr, "line": {"color": color, "width": 2}})
+        sa_m = monthly[f"sales_{slug}"]
+        roas = np.where(c_m > 0, sa_m / c_m, np.nan)
+        roas_traces.append({"type": "scatter", "mode": "lines", "name": ch, "x": m_labels, "y": roas, "line": {"color": color, "width": 2}})
+        # Monthly KPI ratios; the notebook's quarterly table is the quarterly mean of these (01b §8.1)
+        monthly_kpi["CPC (€)"][ch] = (c_m / cl_m.where(cl_m > 0)).astype(float)
+        monthly_kpi["CPM (€)"][ch] = (c_m / im_m.where(im_m > 0) * 1000.0).astype(float)
+        monthly_kpi["CTR"][ch] = (cl_m / im_m.where(im_m > 0)).astype(float)
+        monthly_kpi["Attributed ROAS"][ch] = (sa_m / c_m.where(c_m > 0)).astype(float)
+
+    quarter_rows: list[dict[str, str]] = []
+    quarters: list[str] = []
+    for kpi_name, by_ch in monthly_kpi.items():
+        for ch, s in by_ch.items():
+            q = s.groupby(s.index.to_period("Q")).mean()
+            quarters = quarters or [str(p) for p in q.index]
+            if q.notna().any():
+                fmt = (lambda v: f"{100 * v:.2f}%") if kpi_name == "CTR" else (lambda v: f"{v:.3f}")
+                quarter_rows.append({"series": f"{kpi_name} · {ch}", **{str(p): fmt(v) if pd.notna(v) else "–" for p, v in q.items()}})
 
     fig_eff = small_multiples_figure(
         panels=[
             {"title": "Monthly CPC (€ / Click)", "xaxis_title": "Month", "yaxis_title": "CPC (€)", "traces": cpc_traces},
             {"title": "Monthly CPM (€ / 1,000 Impressions)", "xaxis_title": "Month", "yaxis_title": "CPM (€)", "traces": cpm_traces},
             {"title": "Monthly CTR (Clicks / Impressions %)", "xaxis_title": "Month", "yaxis_title": "CTR (%)", "traces": ctr_traces},
+            {"title": "Monthly attributed ROAS (attributed sales / cost)", "xaxis_title": "Month", "yaxis_title": "ROAS", "traces": roas_traces},
         ],
-        ncols=3,
-        height_per_row=320,
+        ncols=2,
+        height_per_row=300,
         title="Monthly Funnel Efficiency KPIs Across Digital Paid Channels (CPC, CPM, CTR)",
     )
 
@@ -214,9 +235,18 @@ def build_explore_efficiency_section(
             ),
             ChartBlock(
                 id="efficiency_kpis",
-                title="Monthly Unit-Cost & Funnel Efficiency KPIs (CPC, CPM, CTR)",
-                subtitle="Evolution of cost per click, cost per mille, and click-through rate across the 6 digital channels.",
+                title="Monthly Unit-Cost & Funnel Efficiency KPIs (CPC, CPM, CTR, ROAS)",
+                subtitle=f"Cost per click, cost per mille, click-through rate and attributed ROAS across the {len(digital_channels)} digital channels.",
                 figure=fig_eff,
+            ),
+            TableBlock(
+                id="efficiency_quarterly",
+                title="Quarterly mean of the monthly KPI",
+                columns=[
+                    TableColumn(key="series", label="KPI · channel"),
+                    *[TableColumn(key=q, label=q, align="right") for q in quarters],
+                ],
+                rows=quarter_rows,
             ),
             ChartBlock(
                 id="funnel_correlations",

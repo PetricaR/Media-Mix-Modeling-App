@@ -41,6 +41,7 @@ def build_explore_spend_section(
     cost_ratio = {yr: 100.0 * float(w["total_cost"].sum()) / max(float(w["total_sales"].sum()), 1.0) for yr, w in ((y_prev, w23), (y_last, w24))}
 
     spend_rows = []
+    year_rows = []
     ch_ordered = []
     spend_shares = []
     sales_shares_paid = []
@@ -62,6 +63,20 @@ def build_explore_spend_section(
         s_share = 100.0 * s_sum / max(paid_sales_sum, 1.0)
         roas = s_sum / max(c_sum, 1.0)
 
+        s23 = float(w23[s_col].sum()) if len(w23) else 0.0
+        s24 = float(w24[s_col].sum()) if len(w24) else 0.0
+        active = c_ser[c_ser > 0]
+        year_rows.append(
+            {
+                "channel": ch,
+                "spend_prev": f"€{c23:,.0f}",
+                "spend_last": f"€{c24:,.0f}",
+                "yoy_spend": fmt_pct(yoy_c, signed=True),
+                "yoy_sales": fmt_pct(100.0 * (s24 / s23 - 1.0), signed=True) if s23 > 0 else "–",
+                "cv_active": f"{float(active.std() / active.mean()):.2f}" if len(active) > 1 else "–",
+                "_c_sum": c_sum,
+            }
+        )
         spend_rows.append(
             {
                 "channel": ch,
@@ -267,7 +282,7 @@ def build_explore_spend_section(
             KpisBlock(
                 items=[
                     KpiItem(label="Total paid spend", value=fmt_eur(total_cost_sum), delta=f"Mean {fmt_eur(float(wide_df['total_cost'].mean()))}/day over {len(wide_df)} days"),
-                    KpiItem(label=f"{y_last} vs {y_prev} spend", value=fmt_pct(yoy_spend_pct, signed=True), delta=f"vs {fmt_pct(yoy_sales_pct, signed=True)} sales growth", status="success" if yoy_spend_pct < yoy_sales_pct else "warn"),
+                    KpiItem(label=f"{y_last} vs {y_prev} spend", value=fmt_pct(yoy_spend_pct, signed=True), delta=f"€{float(w23['total_cost'].sum()):,.0f} → €{float(w24['total_cost'].sum()):,.0f}; sales {fmt_pct(yoy_sales_pct, signed=True)}", status="success" if yoy_spend_pct < yoy_sales_pct else "warn"),
                     KpiItem(label=f"{cat or 'Print'} share of spend", value=fmt_pct(cat_meta.get('share', 0.0)), delta=f"{n_sends} send-outs, Ø {fmt_eur(cat_mean_send)} each"),
                     KpiItem(label="Marketing cost ratio", value=f"{cost_ratio[y_last]:.1f}%", delta=f"spend / sales ({cost_ratio[y_prev]:.1f}% in {y_prev})"),
                 ]
@@ -326,6 +341,39 @@ def build_explore_spend_section(
                     TableColumn(key="yoy_spend", label="YoY Spend", align="right"),
                 ],
                 rows=spend_rows,
+            ),
+            TableBlock(
+                id="spend_by_year",
+                title=f"Spend per channel: {y_prev} vs {y_last}",
+                subtitle="Spend and attributed-sales growth by channel; CV is the coefficient of variation of spend on active days.",
+                columns=[
+                    TableColumn(key="channel", label="Paid Channel"),
+                    TableColumn(key="spend_prev", label=f"Spend {y_prev}", align="right"),
+                    TableColumn(key="spend_last", label=f"Spend {y_last}", align="right"),
+                    TableColumn(key="yoy_spend", label="Spend YoY", align="right"),
+                    TableColumn(key="yoy_sales", label="Attributed sales YoY", align="right"),
+                    TableColumn(key="cv_active", label="CV (active days)", align="right"),
+                ],
+                rows=sorted(year_rows, key=lambda r: -r.pop("_c_sum")),
+            ),
+            TableBlock(
+                id="spend_weekday_eur",
+                title="Mean daily spend by weekday (€)",
+                subtitle="Digital channels only; the print channel's spend lands on its send-out day.",
+                columns=[
+                    TableColumn(key="weekday", label="Weekday"),
+                    *[TableColumn(key=slug_map[ch], label=ch, align="right") for ch in config.digital_paid_channels],
+                ],
+                rows=[
+                    {
+                        "weekday": day,
+                        **{
+                            slug_map[ch]: f"€{float(wide_df.loc[wide_df.index.dayofweek == d, f'cost_{slug_map[ch]}'].mean()):,.0f}"
+                            for ch in config.digital_paid_channels
+                        },
+                    }
+                    for d, day in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+                ],
             ),
         ],
     )
