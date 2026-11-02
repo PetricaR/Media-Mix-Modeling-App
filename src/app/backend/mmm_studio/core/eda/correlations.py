@@ -153,12 +153,14 @@ def build_explore_correlations_section(
     # 5. Cross-correlation lag profile k = 0..21 days: corr(cost_{c, t}, total_sales_{t+k})
     lags = list(range(0, 22))
     lag_series = []
-    catalog_lag3_r = 0.0
+    cat = config.print_event_channels[0] if config.print_event_channels else None
+    cat_peak_k, cat_peak_r = 0, float("nan")
     for ch in paid_channels:
         c_ser = wide_df[f"cost_{slug_map[ch]}"]
         r_lags = [round(float(c_ser.corr(y.shift(-k))), 3) for k in lags]
-        if ch == "Catalog" and len(r_lags) > 3:
-            catalog_lag3_r = round(r_lags[3], 2)
+        if ch == cat:
+            cat_peak_k = int(np.nanargmax(r_lags))
+            cat_peak_r = r_lags[cat_peak_k]
         lag_series.append(
             {
                 "name": ch,
@@ -175,9 +177,43 @@ def build_explore_correlations_section(
         xaxis_title="Forward Lag k (Days After Spend)",
         yaxis_title="Pearson r with Total Sales(t + k)",
         hlines=[{"y": 0, "color": SLATE, "dash": "solid"}],
-        vlines=[{"x": 3, "color": COPPER, "dash": "dot", "label": f"Catalog Peak (+3d, r={catalog_lag3_r:.2f})"}],
+        vlines=[{"x": cat_peak_k, "color": COPPER, "dash": "dot", "label": f"{cat} peak (+{cat_peak_k}d, r={cat_peak_r:.2f})"}] if cat else None,
         height=400,
     )
+
+    # 6. Attributed sales of all channels, ordered by hierarchical clustering (lower triangle), and spend × channel sales
+    from scipy.cluster.hierarchy import leaves_list, linkage
+
+    sales_df = pd.DataFrame({ch: wide_df[f"sales_{slug_map[ch]}"] for ch in all_channels})
+    sales_corr = sales_df.corr()
+    n_ch = len(sales_corr)
+    if n_ch > 2:
+        sales_order = list(sales_corr.index[leaves_list(linkage(1 - sales_corr.to_numpy()[np.triu_indices(n_ch, 1)], "average"))])
+        sales_corr = sales_corr.loc[sales_order, sales_order]
+    sales_vals = sales_corr.to_numpy()
+    off_mask = ~np.eye(n_ch, dtype=bool)
+    sales_mean_r = float(sales_vals[off_mask].mean()) if n_ch > 1 else float("nan")
+    pair_i, pair_j = np.unravel_index(np.nanargmax(np.where(off_mask, sales_vals, np.nan)), sales_vals.shape)
+    lower = sales_vals.copy()
+    lower[np.triu_indices(n_ch, 1)] = np.nan
+    fig_sales_matrix = heatmap_figure(
+        x=list(sales_corr.columns), y=list(sales_corr.index), z=lower, colorscale="RdBu_r", zmin=-1, zmax=1, height=560
+    )
+    fig_sales_matrix["layout"]["yaxis"] = {**fig_sales_matrix["layout"].get("yaxis", {}), "autorange": "reversed"}
+
+    cross = pd.DataFrame(
+        {t_ch: [float(wide_df[f"cost_{slug_map[c]}"].corr(sales_df[t_ch])) for c in paid_channels] for t_ch in sales_corr.columns},
+        index=[f"{c} cost" for c in paid_channels],
+    )
+    if cat:
+        cat_shifted = wide_df[f"cost_{slug_map[cat]}"].shift(cat_peak_k)
+        cross.loc[f"{cat} cost (lag {cat_peak_k})"] = [float(cat_shifted.corr(sales_df[t_ch])) for t_ch in sales_corr.columns]
+    fig_cross = heatmap_figure(
+        x=list(cross.columns), y=list(cross.index), z=cross.to_numpy(), colorscale="RdBu_r", zmin=-1, zmax=1, height=420
+    )
+    fig_cross["layout"]["yaxis"] = {**fig_cross["layout"].get("yaxis", {}), "autorange": "reversed"}
+    spill_vals = [(r, c, cross.loc[r, c]) for r in cross.index for c in cross.columns if not r.startswith(f"{c} cost")]
+    spill_top = max(spill_vals, key=lambda v: v[2]) if spill_vals else None
 
     # Summary table
     table_rows = []
@@ -205,7 +241,11 @@ def build_explore_correlations_section(
 
     top2 = sorted(corr_cost_pearson, key=corr_cost_pearson.get, reverse=True)[:2]
     vif_sorted = sorted(vif_digital, key=vif_digital.get, reverse=True)
-    cat = config.print_event_channels[0] if config.print_event_channels else None
+    send_day_text = ""
+    if cat and "catalog_sendout" in wide_df and int(wide_df["catalog_sendout"].sum()):
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        send_d = int(pd.Series(wide_df.index[wide_df["catalog_sendout"] == 1].dayofweek).mode().iloc[0])
+        send_day_text = f" (a {day_names[send_d]} send-out hits the following {day_names[(send_d + cat_peak_k) % 7]})"
     cat_r0 = corr_cost_pearson.get(cat, float("nan")) if cat else float("nan")
     cat_lags = [float(wide_df[f"cost_{slug_map[cat]}"].corr(y.shift(-k))) for k in lags] if cat else []
     cat_best = int(np.nanargmax(cat_lags)) if cat_lags else 0
@@ -244,14 +284,14 @@ def build_explore_correlations_section(
                 title=f"Same-day correlation says the {cat or 'catalog'} does not matter — that is wrong",
                 body=(
                     f"The {cat or 'catalog'} cost is booked on the send-out day while its effect comes days later: same-day "
-                    f"r = **{cat_r0:+.2f}**, but r = **{cat_best_r:+.2f}** at **+{cat_best} days** (a Thursday send-out hits the "
-                    "following Sunday). A standard lag-0 adstock is the wrong shape; shift the spend to its in-home date. "
+                    f"r = **{cat_r0:+.2f}**, but r = **{cat_best_r:+.2f}** at **+{cat_best} days**{send_day_text}. "
+                    "A standard lag-0 adstock is the wrong shape; shift the spend to its in-home date. "
                     f"Meanwhile the two highest same-day correlations ({', '.join(top2)}) belong to the channels whose cost is "
                     "mechanically tied to demand (commission and cost-per-click)."
                 ),
             ),
             ChartBlock(
-                id="corr_cost_vs_channel_sales",
+                id="corr_cost_and_sales_vs_total",
                 title="Same-Day Correlation with Total Sales: Channel Spend vs Channel Sales",
                 subtitle="Toggle between Pearson (linear) and Spearman (rank) correlation.",
                 figure=fig_cost_pearson,
@@ -274,6 +314,26 @@ def build_explore_correlations_section(
             ),
             ChartBlock(
                 id="corr_channel_sales",
+                title=(
+                    f"Attributed sales move together: mean r = {sales_mean_r:.2f} across channel pairs, up to "
+                    f"{sales_vals[pair_i, pair_j]:.2f} ({sales_corr.index[pair_i]} × {sales_corr.columns[pair_j]})"
+                ),
+                subtitle="Pearson r of daily attributed sales, ordered by hierarchical clustering: one demand signal, many channels.",
+                figure=fig_sales_matrix,
+            ),
+            ChartBlock(
+                id="corr_cost_vs_other_channel_sales",
+                title="Spend in one channel correlates with sales credited to others — spill-over and shared demand",
+                subtitle=(
+                    f"Pearson r of each channel's daily cost with every channel's attributed sales; strongest cross-channel link: "
+                    f"{spill_top[0]} × {spill_top[1]} sales (r = {spill_top[2]:.2f})."
+                    if spill_top
+                    else "Pearson r of each channel's daily cost with every channel's attributed sales."
+                ),
+                figure=fig_cross,
+            ),
+            ChartBlock(
+                id="corr_channel_vs_rest",
                 title="Channel Sales Correlation with Total Sales vs Rest-of-Business",
                 subtitle="Measuring how strongly each channel's revenue co-moves with the other 11 channels combined.",
                 figure=fig_ch_sales_pearson,

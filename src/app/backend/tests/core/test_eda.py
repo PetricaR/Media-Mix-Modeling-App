@@ -122,3 +122,55 @@ def test_eda_numbers_match_notebooks_01_and_01b(
     robust = correlation_robustness(panel, cfg)
     assert robust.loc["SEA", "weekly"] == pytest.approx(0.83, abs=0.005)
     assert robust.loc["Display", "deseasonalised"] == pytest.approx(0.39, abs=0.005)
+
+
+def _table(section, block_id: str) -> list[dict[str, Any]]:
+    return next(b for b in section.blocks if getattr(b, "id", None) == block_id).rows
+
+
+def test_eda_tables_match_notebook_01b_printouts(
+    profiled_case_study: tuple[pd.DataFrame, DataProfile],
+    wide_model: pd.DataFrame,
+) -> None:
+    """Tables the notebooks print (01b §2, §5.1, §9 and 01 §4) are reproduced cell for cell."""
+    df_raw, profile = profiled_case_study
+    panel = add_calendar_and_adstock_features(wide_model, config=profile.role_config)
+
+    lost = {r["channel"]: r for r in _table(build_data_quality_section(df_raw, panel, profile), "quality_missing_sales_lost")}
+    assert (lost["TV"]["lost"], lost["TV"]["share"]) == ("€181,048", "0.031%")
+    assert (lost["Catalog"]["lost"], lost["Owned"]["lost"]) == ("€438,959", "€3,212")
+
+    by_year = {r["stat"]: r for r in _table(build_explore_target_section(panel), "target_profile_by_year")}
+    assert (by_year["Total"]["y2023"], by_year["Total"]["y2024"]) == ("€260,785,035", "€314,803,501")
+    assert (by_year["Skewness"]["y2023"], by_year["Excess kurtosis"]["all"]) == ("2.51", "8.61")
+
+    s_cat = build_explore_catalog_section(panel, profile.role_config)
+    per_year = {r["year"]: r for r in _table(s_cat, "catalog_by_year")}
+    assert (per_year[2023]["cost_per_copy"], per_year[2024]["cost_per_copy"]) == ("€0.722", "€0.769")
+    evidence = next(b for b in s_cat.blocks if getattr(b, "title", "") == "Sales peaks follow the catalog").body
+    assert "**20 of the 25**" in evidence and "€473.1k/day" in evidence and "€980.4k/day" in evidence
+
+
+def test_eda_figures_match_notebook_01b_headlines(
+    profiled_case_study: tuple[pd.DataFrame, DataProfile],
+    wide_model: pd.DataFrame,
+) -> None:
+    """Figures saved to reports/figures/eda carry the same computed facts as the notebook headlines."""
+    _, profile = profiled_case_study
+    cfg = profile.role_config
+    panel = add_calendar_and_adstock_features(wide_model, config=cfg)
+
+    def block(section, block_id: str):
+        return next(b for b in section.blocks if getattr(b, "id", None) == block_id)
+
+    gap = block(build_explore_catalog_section(panel, cfg), "catalog_natural_experiment")
+    assert gap.title == "Without a catalog, September 2023 fell to €473.1k/day — the lowest month of the period"
+
+    s_corr = build_explore_correlations_section(panel, cfg)
+    assert "mean r = 0.49" in block(s_corr, "corr_channel_sales").title
+    cross = block(s_corr, "corr_cost_vs_other_channel_sales").figure["data"][0]
+    row = cross["z"][cross["y"].index("Catalog cost (lag 3)")]
+    assert round(row[cross["x"].index("Catalog")], 2) == 0.55
+
+    weekday = block(build_explore_spend_section(panel, cfg), "spend_weekday_index").subtitle
+    assert "Social Media spends 1.7× its average on Mondays" in weekday and "Affiliate spends 1.6× its average on Sundays" in weekday

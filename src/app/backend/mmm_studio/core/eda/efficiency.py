@@ -71,6 +71,8 @@ def build_explore_efficiency_section(
     funnel_pairs = ["Cost ↔ Impr", "Cost ↔ Clicks", "Impr ↔ Clicks", "Cost ↔ Ch.Sales", "Clicks ↔ Ch.Sales"]
     funnel_z = []
     kpi_rows = []
+    ctr_over_100: list[str] = []
+    no_impressions: list[str] = []
 
     for ch in paid_channels:
         slug = slug_map[ch]
@@ -91,6 +93,10 @@ def build_explore_efficiency_section(
         im_sum = float(im.sum())
         cl_sum = float(cl.sum())
         sa_sum = float(sa.sum())
+        if im_sum <= 0:
+            no_impressions.append(ch)
+        elif cl_sum > im_sum:
+            ctr_over_100.append(ch)
         kpi_rows.append(
             {
                 "channel": ch,
@@ -268,7 +274,17 @@ def build_explore_efficiency_section(
                     TableColumn(key="corr_cost_sales", label="r(Cost, Ch.Sales)", align="right"),
                 ],
                 rows=kpi_rows,
-                caption="Affiliate impressions are tiny (CTR > 100 %), so its CPM and CTR are not meaningful; PSM has no impressions.",
+                caption=" ".join(
+                    part
+                    for part in (
+                        f"{', '.join(ctr_over_100)}: more clicks than impressions (CTR > 100 %), so CPM and CTR are not meaningful."
+                        if ctr_over_100
+                        else "",
+                        f"{', '.join(no_impressions)}: no impressions recorded." if no_impressions else "",
+                    )
+                    if part
+                )
+                or None,
             ),
         ],
     )

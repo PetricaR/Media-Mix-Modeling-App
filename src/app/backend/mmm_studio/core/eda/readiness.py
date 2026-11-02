@@ -156,7 +156,12 @@ def build_explore_readiness_section(wide_df: pd.DataFrame, config: DataRoleConfi
         blocks=[
             KpisBlock(
                 items=[
-                    KpiItem(label="Target", value="≤ 15%", delta="MAE / mean daily sales", status="success"),
+                    KpiItem(
+                        label="Target",
+                        value="≤ 15%",
+                        delta=f"MAE / mean daily sales: an error budget of €{0.15 * float(y.mean()):,.0f}/day",
+                        status="success",
+                    ),
                     *[
                         KpiItem(
                             label=name.replace("Naive: ", "Naive · "),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 import uuid
 from typing import Any
 
@@ -19,7 +20,7 @@ from mmm_studio.core.meridian.forecast import (
     validate_plan,
 )
 from mmm_studio.core.meridian.spec import MeridianSpecConfig
-from mmm_studio.core.schema import extract_role_config
+from mmm_studio.core.schema import extract_role_config, slugify_channel
 from mmm_studio.db.models import ForecastRun, Run, ScenarioRun
 from mmm_studio.jobs.app import count_active_queue_jobs, defer_task, get_queue_position, sweep_stale_runs
 from mmm_studio.jobs.tasks import default_forecast_keys, run_forecast_job, run_scenario_job
@@ -34,6 +35,38 @@ class ScenarioCreateRequest(BaseModel):
     name: str = "What-If Scenario"
     multipliers: dict[str, float] = Field(default_factory=dict)
     horizon_days: int = Field(default=42, ge=1, le=90)
+
+
+def _normalise_multipliers(run: Run | None, multipliers: dict[str, float]) -> dict[str, float]:
+    """Key scenario multipliers by channel slug; a display name is accepted too.
+
+    An unknown channel or a negative / non-finite multiplier is a 422: silently dropping it would return a
+    "no change" scenario that looks like a real result.
+    """
+    cfg = extract_role_config((run.config if run else None) or {})
+    lookup: dict[str, str] = {}
+    for name, slug in zip(cfg.paid_channels, cfg.paid_slugs, strict=True):
+        lookup[slugify_channel(slug)] = slug
+        lookup[slugify_channel(name)] = slug
+    normalised: dict[str, float] = {}
+    unknown: list[str] = []
+    for key, value in multipliers.items():
+        slug = lookup.get(slugify_channel(str(key)))
+        if slug is None:
+            unknown.append(str(key))
+            continue
+        if not math.isfinite(value) or value < 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Multiplier for {key!r} must be a finite number ≥ 0 (got {value}).",
+            )
+        normalised[slug] = float(value)
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown channel(s) {', '.join(sorted(unknown))}; use one of: {', '.join(sorted(set(lookup.values())))}.",
+        )
+    return normalised
 
 
 def _paid_channels_for_run(run: Run | None, wide_df: pd.DataFrame) -> list[str]:
@@ -295,6 +328,7 @@ def create_scenario(
             detail=f"Forecast {forecast_id} is {fc.status}; scenarios can run once it has succeeded.",
         )
     run = db.get(Run, fc.run_id)
+    multipliers = _normalise_multipliers(run, payload.multipliers)
 
     scenario_id = f"sc_{uuid.uuid4().hex[:10]}"
     sc = ScenarioRun(
@@ -303,7 +337,7 @@ def create_scenario(
         run_id=fc.run_id,
         name=payload.name.strip() or "What-If Scenario",
         inputs={
-            "multipliers": payload.multipliers,
+            "multipliers": multipliers,
             "horizon_days": payload.horizon_days,
             # Lets the interactive worker's cache tell a re-run's model apart from the previous one
             "cache_version": run.updated_at.isoformat() if run and run.updated_at else "",

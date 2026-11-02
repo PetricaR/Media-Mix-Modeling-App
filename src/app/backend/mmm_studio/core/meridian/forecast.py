@@ -519,6 +519,17 @@ def build_forecast_scenarios_section(
         for _, r in scenarios_df.iterrows()
     ]
 
+    scen_notes = []
+    skip = scenarios_df[(scenarios_df["delta_spend"] < 0) & scenarios_df["scenario"].str.contains("catalog", case=False)]
+    if len(skip):
+        r = skip.iloc[0]
+        scen_notes.append(
+            f"Skipping a catalog saves {fmt_eur(-float(r['delta_spend']))} and loses {fmt_eur(-float(r['delta_sales']))} in sales "
+            f"(ratio {float(r['delta_sales']) / float(r['delta_spend']):.2f})."
+        )
+    if scenarios_df["scenario"].str.contains("SEA").any():
+        scen_notes.append("Moving budget to SEA rides on SEA's upward-biased ROI and should be tested before acting on it.")
+
     tot_fc_sales = float(forecast_daily["forecast"].sum())
     tot_fc_spend = float(forecast_daily["planned_spend"].sum())
     n_sends = int((plan_df["catalog"] > 0).sum()) if "catalog" in plan_df.columns else 0
@@ -539,7 +550,7 @@ def build_forecast_scenarios_section(
                 KpiItem(
                     label=f"Back-test {backtest_label} MAE / mean",
                     value=f"{100.0 * bt_m['MAE_over_mean']:.1f}%",
-                    delta=f"R² {bt_m['R2']:.3f} · bias {fmt_eur_signed(bt_m['bias'])}/day",
+                    delta=f"R² {bt_m['R2']:.3f} · RMSE {fmt_eur(bt_m['RMSE'])} · bias {fmt_eur_signed(bt_m['bias'])}/day",
                     status="success" if bt_m["MAE_over_mean"] <= 0.15 else "warn",
                 ),
                 KpiItem(
@@ -618,10 +629,7 @@ def build_forecast_scenarios_section(
                 TableColumn(key="marginal_roas", label="Δ sales / Δ spend", align="right"),
             ],
             rows=scen_rows,
-            caption=(
-                "Skipping a catalog saves its cost but loses roughly the same in sales (catalog ROI ≈ 1). Moving Display "
-                "budget to SEA rides on SEA's upward-biased ROI and should be tested before acting on it."
-            ),
+            caption=" ".join(scen_notes) or None,
         ),
         TableBlock(
             id="forecast_weekly_plan_table",

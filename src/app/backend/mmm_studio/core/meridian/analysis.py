@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from mmm_studio.charts.builders import bar_figure, line_figure, small_multiples_figure
+from mmm_studio.charts.builders import _hex_to_rgba, bar_figure, line_figure, small_multiples_figure
 from mmm_studio.charts.theme import (
     BASELINE_FILL,
     COPPER,
@@ -107,6 +107,16 @@ def extract_adstock_curves(mmm: Any) -> pd.DataFrame:
     ad = analyzer.Analyzer(mmm).adstock_decay()
     ad = ad[(ad.distribution == "posterior") & ad.is_int_time_unit].copy()
     return ad[["channel", "time_units", "mean", "ci_lo", "ci_hi"]].reset_index(drop=True)
+
+
+def _band_traces(lo: Any, hi: Any, color: str, decimals: int) -> list[dict[str, Any]]:
+    """Two traces that shade a 90 % credible band (upper edge, then the lower edge filled up to it)."""
+    fill = _hex_to_rgba(color, 0.18)
+    edge = {"color": "rgba(0,0,0,0)", "width": 0}
+    return [
+        {"name": "90% CI upper", "y": [round(float(v), decimals) for v in hi], "line": edge, "hoverinfo": "skip", "showlegend": False},
+        {"name": "90% CI", "y": [round(float(v), decimals) for v in lo], "line": edge, "fill": "tonexty", "fillcolor": fill, "hoverinfo": "skip"},
+    ]
 
 
 def extract_response_curves(
@@ -395,6 +405,9 @@ def build_meridian_model_section(
     acc_rows = [_acc_row(f"Train ({train_span})", m_train), _acc_row(f"Hold-out {q4_label} ({test_span}, forecast)", m_test)]
     if forward_metrics:
         acc_rows.append(_acc_row(f"Forward hold-out {forward_label} (trained only on earlier data)", forward_metrics))
+    # Meridian's predictive_accuracy "All Data" row (notebook 03): every day, training and hold-out together
+    m_all = regression_metrics(fit_df["actual"].to_numpy(), fit_df["expected"].to_numpy())
+    acc_rows.append(_acc_row(f"All days ({len(fit_df)} days, training + hold-out)", m_all))
 
     rhat_rows = [
         {
@@ -679,11 +692,12 @@ def build_drivers_roi_section(
                     "title": f"{label}",
                     "x": [int(t) for t in sub["time_units"]],
                     "traces": [
+                        *_band_traces(sub["ci_lo"], sub["ci_hi"], channel_color(label), 3),
                         {
                             "name": "Remaining Effect",
                             "y": [round(float(v), 3) for v in sub["mean"]],
                             "color": channel_color(label),
-                        }
+                        },
                     ],
                 }
             )
@@ -691,7 +705,7 @@ def build_drivers_roi_section(
         panels=ad_panels,
         ncols=3,
         title="Posterior Adstock Carry-Over Curves by Channel (Days After Spend / In-Home Date)",
-        subtitle="Share of initial media impulse remaining n days after exposure",
+        subtitle="Share of initial media impulse remaining n days after exposure (posterior mean, 90 % CI)",
         height_per_row=240,
     )
 
@@ -706,11 +720,26 @@ def build_drivers_roi_section(
                     "title": f"{label} (0–200% Spend)",
                     "x": [round(float(s) / 1e6, 2) for s in rc_df["spend"]],
                     "traces": [
+                        *_band_traces(rc_df["ci_lo"] / 1e6, rc_df["ci_hi"] / 1e6, channel_color(label), 2),
                         {
                             "name": "Incremental Sales (€M)",
                             "y": [round(float(m) / 1e6, 2) for m in rc_df["mean"]],
                             "color": channel_color(label),
-                        }
+                        },
+                        *(
+                            [
+                                {
+                                    "name": "Actual spend",
+                                    "x": [round(float(rc_df.loc[cur, "spend"]) / 1e6, 2)],
+                                    "y": [round(float(rc_df.loc[cur, "mean"]) / 1e6, 2)],
+                                    "mode": "markers",
+                                    "marker": {"color": channel_color(label), "size": 9, "line": {"color": "#FFFFFF", "width": 2}},
+                                }
+                                for cur in [int((rc_df["multiplier"] - 1.0).abs().idxmin())]
+                            ]
+                            if "multiplier" in rc_df
+                            else []
+                        ),
                     ],
                 }
             )
@@ -718,7 +747,7 @@ def build_drivers_roi_section(
         panels=rc_panels,
         ncols=3,
         title="Hill Saturation Response Curves: Incremental Sales (€M) vs Period Spend (€M, 0–200% of Actual)",
-        subtitle="Catalog remains nearly linear across observed spend, while Display and SEA exhibit diminishing marginal returns",
+        subtitle="Posterior mean incremental sales with a 90 % credible band; the dot marks the actual spend",
         height_per_row=250,
     )
 
@@ -852,13 +881,13 @@ def build_drivers_roi_section(
         ChartBlock(
             id="drivers_adstock_curves",
             title="Carry-over: share of the effect remaining n days after spend",
-            subtitle="Posterior mean by channel (catalog: days after the in-home date).",
+            subtitle="Posterior mean with a 90 % credible band by channel (catalog: days after the in-home date).",
             figure=fig_adstock,
         ),
         ChartBlock(
             id="drivers_response_curves",
             title="Response curves: incremental sales vs total spend (0–200 % of actual)",
-            subtitle="Incremental sales (€M) as a function of the channel's total spend over the period (€M).",
+            subtitle="Incremental sales (€M) vs the channel's total spend over the period (€M), with a 90 % credible band; the dot is the actual spend.",
             figure=fig_rc,
         ),
         ChartBlock(

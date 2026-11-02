@@ -192,13 +192,13 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
           </Alert>
         ) : (
           <>
-            <FormControl size="small" sx={{ minWidth: { xs: "100%", sm: 420 }, mb: 2 }}>
+            <FormControl size="small" sx={{ width: { xs: "100%", sm: 420 }, maxWidth: "100%", mb: 2 }}>
               <InputLabel id="forecast-select-label">Forecast</InputLabel>
               <Select labelId="forecast-select-label" label="Forecast" value={forecastId ?? ""} onChange={(e) => setForecastId(e.target.value as string)}>
                 {forecasts.map((f) => (
                   <MenuItem key={f.id} value={f.id}>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%" }}>
-                      <Box sx={{ flexGrow: 1 }}>{f.name}</Box>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%", minWidth: 0 }}>
+                      <Box sx={{ flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</Box>
                       <Chip size="small" label={f.status} color={f.status === "succeeded" ? "success" : f.status === "failed" ? "error" : "info"} />
                     </Stack>
                   </MenuItem>

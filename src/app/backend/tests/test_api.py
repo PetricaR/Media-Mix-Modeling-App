@@ -197,11 +197,18 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     r_fc = client.get(f"/api/v1/forecasts/{default_fc_id}")
     assert r_fc.json()["result"]["scenario_total_sales"] > 0
 
+    # An unknown channel or a negative multiplier is rejected instead of silently returning "no change"
+    for bad in ({"Teletext": 1.2}, {"sea": -0.5}):
+        r_bad = client.post(f"/api/v1/forecasts/{default_fc_id}/scenarios", json={"multipliers": bad})
+        assert r_bad.status_code == 422, r_bad.text
+
+    # Display names are accepted and stored as slugs
     r_sc = client.post(
         f"/api/v1/forecasts/{default_fc_id}/scenarios",
-        json={"name": "SEA +20%", "multipliers": {"sea": 1.2, "affiliate": 2.0}, "horizon_days": 42},
+        json={"name": "SEA +20%", "multipliers": {"SEA": 1.2, "Affiliate": 2.0}, "horizon_days": 42},
     )
     assert r_sc.status_code == 202
+    assert r_sc.json()["inputs"]["multipliers"] == {"sea": 1.2, "affiliate": 2.0}
     sc_id = r_sc.json()["id"]
 
     run_worker_loop(queue="interactive", burst=True)

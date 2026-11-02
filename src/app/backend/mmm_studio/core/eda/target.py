@@ -238,6 +238,23 @@ def build_explore_target_section(wide_df: pd.DataFrame) -> Section:
         for r in stationarity_table(y)
     ]
 
+    # Daily sales by complete year and over all days (01b §5.1)
+    profile_cols = {f"y{yr}": full.loc[full.index.year == yr, "total_sales"] for yr in years}
+    profile_cols["all"] = y
+    profile_stats = [
+        ("Days", lambda s: f"{len(s):,}"),
+        ("Total", lambda s: f"€{s.sum():,.0f}"),
+        ("Mean", lambda s: f"€{s.mean():,.0f}"),
+        ("Median", lambda s: f"€{s.median():,.0f}"),
+        ("Standard deviation", lambda s: f"€{s.std():,.0f}"),
+        ("Min", lambda s: f"€{s.min():,.0f}"),
+        ("Max", lambda s: f"€{s.max():,.0f}"),
+        ("Coefficient of variation", lambda s: f"{s.std() / s.mean():.2f}"),
+        ("Skewness", lambda s: f"{s.skew():.2f}"),
+        ("Excess kurtosis", lambda s: f"{s.kurt():.2f}"),
+    ]
+    profile_rows = [{"stat": name, **{k: fn(s) for k, s in profile_cols.items()}} for name, fn in profile_stats]
+
     blocks = [
         KpisBlock(
             items=[
@@ -246,6 +263,17 @@ def build_explore_target_section(wide_df: pd.DataFrame) -> Section:
                 KpiItem(label=f"{years[-1]} vs {years[-2]} sales" if len(years) >= 2 else "Year-on-year", value=fmt_pct(yoy_pct, signed=True), delta=yoy_txt, status="success"),
                 KpiItem(label="Skewness", value=f"{skew_raw:.2f}", delta=f"Log scale {skew_log:.2f}: a log / multiplicative model is natural"),
             ]
+        ),
+        TableBlock(
+            id="target_profile_by_year",
+            title="Daily total sales by year",
+            subtitle="Complete calendar years and all days in the data.",
+            columns=[
+                TableColumn(key="stat", label="Statistic"),
+                *[TableColumn(key=f"y{yr}", label=str(yr), align="right") for yr in years],
+                TableColumn(key="all", label="All days", align="right"),
+            ],
+            rows=profile_rows,
         ),
         ChartBlock(
             id="target_timeseries",

@@ -17,6 +17,7 @@ from mmm_studio.jobs.app import (
     defer_task,
     ensure_procrastinate_schema,
     get_procrastinate_app,
+    release_stalled_jobs,
     sweep_stale_runs,
 )
 from mmm_studio.jobs.tasks import ensure_stage_rows, run_analysis_job
@@ -133,3 +134,20 @@ def test_worker_executes_analysis_job_and_sweeps_stale_heartbeat(test_env: Path)
         assert stuck_after is not None
         assert stuck_after.status == "failed"
         assert "Worker lost" in (stuck_after.error or "")
+
+
+def test_stalled_job_of_a_dead_worker_releases_its_lock(test_env: Path) -> None:
+    """A Meridian job left in `doing` by a killed worker must not hold `meridian_singleton` forever."""
+    with psycopg.connect(TEST_DB_URL, autocommit=True) as conn:
+        job_id = conn.execute(
+            "WITH w AS (INSERT INTO procrastinate_workers (last_heartbeat) VALUES (now() - interval '1 hour') RETURNING id) "
+            "INSERT INTO procrastinate_jobs (queue_name, task_name, lock, args, status, worker_id) "
+            "SELECT 'meridian', 'mmm_studio.jobs.tasks.run_meridian_job', 'meridian_singleton', '{}', 'doing', id FROM w RETURNING id"
+        ).fetchone()[0]
+
+    assert job_id in release_stalled_jobs()
+
+    with psycopg.connect(TEST_DB_URL) as conn:
+        status = conn.execute("SELECT status FROM procrastinate_jobs WHERE id = %s", (job_id,)).fetchone()[0]
+    assert status == "failed"
+    assert release_stalled_jobs() == []

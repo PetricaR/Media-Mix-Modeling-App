@@ -1,4 +1,4 @@
-"""Catalog deep-dive: 28 send-outs, event study, adstock kernel decay, cross-channel halo, circulation lift, and matched-Thursday experiment (01 & 01b)."""
+"""Catalog deep-dive: send-outs, event study, adstock kernel decay, cross-channel halo, circulation lift, and matched-Thursday experiment (01 & 01b)."""
 
 from __future__ import annotations
 
@@ -6,13 +6,14 @@ import numpy as np
 import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure, line_figure, small_multiples_figure
-from mmm_studio.charts.theme import COPPER, NAVY, SLATE, TEAL, channel_color
+from mmm_studio.charts.theme import BASELINE_FILL, COPPER, NAVY, SLATE, TEAL, TEXT_PRIMARY, channel_color
 from mmm_studio.core.eda.notebook_stats import (
     catalog_decay,
     catalog_event_study,
     catalog_halo_0_6,
     per_sendout_lifts,
 )
+from mmm_studio.core.features import complete_years
 from mmm_studio.core.schema import DataRoleConfig
 from mmm_studio.report.narrative import fmt_eur, fmt_pct
 from mmm_studio.report.sections import (
@@ -101,6 +102,7 @@ def build_explore_catalog_section(
         cat_mean.append(float(np.mean(vals_cat)))
         non_cat_mean.append(float(np.mean(vals_non)))
 
+    peak_tau = max((t for t in taus if t >= 0), key=lambda t: tot_mean[taus.index(t)])
     fig_event_study = line_figure(
         x=taus,
         series=[
@@ -121,7 +123,7 @@ def build_explore_catalog_section(
         yaxis_title="Mean Daily Sales (k€)",
         vlines=[
             {"x": 0, "color": SLATE, "dash": "dash", "label": "Send-out (τ=0)"},
-            {"x": 3, "color": COPPER, "dash": "dot", "label": "Peak Response (τ=+3d)"},
+            {"x": peak_tau, "color": COPPER, "dash": "dot", "label": f"Peak Response (τ=+{peak_tau}d)"},
         ],
         height=390,
     )
@@ -254,6 +256,113 @@ def build_explore_catalog_section(
     send_costs = wide_df.loc[sendout_mask, "cost_catalog"]
     send_impr = wide_df.loc[sendout_mask, "impr_catalog"] if "impr_catalog" in wide_df else pd.Series(dtype=float)
 
+    send_year = sendout_df.assign(cpc=sendout_df["cost_catalog"] / sendout_df["impr_catalog"]).groupby(sendout_df.index.year)
+    year_rows = [
+        {
+            "year": int(yr),
+            "send_outs": len(g),
+            "cost": f"€{g['cost_catalog'].mean():,.0f}",
+            "circulation": f"{g['impr_catalog'].mean():,.0f}",
+            "cost_per_copy": f"€{g['cpc'].mean():.3f}",
+        }
+        for yr, g in send_year
+    ] if "impr_catalog" in sendout_df else []
+
+    year_trend = None
+    if len(year_rows) >= 2:
+        g0, g1 = send_year.get_group(year_rows[0]["year"]), send_year.get_group(year_rows[-1]["year"])
+        c0, c1 = g0["impr_catalog"].mean(), g1["impr_catalog"].mean()
+        p0, p1 = g0["cpc"].mean(), g1["cpc"].mean()
+        year_trend = (
+            f"{year_rows[0]['year']} → {year_rows[-1]['year']}: circulation {100 * (c1 / c0 - 1):+.0f}%, "
+            f"cost per copy {100 * (p1 / p0 - 1):+.0f}%."
+        )
+
+    y_sales = wide_df["total_sales"]
+    top25 = y_sales.nlargest(25)
+    near_top = sum(any(0 <= (d - s).days <= 7 for s in sendout_df.index) for d in top25.index)
+    # Same calendar month in two complete years, one without and one with a send-out: the largest such contrast
+    full = complete_years(wide_df)
+    month_mean = full["total_sales"].groupby([full.index.year, full.index.month]).mean()
+    month_sends = sendout_df.groupby([sendout_df.index.year, sendout_df.index.month]).size()
+    contrast = None
+    for (y0, m), v0 in month_mean.items():
+        if month_sends.get((y0, m), 0):
+            continue
+        for (y1, m1), v1 in month_mean.items():
+            if m1 == m and y1 != y0 and month_sends.get((y1, m1), 0) and (contrast is None or v1 / v0 > contrast[4] / contrast[2]):
+                contrast = (m, y0, v0, y1, v1, int(month_sends[(y1, m1)]))
+    evidence = [f"**{near_top} of the 25** highest-sales days fall within 7 days after a send-out."]
+    if contrast:
+        m, y0, v0, y1, v1, n1 = contrast
+        month_name = pd.Timestamp(year=y0, month=m, day=1).strftime("%B")
+        evidence.append(
+            f"{month_name} {y0} had no send-out and averaged **{fmt_eur(v0)}/day**; {month_name} {y1} had {n1} and averaged "
+            f"**{fmt_eur(v1)}/day** ({v1 / v0:.1f}×)."
+        )
+
+    # Natural experiment (01b §10.4): the month without a send-out against the same month a year later
+    gap_block = None
+    if contrast:
+        m, y0, v0, y1, v1, _ = contrast
+        month_name = pd.Timestamp(year=y0, month=m, day=1).strftime("%B")
+        gap_start = max((d for d in sendout_df.index if d < pd.Timestamp(year=y0, month=m, day=1)), default=None)
+        gap_end = min((d for d in sendout_df.index if d > pd.Timestamp(year=y0, month=m, day=1) + pd.offsets.MonthEnd(0)), default=None)
+        panels, ymax = [], 0.0
+        for yr in (y0, y1):
+            m_start = pd.Timestamp(year=yr, month=m, day=1)
+            w_start, w_end = m_start - pd.offsets.MonthBegin(1), m_start + pd.offsets.MonthEnd(2)
+            w = y_sales.loc[w_start:w_end]
+            ymax = max(ymax, float(w.max()))
+            sends = [d for d in sendout_df.index if w_start <= d <= w_end]
+            m_mean = float(y_sales.loc[m_start : m_start + pd.offsets.MonthEnd(0)].mean())
+            panels.append(
+                {
+                    "title": f"{yr}: {w_start.day} {w_start:%b} – {w_end.day} {w_end:%b} · {month_name} mean {fmt_eur(m_mean)}/day",
+                    "traces": [
+                        {"name": "Total sales", "x": [d.strftime("%Y-%m-%d") for d in w.index], "y": w.round(0).tolist(), "color": TEAL},
+                        {
+                            "name": f"{month_name} mean",
+                            "x": [m_start.strftime("%Y-%m-%d"), (m_start + pd.offsets.MonthEnd(0)).strftime("%Y-%m-%d")],
+                            "y": [round(m_mean), round(m_mean)],
+                            "line": {"color": TEXT_PRIMARY, "width": 2.5},
+                        },
+                        {
+                            "name": "Catalog send-out",
+                            "x": [d.strftime("%Y-%m-%d") for d in sends],
+                            "y": [0] * len(sends),
+                            "mode": "markers",
+                            "marker": {"symbol": "line-ns-open", "size": 14, "color": COPPER, "line": {"width": 2.5, "color": COPPER}},
+                        },
+                    ],
+                }
+            )
+        fig_gap = small_multiples_figure(panels=panels, ncols=1, height_per_row=260)
+        for axis in ("yaxis", "yaxis2"):
+            fig_gap["layout"][axis]["range"] = [0, ymax * 1.08]
+        if gap_start is not None and gap_end is not None:
+            gap_days = (gap_end - gap_start).days
+            fig_gap["layout"]["shapes"] = [
+                {
+                    "type": "rect", "xref": "x", "yref": "y domain", "x0": gap_start.strftime("%Y-%m-%d"),
+                    "x1": gap_end.strftime("%Y-%m-%d"), "y0": 0, "y1": 1, "fillcolor": BASELINE_FILL, "opacity": 0.5,
+                    "line": {"width": 0}, "layer": "below",
+                }
+            ]
+            fig_gap["layout"]["annotations"].append(
+                {
+                    "x": (gap_start + (gap_end - gap_start) / 2).strftime("%Y-%m-%d"), "y": 0.92, "xref": "x", "yref": "y domain",
+                    "text": f"{gap_days} days without a catalog", "showarrow": False, "font": {"size": 11, "color": SLATE},
+                }
+            )
+        lowest = v0 <= float(month_mean.min()) + 1e-6
+        gap_block = ChartBlock(
+            id="catalog_natural_experiment",
+            title=f"Without a catalog, {month_name} {y0} fell to {fmt_eur(v0)}/day" + (" — the lowest month of the period" if lowest else ""),
+            subtitle=f"Daily total sales around {month_name} in {y0} (no send-out) and {y1}; the dark line marks the {month_name} mean.",
+            figure=fig_gap,
+        )
+
     # 6. Matched-Thursday Natural Experiment (Thursdays WITH vs WITHOUT Catalog send-out)
     thu_indices = np.where((wide_df.index.dayofweek == 3) & (np.arange(len(wide_df)) + 7 <= len(wide_df)))[0]
     with_cat_curves = []
@@ -296,6 +405,7 @@ def build_explore_catalog_section(
                     KpiItem(label="Effect duration", value=f"50% by day {decay['half_day']}" if decay else "—", delta=f"90% by day {decay['p90_day']} (catalog-attributed excess)" if decay else ""),
                 ]
             ),
+            CalloutBlock(tone="info", title="Sales peaks follow the catalog", body=" ".join(evidence)),
             CalloutBlock(
                 tone="success",
                 title=f"The catalog creates a halo: total sales {uplifts_7d['total_sales']:+.1f}% in the week after a send-out",
@@ -308,7 +418,7 @@ def build_explore_catalog_section(
             ),
             ChartBlock(
                 id="catalog_sendouts",
-                title="Timeline of All 28 Catalog Send-Outs: Spend (€M) & Print Circulation (M Copies)",
+                title=f"Timeline of All {n_sendouts} Catalog Send-Outs: Spend (€M) & Print Circulation (M Copies)",
                 subtitle=(
                     f"{n_sendouts} editions ({n_thu} on a Thursday); cost {fmt_eur(float(send_costs.min()))}–{fmt_eur(float(send_costs.max()))} "
                     f"(Ø {fmt_eur(float(send_costs.mean()))}), circulation Ø {float(send_impr.mean()) / 1e6:.2f}M copies."
@@ -328,7 +438,7 @@ def build_explore_catalog_section(
                 title="How long does the catalog keep selling?",
                 subtitle=(
                     f"Catalog-attributed sales reach 50 % of their excess by day {decay['half_day']} and 90 % by day {decay['p90_day']}: "
-                    "a delayed peak and a 2–3-week tail (priors for the adstock)."
+                    "a delayed peak, then a tail that sets the adstock prior."
                     if decay
                     else "Empirical response vs illustrative adstock kernels."
                 ),
@@ -340,8 +450,9 @@ def build_explore_catalog_section(
                 subtitle="Mean daily sales in the 7 days after a send-out vs all other days (notebook 01 definition).",
                 figure=fig_halo,
             ),
+            *([gap_block] if gap_block else []),
             ChartBlock(
-                id="catalog_natural_experiment",
+                id="catalog_matched_thursdays",
                 title="Matched-Thursday Natural Experiment: Thursdays With vs Without Catalog Send-Out",
                 subtitle="Thursdays with a send-out vs Thursdays without: the same weekdays isolate the catalog from the Sunday pattern.",
                 figure=fig_nat_exp,
@@ -371,6 +482,25 @@ def build_explore_catalog_section(
                     TableColumn(key="total_sales_7d", label="7d Total Sales", align="right"),
                 ],
                 rows=ed_rows,
+            ),
+            *(
+                [
+                    TableBlock(
+                        id="catalog_by_year",
+                        title="Average per send-out by year",
+                        subtitle=year_trend,
+                        columns=[
+                            TableColumn(key="year", label="Year"),
+                            TableColumn(key="send_outs", label="Send-outs", align="right"),
+                            TableColumn(key="cost", label="Cost", align="right"),
+                            TableColumn(key="circulation", label="Circulation", align="right"),
+                            TableColumn(key="cost_per_copy", label="Cost per copy", align="right"),
+                        ],
+                        rows=year_rows,
+                    )
+                ]
+                if year_rows
+                else []
             ),
             TableBlock(
                 id="catalog_event_table",

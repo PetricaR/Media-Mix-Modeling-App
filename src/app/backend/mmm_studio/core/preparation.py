@@ -273,7 +273,7 @@ def build_preparation_section(
         if len(scan):
             piv = scan.pivot(index="k", columns="decay", values="corr")
             best = scan.loc[scan["corr"].idxmax()]
-            best_k_text = f"k = {int(best['k'])} ({best['decay']}, α = {best['alpha']:.2f}, r = {best['corr']:.2f})"
+            best_k_text = f"k = {int(best['k'])} ({best['decay']}, α = {best['alpha']:.2f}, r = {best['corr']:.3f})"
             charts.append(
                 ChartBlock(
                     id="prep_shift_scan",
@@ -415,7 +415,7 @@ def build_preparation_section(
         for k, grp in scan.groupby("k"):
             row: dict[str, Any] = {"k": int(k)}
             for _, r in grp.iterrows():
-                row[r["decay"]] = f"{r['corr']:.2f} (α={r['alpha']:.2f})"
+                row[r["decay"]] = f"{r['corr']:.3f} (α={r['alpha']:.2f})"
             scan_rows.append(row)
 
     def _r(a: pd.Series, b: pd.Series) -> float:

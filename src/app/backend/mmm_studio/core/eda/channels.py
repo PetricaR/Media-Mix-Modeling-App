@@ -212,6 +212,19 @@ def build_explore_channels_section(
             }
         )
 
+    # Weekday where the print channel's sales peak, and the usual send-out weekday (01b §6.3)
+    cat_dow_text = "Weekday profile of each channel's attributed sales."
+    cat_ch = config.print_event_channels[0] if config.print_event_channels else None
+    if cat_ch in ch_names_sorted:
+        cat_row = idx_matrix[ch_names_sorted.index(cat_ch)]
+        peak_d = int(np.argmax(cat_row))
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        cat_dow_text = f"{cat_ch} sales peak on {day_names[peak_d]} (index {cat_row[peak_d]:.0f})"
+        if "catalog_sendout" in wide_df and int(wide_df["catalog_sendout"].sum()):
+            send_d = int(pd.Series(wide_df.index[wide_df["catalog_sendout"] == 1].dayofweek).mode().iloc[0])
+            cat_dow_text += f", {(peak_d - send_d) % 7} days after the usual {day_names[send_d]} send-out"
+        cat_dow_text += "."
+
     return Section(
         id="explore_channels",
         title=f"Channel landscape ({len(config.active_channels)} channels)",
@@ -249,9 +262,7 @@ def build_explore_channels_section(
             ChartBlock(
                 id="channel_weekday_index",
                 title="Channel × Weekday Sales Seasonality Index (100 = Channel Mean)",
-                subtitle=f"Catalog sales concentrate on the weekend after the Thursday send-out (Sunday index {idx_matrix[ch_names_sorted.index(config.print_event_channels[0])][6]:.0f})."
-                if config.print_event_channels and config.print_event_channels[0] in ch_names_sorted
-                else "Weekday profile of each channel's attributed sales.",
+                subtitle=cat_dow_text,
                 figure=fig_dow_idx,
             ),
             TableBlock(

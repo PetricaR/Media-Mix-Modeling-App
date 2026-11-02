@@ -164,6 +164,11 @@ def _meridian_rows(meridian_summary: dict[str, Any] | None, windows: dict[str, d
     return out
 
 
+def _fold_label(fold_start: str) -> str:
+    ts = pd.Timestamp(fold_start)
+    return f"{ts.day}\u00a0{ts:%b %Y}"  # no-break space: wraps as "15 Jan" / "2024" at most
+
+
 def build_benchmark_section(
     panel: pd.DataFrame,
     meridian_summary: dict[str, Any] | None = None,
@@ -374,7 +379,8 @@ def build_benchmark_section(
             title="Walk-forward MAE / mean by fold",
             columns=[
                 TableColumn(key="model", label="Model"),
-                *[TableColumn(key=f, label=f, align="right") for f in cv["folds"]],
+                # "15 Jan 2024" rather than ISO dates: a header with spaces can wrap, so the 11 columns fit
+                *[TableColumn(key=f, label=_fold_label(f), align="right") for f in cv["folds"]],
                 TableColumn(key="mean", label="Mean", align="right"),
                 TableColumn(key="worst", label="Worst", align="right"),
             ],

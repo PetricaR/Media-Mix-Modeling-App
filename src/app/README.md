@@ -5,7 +5,7 @@
 ## Architectural Isolation
 
 `src/app/` is completely self-contained:
-- **Zero dependency on `tchibo_mmm`, `notebooks/`, `outputs/`, `data/processed/`, or `reports/`**: Every chart (all 55 deduplicated interactive Plotly figures covering all 61 notebook visualizations), table (~30 structured tables), Meridian HTML report (3 self-contained reports), and management narrative is generated from scratch by `mmm_studio.core` and `mmm_studio.pipeline` starting solely from an uploaded `.xlsx` workbook.
+- **Zero dependency on `tchibo_mmm`, `notebooks/`, `outputs/`, `data/processed/`, or `reports/`**: Every interactive Plotly chart, table, Meridian HTML report and management narrative is generated from scratch by `mmm_studio.core` and `mmm_studio.pipeline` starting solely from an uploaded `.xlsx` workbook.
 - **Independent Python environment**: Managed via `src/app/backend/pyproject.toml` and `src/app/backend/uv.lock`.
 - **Independent Frontend SPA**: React 18 + TypeScript 5.5 + Vite 5 + MUI 5 + TanStack Query 5 + Plotly (`plotly.js-cartesian-dist-min`) in `src/app/frontend/`.
 
@@ -13,7 +13,7 @@
 
 ## 1. Quickstart: Offline CLI Mode (No Server Required)
 
-You can execute the full 15-stage pipeline directly from the command line against `data/DataScienceMarketingUseCase.xlsx` and write all JSON sections, Parquet datasets, and HTML reports to a local directory:
+You can execute the full 16-stage pipeline directly from the command line against `data/DataScienceMarketingUseCase.xlsx` and write all JSON sections, Parquet datasets, and HTML reports to a local directory:
 
 ```bash
 cd src/app/backend

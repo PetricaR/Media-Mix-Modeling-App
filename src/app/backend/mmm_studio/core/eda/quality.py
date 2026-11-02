@@ -226,6 +226,40 @@ def build_data_quality_section(
         else "No channel-days are missing."
     )
 
+    # Sales lost on missing channel-days: missing days × the channel's mean daily sales (01b §2)
+    channel_mean = clean.groupby("channel")["sales_by_channel"].mean()
+    raw_total = float(clean["sales_by_channel"].sum())
+    lost_rows = [
+        {
+            "channel": ch,
+            "missing_days": int(n),
+            "mean_sales": f"€{float(channel_mean.get(ch, 0.0)):,.0f}",
+            "lost": f"€{n * float(channel_mean.get(ch, 0.0)):,.0f}",
+            "share": f"{100 * n * float(channel_mean.get(ch, 0.0)) / raw_total:.3f}%" if raw_total else "–",
+        }
+        for ch, n in sorted(profile.missing_channel_days.items(), key=lambda t: -t[1])
+        if n
+    ]
+    lost_blocks = (
+        [
+            TableBlock(
+                id="quality_missing_sales_lost",
+                title="Estimated sales lost on missing channel-days",
+                subtitle="Missing days × the channel's mean daily sales; the share of total sales shows the gaps are negligible.",
+                columns=[
+                    TableColumn(key="channel", label="Channel"),
+                    TableColumn(key="missing_days", label="Missing days", align="right"),
+                    TableColumn(key="mean_sales", label="Mean sales / day", align="right"),
+                    TableColumn(key="lost", label="Est. sales lost", align="right"),
+                    TableColumn(key="share", label="Est. share of total sales", align="right"),
+                ],
+                rows=lost_rows,
+            )
+        ]
+        if lost_rows
+        else []
+    )
+
     return Section(
         id="data_quality",
         title="Data quality audit",
@@ -281,6 +315,7 @@ def build_data_quality_section(
                 figure=fig_missing,
                 caption=missing_caption,
             ),
+            *lost_blocks,
             *tv_fig_blocks,
             ChartBlock(
                 id="metric_availability",

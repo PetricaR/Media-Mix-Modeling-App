@@ -87,7 +87,7 @@ backend/mmm_studio/            (flat package, NOT backend/src/mmm_studio as PLAN
   api/          router.py (/api/v1, /health, /auth/check), runs, sections, forecasts (+scenarios), optimiser, exports (artifacts), deps (access code, rate limit)
   db/           SQLAlchemy 2.0 models: runs, stages, forecasts, scenarios, optimisations. create_all only, no Alembic
   jobs/         app.py (Procrastinate app, defer_task, queue counts, stale sweep), tasks.py (5 tasks + LRU cache), worker.py, cloud_run.py (wake-up)
-  pipeline/     context.py (RunContext: storage keys, save_section/dataframe/json, cancel + heartbeat), stages.py (s01–s15)
+  pipeline/     context.py (RunContext: storage keys, save_section/dataframe/json, cancel + heartbeat), stages.py (s01–s16)
   core/         workbook.py (profile_workbook), schema.py (DataProfile, DataRoleConfig, ChannelConfig), tables.py, calendar.py,
                 features.py (notebook controls: weekday/holiday/Christmas/Black Week, Fourier, trend, catalog in-home adstock,
                 hold-out windows), metrics.py, preparation.py (nb 02), ols.py (nb 04), eda/* (+ notebook_stats.py: 01b tables),
@@ -175,13 +175,18 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
   `/optimizer` and the file is `Optimizer.tsx`. Match whatever the file you are editing already uses.
 - **TypeScript.** `strict`, `React.FC` components, MUI `sx` styling, colours from `PALETTE` in `theme.ts`.
   Every HTTP call goes in `api/client.ts`, every query hook in `api/hooks.ts`, and every API type in `api/types.ts`.
-- **No Tchibo logo or brand colours.** The app is labelled as a case-study tool.
+- **Brand tokens, no logo.** Use the Tchibo colours from `PALETTE` / `charts/theme.py`, never the Tchibo logo; the
+  app is labelled an independent case-study prototype.
 
 ## Parity with the notebooks
 
 - **Modelling window.** Notebooks 02–05 keep the isolated 2025-01-01 in every model, so `DataRoleConfig` defaults to
   `drop_trailing_isolated_days=False` and `holdout_days=93` (Q4 2024 through 1 Jan 2025). Yearly and monthly views use
   `core/features.complete_years()`.
+- **Checked against the notebooks' own outputs** (2026-11-02, full run `run_f1e8df83da`): `outputs/meridian_metrics.json`
+  within 0.5 %, `outputs/meridian_holdout_forecast.csv` (93 days) within 0.6 %, `outputs/forecast_2025-01.csv` (42 days)
+  within 0.4 %, every table printed by notebooks 01–05, and every figure headline in `reports/figures` (verification
+  scripts only; the app never reads these files).
 - **Reference numbers** live in `tests/golden/case_study.json` and are asserted by the fast tests (EDA, naive baselines,
   preparation ladder 0.74→0.90, OLS benchmark 34.8/10.7/9.6 % and walk-forward 9.5 %, example plan €8,008,549).
 - **Meridian (full profile, seed 0)** reproduces notebook 03 within MCMC noise: Q4 MAE/mean 8.54 % (nb 8.53 %), R² 0.888,
@@ -201,4 +206,22 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
 7. Starting a queued/running run returns 409; a re-run resets stage rows and clears the previous results; cancelling a finished run returns 409.
 8. Scenario results carry `delta_sales_pct` and `channel_summary` (the Forecast page used to crash); the optimiser and scenarios return 409 until Meridian results exist.
 9. `german_holiday_flags` uses `dateutil.easter` and the real Black Friday (day after the 4th Thursday; it was a week early in 2024); `delayed_binomial_adstock` now peaks at `peak_lag`.
-10. Frontend: Markdown is rendered (it was shown raw), sections poll while a run is active, a temporary drawer gives mobile navigation, the selected run persists, destructive actions are confirmed, tables are labelled scrollable regions with `scope`, and focus is visible.
+10. `release_stalled_jobs()` (sweeper and worker start-up) fails Procrastinate jobs left in `doing` by a killed worker, so `meridian_singleton` is released; before, one killed Meridian worker blocked every later Meridian job.
+11. The response-curve optimiser solves in € millions with analytic PCHIP gradients; on raw euros SLSQP saw a zero gradient and returned the historical allocation (+0.0 %).
+12. Scenario multipliers are normalised to channel slugs in the API (a display name such as `"Display"` works); an
+    unknown channel or a negative multiplier is a 422. Before, any key other than the slug was silently ignored and
+    the scenario reported "+€0".
+13. Frontend: Markdown is rendered (it was shown raw), sections poll while a run is active, a temporary drawer gives mobile navigation, the selected run persists, destructive actions are confirmed, tables are labelled scrollable regions with `scope`, and focus is visible. Table headers, row headers and text
+    over 40 characters wrap (walk-forward folds are labelled "15 Jan 2024"; tables with ≥ 10 columns use tighter cells),
+    so every table fits its card at 1280 px; below a 600 px container each row becomes a labelled card
+    (`data-label` + `@container`).
+14. EDA results the notebooks print but the app had left out are now computed: sales lost on missing channel-days
+    (01b), daily sales by year (01b), average catalog send-out per year and the top-25-days / September contrast
+    (01, 01b), and the €118,094/day error budget (01). The catalog event-study peak line is read from the data (it was
+    fixed at +3), and the shift scan shows 3 decimals like notebook 02 (0.585, which 2-decimal rounding showed as 0.59).
+15. Every figure in `reports/figures` (27 + 34 EDA) now has an app chart with the same analysis: the catalog natural
+    experiment is notebook 01b's 42-day gap (September 2023 €473.1k/day vs 2024 €980.4k/day; the matched-Thursday chart
+    moved to `catalog_matched_thursdays`), the channel-sales and spend × channel-sales correlation matrices were added,
+    adstock and response curves show the 90 % credible band (and the actual-spend dot), and the Meridian accuracy
+    table has notebook 03's "All Data" row (R² 0.902). Captions that stated data facts as fixed text (catalog ROI ≈ 1,
+    Affiliate CTR > 100 %, weekday peaks, "Thursday send-out") are computed.

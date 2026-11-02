@@ -142,6 +142,33 @@ def cancel_procrastinate_job(
         return False
 
 
+def release_stalled_jobs(seconds_since_heartbeat: float | None = None, conninfo: str | None = None) -> list[int]:
+    """Fail jobs stuck in `doing` on a worker that stopped heartbeating (process killed), releasing their locks.
+
+    Without this, a Meridian job whose worker died keeps the `meridian_singleton` lock forever and every later Meridian
+    job (new runs and plan forecasts) waits behind it. Uses Procrastinate's own stalled-job and finish-job queries.
+    """
+    from procrastinate import sql
+
+    dsn = conninfo or get_settings().psycopg_conninfo
+    timeout = seconds_since_heartbeat or max(2 * get_settings().stale_heartbeat_seconds, 300)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            rows = conn.execute(
+                sql.queries["select_stalled_jobs_by_heartbeat"],
+                {"queue": None, "task_name": None, "seconds_since_heartbeat": timeout},
+            ).fetchall()
+            job_ids = [int(r[0]) for r in rows]
+            for job_id in job_ids:
+                conn.execute(sql.queries["finish_job"], {"job_id": job_id, "status": "failed", "delete_job": False})
+    except Exception:
+        logger.warning("Could not release stalled Procrastinate jobs", exc_info=True)
+        return []
+    if job_ids:
+        logger.warning("Released stalled Procrastinate jobs (worker lost): %s", job_ids)
+    return job_ids
+
+
 def sweep_stale_runs(
     stale_seconds: int | None = None,
     sqlalchemy_url: str | None = None,
@@ -149,6 +176,7 @@ def sweep_stale_runs(
 ) -> list[str]:
     """Mark any `running` Run or ForecastRun whose heartbeat is older than `stale_seconds` as `failed`."""
     threshold_sec = stale_seconds if stale_seconds is not None else get_settings().stale_heartbeat_seconds
+    release_stalled_jobs(conninfo=conninfo)
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=threshold_sec)
     SessionLocal = get_session_factory(sqlalchemy_url)
     marked_ids: list[str] = []

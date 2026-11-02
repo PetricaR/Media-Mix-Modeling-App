@@ -10,6 +10,7 @@ from mmm_studio.jobs.app import (
     count_active_queue_jobs,
     ensure_procrastinate_schema,
     get_procrastinate_app,
+    release_stalled_jobs,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ def run_worker_loop(
     # Ensure ORM tables and Procrastinate schema exist
     init_db(sqlalchemy_url)
     ensure_procrastinate_schema(conninfo)
+    # Jobs left in `doing` by a killed worker would otherwise keep their lock (e.g. `meridian_singleton`) forever
+    release_stalled_jobs(conninfo=conninfo)
 
     # Import tasks to ensure registration
     import mmm_studio.jobs.tasks  # noqa: F401

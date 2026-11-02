@@ -227,7 +227,16 @@ def build_explore_spend_section(
     cat_mean_send = float(wide_df[f"cost_{slug_map[cat]}"][wide_df[f"cost_{slug_map[cat]}"] > 0].mean()) if n_sends else 0.0
     top_roas = max(meta, key=lambda c: meta[c]["roas"]) if meta else None
     low_roas = min(meta, key=lambda c: meta[c]["roas"]) if meta else None
-    thu_idx = idx_matrix[ch_ordered.index(cat)][3] if cat in ch_ordered else None
+    day_names = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
+    cat_peak = None
+    if cat in ch_ordered:
+        cat_row = idx_matrix[ch_ordered.index(cat)]
+        cat_peak = (day_names[int(np.argmax(cat_row))], max(cat_row))
+    # The two strongest weekday peaks among the other channels (01b: Social Media on Mondays, Affiliate on Sundays)
+    other_peaks = sorted(
+        ((ch, day_names[int(np.argmax(row))], max(row)) for ch, row in zip(ch_ordered, idx_matrix) if ch != cat),
+        key=lambda v: -v[2],
+    )[:2]
     weekly = full[["total_sales", "total_cost"]].resample("W-SUN").sum()
     wk_counts = full["total_sales"].resample("W-SUN").size()
     weekly = weekly[wk_counts == 7]
@@ -289,7 +298,11 @@ def build_explore_spend_section(
             ChartBlock(
                 id="spend_weekday_index",
                 title="Paid Channel × Weekday Spend Index (100 = Channel Mean)",
-                subtitle=(f"{cat} cost lands on Thursdays (index {thu_idx:.0f}); " if thu_idx is not None else "") + "digital channels lean to the weekend and Monday campaign launches.",
+                subtitle="; ".join(
+                    ([f"{cat} cost lands on {cat_peak[0]} (index {cat_peak[1]:.0f})"] if cat_peak else [])
+                    + [f"{ch} spends {v / 100:.1f}× its average on {day}" for ch, day, v in other_peaks]
+                )
+                + ".",
                 figure=fig_dow,
             ),
             ChartBlock(

@@ -18,6 +18,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import type { SxProps, Theme } from "@mui/material/styles";
 import DownloadIcon from "@mui/icons-material/Download";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import HourglassEmptyOutlinedIcon from "@mui/icons-material/HourglassEmptyOutlined";
@@ -31,7 +32,7 @@ import type {
   SectionBlock,
   TableBlock,
 } from "../../api/types";
-import { FONT_MONO, PALETTE } from "../../theme";
+import { FONT_MONO, FONT_SANS, PALETTE } from "../../theme";
 import { Markdown } from "./Markdown";
 
 const LazyPlotlyChart = React.lazy(() => import("../Charts/PlotlyChart"));
@@ -294,7 +295,42 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
   };
 
   const isNumericLike = (v: unknown) => typeof v === "number" || /^[+\-−]?[€×]?\s?[0-9]/.test(String(v ?? ""));
-  const longText = (key: string) => block.rows.some((r) => String(r[key] ?? "").length > 60);
+  const longText = (key: string) => block.rows.some((r) => String(r[key] ?? "").length > 40);
+
+  const tableSx: SxProps<Theme> = {
+    // Wide tables (e.g. walk-forward folds) get tighter cells so they fit a laptop-width card
+    ...(block.columns.length >= 10 ? { "& .MuiTableCell-sizeSmall": { px: 1 } } : {}),
+    // Narrow containers (phones): each row becomes a card labelled from data-label, as in the responsive-table guide
+    "@container (max-width: 599px)": {
+      "&, & tbody, & tr, & th, & td": { display: "block" },
+      "& thead": { display: "none" },
+      "& tbody tr": { py: 1, borderBottom: `1px solid ${PALETTE.borderSubtle}` },
+      "& tbody tr:last-of-type": { borderBottom: "none" },
+      "& tbody th": { border: "none", whiteSpace: "normal", minWidth: 0, pb: 0.5, fontWeight: 700 },
+      "& tbody td": {
+        display: "flex",
+        flexDirection: "row", // MUI's right-aligned cells use row-reverse, which would put the label after the value
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 2,
+        border: "none",
+        py: 0.25,
+        whiteSpace: "normal",
+        minWidth: 0,
+        textAlign: "right",
+      },
+      "& tbody td::before": {
+        content: "attr(data-label)",
+        flexShrink: 0,
+        maxWidth: "50%",
+        textAlign: "left",
+        fontFamily: FONT_SANS,
+        fontSize: "0.78rem",
+        fontWeight: 600,
+        color: PALETTE.inkSecondary,
+      },
+    },
+  };
 
   return (
     <Paper sx={{ p: { xs: 1.5, md: 2.5 }, mb: 3 }} id={block.table_id || block.id}>
@@ -312,9 +348,15 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
         role="region"
         aria-labelledby={captionId}
         tabIndex={0}
-        sx={{ overflow: "auto", maxBlockSize: "min(560px, 75vh)", border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5 }}
+        sx={{
+          overflow: "auto",
+          maxBlockSize: "min(560px, 75vh)",
+          border: `1px solid ${PALETTE.borderSubtle}`,
+          borderRadius: 1.5,
+          containerType: "inline-size",
+        }}
       >
-        <Table size="small" stickyHeader>
+        <Table size="small" stickyHeader sx={tableSx}>
           <caption className="visually-hidden">{block.title}</caption>
           <TableHead>
             <TableRow>
@@ -324,6 +366,7 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
                     active={orderBy === col.key}
                     direction={orderBy === col.key ? orderDir : "asc"}
                     onClick={() => handleSort(col.key)}
+                    sx={{ "& .MuiTableSortLabel-icon": { fontSize: 16, mx: 0.25 } }}
                   >
                     {col.label}
                   </TableSortLabel>
@@ -342,13 +385,15 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
                       key={col.key}
                       component={cIdx === 0 ? "th" : "td"}
                       scope={cIdx === 0 ? "row" : undefined}
+                      data-label={cIdx === 0 ? undefined : col.label}
                       align={col.align || (typeof val === "number" ? "right" : "left")}
                       sx={{
                         fontFamily: numeric ? FONT_MONO : "inherit",
                         fontSize: numeric ? "0.8rem" : undefined,
                         fontWeight: cIdx === 0 ? 600 : undefined,
-                        whiteSpace: longText(col.key) ? "normal" : "nowrap",
-                        minWidth: longText(col.key) ? 240 : undefined,
+                        // Text columns and the row header may wrap; numbers never do
+                        whiteSpace: longText(col.key) || (cIdx === 0 && !numeric) ? "normal" : "nowrap",
+                        minWidth: longText(col.key) ? 240 : cIdx === 0 && !numeric ? 140 : undefined,
                         verticalAlign: "top",
                       }}
                     >
