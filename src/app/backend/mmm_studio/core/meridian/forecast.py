@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure, line_figure
-from mmm_studio.charts.theme import COPPER, NAVY, SLATE, TEAL
+from mmm_studio.charts.theme import COPPER, INK_MUTED, NAVY, SLATE, TEAL
 from mmm_studio.core.meridian.fit import FAST_SAMPLING, fit_meridian
 from mmm_studio.core.meridian.spec import (
     CHANNEL_DISPLAY_NAMES,
@@ -22,9 +22,8 @@ from mmm_studio.core.meridian.spec import (
 )
 from mmm_studio.core.metrics import regression_metrics
 from mmm_studio.core.schema import slugify_channel
-from mmm_studio.report.narrative import fmt_eur
+from mmm_studio.report.narrative import fmt_eur, fmt_eur_signed
 from mmm_studio.report.sections import (
-    CalloutBlock,
     ChartBlock,
     KpiItem,
     KpisBlock,
@@ -143,7 +142,7 @@ def build_example_plan(
             continue
         if col == "catalog":
             sends = recent[cost_col][recent[cost_col] > 0]
-            avg_send_cost = catalog_cost or (float(sends.mean()) if len(sends) > 0 else 1299842.0)
+            avg_send_cost = catalog_cost or (float(sends.mean()) if len(sends) > 0 else 0.0)
             valid_so = [pd.Timestamp(s) for s in send_outs if pd.Timestamp(s) in plan.index]
             if valid_so:
                 plan.loc[pd.DatetimeIndex(valid_so), col] = avg_send_cost
@@ -254,229 +253,238 @@ def evaluate_forecast_scenario(
     return daily
 
 
+def apply_multipliers(
+    plan: pd.DataFrame,
+    multipliers: dict[str, float] | None,
+    locked: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Scale each plan column by its multiplier; `locked` columns (controls such as Affiliate) stay as planned."""
+    alt = plan.copy()
+    for col in alt.columns:
+        if col in locked:
+            continue
+        alt[col] = alt[col] * float((multipliers or {}).get(col, 1.0))
+    return alt
+
+
+def scenario_payload(
+    base_daily: pd.DataFrame,
+    base_plan: pd.DataFrame,
+    alt_daily: pd.DataFrame,
+    alt_plan: pd.DataFrame,
+    method: str,
+    multipliers: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Result payload shared by forecasts and scenarios (totals, deltas, per-channel summary, daily rows, figure)."""
+    n_days = len(alt_daily)
+    base_daily = base_daily.iloc[:n_days]
+    base_plan = base_plan.iloc[:n_days]
+    alt_plan = alt_plan.iloc[:n_days]
+    base_sales = float(base_daily["forecast"].sum())
+    alt_sales = float(alt_daily["forecast"].sum())
+    base_spend = float(base_plan.to_numpy().sum())
+    alt_spend = float(alt_plan.to_numpy().sum())
+    delta_sales = alt_sales - base_sales
+    delta_spend = alt_spend - base_spend
+    m_roas = round(delta_sales / delta_spend, 2) if abs(delta_spend) > 1.0 else None
+    dates = [d.strftime("%Y-%m-%d") for d in alt_daily.index]
+
+    channel_summary = []
+    for col in alt_plan.columns:
+        b_sp = float(base_plan[col].sum())
+        a_sp = float(alt_plan[col].sum())
+        channel_summary.append(
+            {
+                "channel": CHANNEL_DISPLAY_NAMES.get(col, col),
+                "slug": col,
+                "multiplier": round(a_sp / b_sp, 3) if b_sp > 0 else float((multipliers or {}).get(col, 1.0)),
+                "base_spend": round(b_sp, 0),
+                "scenario_spend": round(a_sp, 0),
+                "delta_spend": round(a_sp - b_sp, 0),
+            }
+        )
+
+    same = alt_daily["forecast"].round(0).equals(base_daily["forecast"].round(0))
+    series = [
+        {
+            "name": "Forecast (90% prediction interval)" if same else "Scenario (90% prediction interval)",
+            "y": alt_daily["forecast"].round(0).tolist(),
+            "band_lower": alt_daily["prediction_lo"].round(0).tolist(),
+            "band_upper": alt_daily["prediction_hi"].round(0).tolist(),
+            "color": TEAL,
+            "width": 2.2,
+        }
+    ]
+    if not same:
+        series.append({"name": "Plan as submitted", "y": base_daily["forecast"].round(0).tolist(), "color": NAVY, "dash": "dot", "width": 1.6})
+    fig = line_figure(x=dates, series=series, yaxis_title="Daily sales (€)")
+
+    daily_rows = [
+        {
+            "date": d.strftime("%Y-%m-%d"),
+            "baseline_forecast": round(float(base_daily.loc[d, "forecast"]), 0),
+            "scenario_forecast": round(float(alt_daily.loc[d, "forecast"]), 0),
+            "prediction_lo": round(float(alt_daily.loc[d, "prediction_lo"]), 0),
+            "prediction_hi": round(float(alt_daily.loc[d, "prediction_hi"]), 0),
+            "planned_spend": round(float(alt_plan.loc[d].sum()), 0),
+        }
+        for d in alt_daily.index
+    ]
+    return {
+        "method": method,
+        "horizon_days": n_days,
+        "start_date": dates[0] if dates else None,
+        "end_date": dates[-1] if dates else None,
+        "base_total_sales": round(base_sales, 0),
+        "scenario_total_sales": round(alt_sales, 0),
+        "delta_sales": round(delta_sales, 0),
+        "delta_sales_pct": round(100.0 * delta_sales / base_sales, 2) if base_sales else 0.0,
+        "base_total_spend": round(base_spend, 0),
+        "scenario_total_spend": round(alt_spend, 0),
+        "delta_spend": round(delta_spend, 0),
+        "marginal_roas": m_roas,
+        "prediction_lo_total": round(float(alt_daily["prediction_lo"].sum()), 0),
+        "prediction_hi_total": round(float(alt_daily["prediction_hi"].sum()), 0),
+        "channel_summary": channel_summary,
+        "figure": fig,
+        "daily": daily_rows,
+    }
+
+
+def model_scenario_from_multipliers(
+    mmm: Any,
+    history: pd.DataFrame,
+    base_daily: pd.DataFrame,
+    base_plan: pd.DataFrame,
+    cfg: MeridianSpecConfig,
+    multipliers: dict[str, float] | None = None,
+    horizon_days: int | None = None,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Evaluate a multiplier scenario with the fitted forecast model (no refit), as in notebook 05 §4."""
+    alt_plan = apply_multipliers(base_plan, multipliers, locked=tuple(cfg.as_controls))
+    alt_daily = evaluate_forecast_scenario(mmm, history, base_daily, alt_plan, cfg, seed=seed)
+    n = min(horizon_days or len(base_daily), len(base_daily))
+    return scenario_payload(
+        base_daily.iloc[:n], base_plan.iloc[:n], alt_daily.iloc[:n], alt_plan.iloc[:n], "Meridian posterior (fitted model, no refit)", multipliers
+    )
+
+
 def fast_forecast_from_multipliers(
     base_daily: pd.DataFrame,
     base_plan: pd.DataFrame,
     multipliers: dict[str, float] | None = None,
     horizon_days: int | None = None,
     mroi_map: dict[str, float] | None = None,
+    catalog_shift: int = 2,
 ) -> dict[str, Any]:
-    """Fast interactive scenario evaluator scaling channel spend and updating daily sales via mROI / adstock."""
-    mults = multipliers or {}
-    default_mroi = {
-        "sea": 3.85,
-        "catalog": 0.85,
-        "display": 0.22,
-        "display_network": 0.95,
-        "social_media": 1.40,
-        "psm": 1.15,
-        "affiliate": 0.0,
-    }
-    if mroi_map:
-        default_mroi.update({slugify_channel(k): float(v) for k, v in mroi_map.items()})
+    """Approximate a scenario from the run's marginal ROIs when the fitted forecast model is not available.
 
+    Each channel's spend change is spread over a short carry-over kernel (catalog: after its in-home date) and
+    multiplied by that channel's posterior marginal ROI. Channels without an mROI (e.g. controls) do not move sales.
+    """
+    mults = {slugify_channel(k): float(v) for k, v in (multipliers or {}).items()}
+    mroi = {slugify_channel(k): float(v) for k, v in (mroi_map or {}).items()}
     n_days = min(horizon_days or len(base_daily), len(base_daily))
     d_base = base_daily.iloc[:n_days].copy()
     p_base = base_plan.iloc[:n_days].copy()
     p_alt = p_base.copy()
-
-    daily_delta_sales = np.zeros(n_days, dtype=float)
+    delta = np.zeros(n_days, dtype=float)
     for col in p_alt.columns:
         slug = slugify_channel(col)
-        m = float(mults.get(slug, mults.get(col, 1.0)))
-        p_alt[col] = p_base[col] * m
-        diff_spend = (p_alt[col] - p_base[col]).to_numpy(dtype=float)
-        mroi = default_mroi.get(slug, 1.0)
+        if slug not in mroi:
+            continue
+        p_alt[col] = p_base[col] * mults.get(slug, 1.0)
+        diff = (p_alt[col] - p_base[col]).to_numpy(dtype=float)
         if slug == "catalog":
-            # Distribute catalog delta over 14 days post-in-home (shifted 2 days)
-            kernel = np.array([0.0, 0.0, 0.18, 0.22, 0.16, 0.12, 0.09, 0.07, 0.05, 0.04, 0.03, 0.02, 0.01, 0.01])
-            conv = np.convolve(diff_spend, kernel)[:n_days]
-            daily_delta_sales += conv * mroi
+            kernel = np.r_[np.zeros(catalog_shift), 0.8 ** np.arange(14)]
         else:
-            kernel = np.array([0.65, 0.22, 0.08, 0.05])
-            conv = np.convolve(diff_spend, kernel)[:n_days]
-            daily_delta_sales += conv * mroi
-
+            kernel = 0.5 ** np.arange(4)
+        kernel = kernel / kernel.sum()
+        delta += np.convolve(diff, kernel)[:n_days] * mroi[slug]
     d_alt = d_base.copy()
-    d_alt["forecast"] = np.maximum(0.0, d_base["forecast"].to_numpy(dtype=float) + daily_delta_sales)
-    d_alt["credible_lo"] = np.maximum(0.0, d_base["credible_lo"].to_numpy(dtype=float) + daily_delta_sales * 0.85)
-    d_alt["credible_hi"] = np.maximum(0.0, d_base["credible_hi"].to_numpy(dtype=float) + daily_delta_sales * 1.15)
-    d_alt["prediction_lo"] = np.maximum(0.0, d_base["prediction_lo"].to_numpy(dtype=float) + daily_delta_sales * 0.80)
-    d_alt["prediction_hi"] = np.maximum(0.0, d_base["prediction_hi"].to_numpy(dtype=float) + daily_delta_sales * 1.20)
+    for col in ("forecast", "credible_lo", "credible_hi", "prediction_lo", "prediction_hi"):
+        d_alt[col] = np.maximum(0.0, d_base[col].to_numpy(dtype=float) + delta)
     d_alt["planned_spend"] = p_alt.sum(axis=1).to_numpy(dtype=float)
-
-    base_total_sales = float(d_base["forecast"].sum())
-    alt_total_sales = float(d_alt["forecast"].sum())
-    base_total_spend = float(p_base.to_numpy().sum())
-    alt_total_spend = float(p_alt.to_numpy().sum())
-
-    dates_str = [d.strftime("%Y-%m-%d") for d in d_alt.index]
-    fig = line_figure(
-        x=dates_str,
-        series=[
-            {
-                "name": "Scenario Forecast (90% PI)",
-                "y": d_alt["forecast"].round(0).tolist(),
-                "band_lower": d_alt["prediction_lo"].round(0).tolist(),
-                "band_upper": d_alt["prediction_hi"].round(0).tolist(),
-                "color": TEAL,
-                "width": 2.2,
-            },
-            {
-                "name": "Baseline Plan Forecast",
-                "y": d_base["forecast"].round(0).tolist(),
-                "color": NAVY,
-                "dash": "dot",
-                "width": 1.6,
-            },
-        ],
-        title=f"Interactive Scenario Forecast ({dates_str[0]} .. {dates_str[-1]}, {n_days} Days)",
-        subtitle=(
-            f"Scenario Sales = {fmt_eur(alt_total_sales)} (Δ {alt_total_sales - base_total_sales:+,.0f} €) | "
-            f"Planned Spend = {fmt_eur(alt_total_spend)} (Δ {alt_total_spend - base_total_spend:+,.0f} €)"
-        ),
-        yaxis_title="Daily Sales Forecast (€)",
-    )
-
-    daily_rows = [
-        {
-            "date": d.strftime("%Y-%m-%d"),
-            "baseline_forecast": round(float(d_base.loc[d, "forecast"]), 0),
-            "scenario_forecast": round(float(d_alt.loc[d, "forecast"]), 0),
-            "prediction_lo": round(float(d_alt.loc[d, "prediction_lo"]), 0),
-            "prediction_hi": round(float(d_alt.loc[d, "prediction_hi"]), 0),
-            "planned_spend": round(float(d_alt.loc[d, "planned_spend"]), 0),
-        }
-        for d in d_alt.index
-    ]
-
-    delta_sales = alt_total_sales - base_total_sales
-    delta_spend = alt_total_spend - base_total_spend
-    m_roas = round(delta_sales / delta_spend, 2) if abs(delta_spend) > 1e-6 else None
-
-    return {
-        "horizon_days": n_days,
-        "start_date": dates_str[0],
-        "end_date": dates_str[-1],
-        "baseline_sales": round(base_total_sales, 0),
-        "scenario_sales": round(alt_total_sales, 0),
-        "sales_delta": round(delta_sales, 0),
-        "baseline_spend": round(base_total_spend, 0),
-        "scenario_spend": round(alt_total_spend, 0),
-        "spend_delta": round(delta_spend, 0),
-        "base_total_sales": round(base_total_sales, 0),
-        "scenario_total_sales": round(alt_total_sales, 0),
-        "delta_sales": round(delta_sales, 0),
-        "base_total_spend": round(base_total_spend, 0),
-        "scenario_total_spend": round(alt_total_spend, 0),
-        "delta_spend": round(delta_spend, 0),
-        "marginal_roas": m_roas,
-        "figure": fig,
-        "daily": daily_rows,
-    }
+    return scenario_payload(d_base, p_base, d_alt, p_alt, "Marginal-ROI approximation (fitted model not available)", multipliers)
 
 
 def build_forecast_scenarios_section(
     wide_df: pd.DataFrame,
-    q4_holdout_df: pd.DataFrame,
+    backtest_df: pd.DataFrame,
     forecast_daily: pd.DataFrame,
     plan_df: pd.DataFrame,
     scenarios_df: pd.DataFrame,
+    backtest_label: str = "hold-out",
+    backtest_train_end: str | None = None,
+    sampling_label: str | None = None,
 ) -> Section:
-    """Build the `forecast_scenarios` section reproducing `05_forecast.ipynb`."""
-    # 1. Leak-free Q4 backtest metrics & chart (`05_backtest_q4`)
-    bt_m = regression_metrics(q4_holdout_df["actual"].to_numpy(), q4_holdout_df["expected"].to_numpy())
-    lo_col = "prediction_lo" if "prediction_lo" in q4_holdout_df.columns else "expected_lo"
-    hi_col = "prediction_hi" if "prediction_hi" in q4_holdout_df.columns else "expected_hi"
-    coverage = float(
-        ((q4_holdout_df["actual"] >= q4_holdout_df[lo_col]) & (q4_holdout_df["actual"] <= q4_holdout_df[hi_col])).mean()
-    )
+    """Build the `forecast_scenarios` section reproducing `05_forecast.ipynb`.
 
-    q4_dates = [d.strftime("%Y-%m-%d") for d in q4_holdout_df.index]
+    `backtest_df` holds `actual`, `forecast` and the 90 % prediction interval of a leak-free back-test: a model fitted
+    only on history up to `backtest_train_end` and given the hold-out's actual spend as its plan.
+    """
+    bt_m = regression_metrics(backtest_df["actual"].to_numpy(), backtest_df["forecast"].to_numpy())
+    coverage = float(
+        ((backtest_df["actual"] >= backtest_df["prediction_lo"]) & (backtest_df["actual"] <= backtest_df["prediction_hi"])).mean()
+    )
+    bt_dates = [d.strftime("%Y-%m-%d") for d in backtest_df.index]
     fig_bt = line_figure(
-        x=q4_dates,
+        x=bt_dates,
         series=[
-            {"name": "Actual Q4 Sales", "y": q4_holdout_df["actual"].round(0).tolist(), "color": SLATE, "width": 1.6},
             {
-                "name": "Out-of-Sample Forecast (90% Interval)",
-                "y": q4_holdout_df["expected"].round(0).tolist(),
-                "band_lower": q4_holdout_df[lo_col].round(0).tolist(),
-                "band_upper": q4_holdout_df[hi_col].round(0).tolist(),
-                "color": NAVY,
+                "name": "Forecast (90% prediction interval)",
+                "y": backtest_df["forecast"].round(0).tolist(),
+                "band_lower": backtest_df["prediction_lo"].round(0).tolist(),
+                "band_upper": backtest_df["prediction_hi"].round(0).tolist(),
+                "color": TEAL,
                 "width": 2.0,
             },
+            {"name": "Actual", "y": backtest_df["actual"].round(0).tolist(), "color": NAVY, "width": 1.4, "mode": "lines+markers", "marker": {"size": 4}},
         ],
-        title=f"Leak-Free Back-Test on Q4 2024: MAE / Mean = {100.0 * bt_m['MAE_over_mean']:.1f}% (R² = {bt_m['R2']:.3f})",
-        subtitle="Trained strictly on history up to 2024-09-30; predicted from Q4 planned media spend and calendar controls",
-        yaxis_title="Daily Total Sales (€)",
+        yaxis_title="Daily total sales (€)",
     )
 
-    # 2. 42-day Jan–Feb 2025 forecast chart (`05_forecast_2025_01`)
-    recent_hist = wide_df.loc["2024-11-15":, "total_sales"]
-    if len(recent_hist) == 0:
-        recent_hist = wide_df["total_sales"].iloc[-min(47, len(wide_df)) :]
+    recent_hist = wide_df["total_sales"].iloc[-min(48, len(wide_df)) :]
     hist_dates = [d.strftime("%Y-%m-%d") for d in recent_hist.index]
     fc_dates = [d.strftime("%Y-%m-%d") for d in forecast_daily.index]
     all_dates = hist_dates + fc_dates
-
-    hist_y: list[float | None] = [round(float(v), 0) for v in recent_hist] + [None] * len(fc_dates)
-    fc_y: list[float | None] = [None] * len(hist_dates) + [round(float(v), 0) for v in forecast_daily["forecast"]]
-    fc_lo: list[float | None] = [None] * len(hist_dates) + [round(float(v), 0) for v in forecast_daily["prediction_lo"]]
-    fc_hi: list[float | None] = [None] * len(hist_dates) + [round(float(v), 0) for v in forecast_daily["prediction_hi"]]
-
-    vlines = [{"x": fc_dates[0], "color": SLATE, "dash": "dash", "annotation": "Forecast Start"}]
+    pad = [None] * len(hist_dates)
+    vlines = [{"x": fc_dates[0], "color": SLATE, "dash": "dash", "label": "history | forecast"}]
     if "catalog" in plan_df.columns:
         for d in plan_df.index[plan_df["catalog"] > 0]:
-            vlines.append({"x": d.strftime("%Y-%m-%d"), "color": COPPER, "dash": "dot", "annotation": "Planned Catalog"})
-
+            vlines.append({"x": d.strftime("%Y-%m-%d"), "color": COPPER, "dash": "dot", "label": "Catalog"})
     fig_fc = line_figure(
         x=all_dates,
         series=[
-            {"name": "Actual Sales (Recent History)", "y": hist_y, "color": SLATE, "width": 1.6},
+            {"name": "Actual (history)", "y": [round(float(v), 0) for v in recent_hist] + [None] * len(fc_dates), "color": NAVY, "width": 1.6},
             {
-                "name": "Daily Forecast (90% Prediction Interval)",
-                "y": fc_y,
-                "band_lower": fc_lo,
-                "band_upper": fc_hi,
+                "name": "Forecast (90% prediction interval)",
+                "y": pad + [round(float(v), 0) for v in forecast_daily["forecast"]],
+                "band_lower": pad + [round(float(v), 0) for v in forecast_daily["prediction_lo"]],
+                "band_upper": pad + [round(float(v), 0) for v in forecast_daily["prediction_hi"]],
                 "color": TEAL,
                 "width": 2.2,
             },
         ],
-        title=f"Daily Sales Forecast for the 42-Day Budget Plan ({fc_dates[0]} .. {fc_dates[-1]})",
-        subtitle=(
-            f"Total Forecast Sales = {fmt_eur(float(forecast_daily['forecast'].sum()))} "
-            f"(Ø {fmt_eur(float(forecast_daily['forecast'].mean()))}/day) "
-            f"for {fmt_eur(float(forecast_daily['planned_spend'].sum()))} Planned Spend"
-        ),
-        yaxis_title="Daily Total Sales (€)",
+        yaxis_title="Daily total sales (€)",
         vlines=vlines,
     )
 
-    # 3. Scenarios comparison chart (`05_scenarios`)
-    scen_sub = scenarios_df[scenarios_df["scenario"] != "Plan as submitted"].copy()
+    scen_sub = scenarios_df.iloc[1:].copy()
     fig_scen = bar_figure(
         categories=scen_sub["scenario"].tolist(),
         series=[
-            {
-                "name": "Δ Forecast Sales (€k)",
-                "values": (scen_sub["delta_sales"] / 1e3).round(1).tolist(),
-                "color": TEAL,
-            },
-            {
-                "name": "Δ Planned Spend (€k)",
-                "values": (scen_sub["delta_spend"] / 1e3).round(1).tolist(),
-                "color": SLATE,
-            },
+            {"name": "Δ forecast sales (k€)", "values": (scen_sub["delta_sales"] / 1e3).round(1).tolist(), "color": TEAL},
+            {"name": "Δ planned spend (k€)", "values": (scen_sub["delta_spend"] / 1e3).round(1).tolist(), "color": INK_MUTED},
         ],
         barmode="group",
         orientation="h",
-        title="Budget What-If Scenarios Over the 42-Day Forecast Window (Δ k€ vs Submitted Plan)",
-        subtitle="Evaluated directly on the fitted Bayesian posterior without refitting MCMC",
-        xaxis_title="Change vs Submitted Plan (€ Thousands)",
+        xaxis_title="Change vs plan as submitted (k€)",
         vlines=[{"x": 0.0, "color": NAVY, "dash": "solid"}],
+        height=320,
     )
 
-    # Weekly budget plan table
     wk_plan = plan_df.resample("W-SUN").sum()
     wk_plan_rows = []
     for dt, r in wk_plan.iterrows():
@@ -486,7 +494,6 @@ def build_forecast_scenarios_section(
         row_dict["total"] = fmt_eur(float(r.sum()))
         wk_plan_rows.append(row_dict)
 
-    # Weekly forecast summary table
     wk_fc = forecast_daily[["forecast", "prediction_lo", "prediction_hi", "planned_spend"]].resample("W-SUN").sum()
     wk_fc["days"] = forecast_daily.resample("W-SUN").size()
     wk_fc_rows = [
@@ -500,134 +507,137 @@ def build_forecast_scenarios_section(
         }
         for dt, r in wk_fc.iterrows()
     ]
-
     scen_rows = [
         {
             "scenario": str(r["scenario"]),
             "sales": fmt_eur(float(r["sales"])),
             "spend": fmt_eur(float(r["spend"])),
-            "delta_sales": f"{'+' if float(r['delta_sales']) >= 0 else ''}{fmt_eur(float(r['delta_sales']))}",
-            "delta_spend": f"{'+' if float(r['delta_spend']) >= 0 else ''}{fmt_eur(float(r['delta_spend']))}",
-            "marginal_roas": f"{float(r['marginal_roas']):.2f}x" if pd.notna(r["marginal_roas"]) else "– (budget neutral)",
+            "delta_sales": fmt_eur_signed(float(r["delta_sales"])),
+            "delta_spend": fmt_eur_signed(float(r["delta_spend"])),
+            "marginal_roas": f"{float(r['marginal_roas']):.2f}" if pd.notna(r["marginal_roas"]) else "–",
         }
         for _, r in scenarios_df.iterrows()
     ]
 
     tot_fc_sales = float(forecast_daily["forecast"].sum())
     tot_fc_spend = float(forecast_daily["planned_spend"].sum())
-
-    blocks = [
+    n_sends = int((plan_df["catalog"] > 0).sum()) if "catalog" in plan_df.columns else 0
+    blocks: list[Any] = [
         KpisBlock(
             items=[
                 KpiItem(
-                    label="42-Day Forecast Total Sales",
+                    label=f"Forecast sales, {len(forecast_daily)} days",
                     value=fmt_eur(tot_fc_sales),
                     delta=f"Ø {fmt_eur(float(forecast_daily['forecast'].mean()))}/day",
                     status="success",
                 ),
                 KpiItem(
-                    label="42-Day Planned Media Spend",
+                    label="Planned spend",
                     value=fmt_eur(tot_fc_spend),
-                    delta=f"2 Catalog send-outs ({len(forecast_daily)}d)",
-                    status="neutral",
+                    delta=f"{n_sends} catalog send-out{'s' if n_sends != 1 else ''} · {fc_dates[0]} → {fc_dates[-1]}",
                 ),
                 KpiItem(
-                    label="Leak-Free Q4 Back-Test MAE/Mean",
-                    value=f"{100.0 * bt_m['MAE_over_mean']:.2f}%",
-                    delta=f"R² = {bt_m['R2']:.3f} (≤ 15% target)",
-                    status="success",
+                    label=f"Back-test {backtest_label} MAE / mean",
+                    value=f"{100.0 * bt_m['MAE_over_mean']:.1f}%",
+                    delta=f"R² {bt_m['R2']:.3f} · bias {fmt_eur_signed(bt_m['bias'])}/day",
+                    status="success" if bt_m["MAE_over_mean"] <= 0.15 else "warn",
                 ),
                 KpiItem(
-                    label="90% Prediction Interval Coverage",
+                    label="Days inside 90% prediction interval",
                     value=f"{100.0 * coverage:.0f}%",
-                    delta="Out-of-sample daily coverage",
-                    status="neutral",
+                    delta="Nominal 90 %",
+                    status="success" if coverage >= 0.85 else "warn",
                 ),
             ]
         ),
         MarkdownBlock(
+            title="How the forecast works",
             body=(
-                "### Operational Short-Term Forecasting from a Marketing Budget Plan\n"
-                "To forecast future sales from a planned daily media budget, future plan dates are appended to the historical panel "
-                "as hold-out rows (with placeholder sales equal to the training mean so KPI scaling is completely leak-free). "
-                "We report two uncertainty bands:\n"
-                "- **90% Prediction Interval:** where an *actual* future day's sales will land (includes observation noise $\\sigma$).\n"
-                "- **90% Credible Interval:** parameter uncertainty around the *expected* mean sales trajectory."
-            )
+                "Meridian only predicts inside the window it is fitted on, so the plan's days are appended to the history as "
+                "**hold-out rows** (their sales are unknown) and the model is refit"
+                + (f" ({sampling_label})" if sampling_label else "")
+                + ". The rows' sales placeholder is the training mean, so Meridian's KPI scaling is unchanged and no future "
+                "sales are used.\n\n"
+                "- **90 % prediction interval:** where an *actual* day's sales are expected to land — use this for planning.\n"
+                "- **90 % credible interval:** uncertainty about the *expected* level only (much narrower)."
+            ),
         ),
         ChartBlock(
             id="forecast_backtest_q4",
-            title="Leak-Free Back-Test on Q4 2024 (No Q4 Sales Used in Training or Scaling)",
-            subtitle="Daily out-of-sample forecast and 90% prediction interval vs actual Q4 2024 sales",
+            title=f"Leak-free back-test, {backtest_label}: MAE / mean = {100.0 * bt_m['MAE_over_mean']:.1f}%",
+            subtitle=(
+                f"Trained only on history up to {backtest_train_end or 'the day before the window'}; the plan is the actual spend of the "
+                "window; no sales from the window are used, not even in the KPI scaling."
+            ),
             figure=fig_bt,
+            caption=(
+                f"Coverage below the nominal 90 % comes from the level offset (bias {fmt_eur_signed(bt_m['bias'])}/day); "
+                "refitting weekly re-anchors the level."
+                if coverage < 0.85
+                else None
+            ),
         ),
         ChartBlock(
             id="forecast_2025_01_chart",
-            title=f"Daily Sales Forecast for the {len(forecast_daily)}-Day Budget Plan ({fc_dates[0]} .. {fc_dates[-1]})",
-            subtitle="Recent history vs future daily forecast with 90% prediction interval and planned Catalog send-outs",
+            title=f"Daily sales forecast for the budget plan ({fc_dates[0]} → {fc_dates[-1]})",
+            subtitle=(
+                f"{fmt_eur(tot_fc_sales)} forecast sales (Ø {fmt_eur(float(forecast_daily['forecast'].mean()))}/day) for "
+                f"{fmt_eur(tot_fc_spend)} planned spend; dotted lines are planned catalog send-outs."
+            ),
             figure=fig_fc,
         ),
         TableBlock(
             id="forecast_weekly_summary_table",
-            title="Weekly Sales Forecast & 90% Prediction Interval Summary",
-            subtitle="Aggregated weekly sales forecast and planned media spend across the planning horizon",
+            title="Weekly forecast",
+            subtitle="Low/high add up the daily 5 % / 95 % bounds, so they are deliberately conservative.",
             columns=[
-                TableColumn(key="week_ending", label="Week Ending (Sun)"),
+                TableColumn(key="week_ending", label="Week ending (Sun)"),
                 TableColumn(key="days", label="Days", align="right"),
-                TableColumn(key="planned_spend", label="Planned Spend", align="right"),
-                TableColumn(key="forecast_sales", label="Forecast Sales", align="right"),
-                TableColumn(key="pi_90_low", label="90% PI Low (Sum)", align="right"),
-                TableColumn(key="pi_90_high", label="90% PI High (Sum)", align="right"),
+                TableColumn(key="planned_spend", label="Planned spend", align="right"),
+                TableColumn(key="forecast_sales", label="Forecast sales", align="right"),
+                TableColumn(key="pi_90_low", label="Low (sum of daily 5 %)", align="right"),
+                TableColumn(key="pi_90_high", label="High (sum of daily 95 %)", align="right"),
             ],
             rows=wk_fc_rows,
         ),
         ChartBlock(
             id="forecast_scenarios_chart",
-            title="Budget What-If Scenarios: Change in Forecast Sales vs Change in Spend (€k)",
-            subtitle="Instant counterfactual evaluation on the fitted model over the 42-day planning window",
+            title="Budget scenarios on the same forecast window",
+            subtitle="Evaluated with the fitted model (no refit); only media channels change, Affiliate stays as planned.",
             figure=fig_scen,
         ),
         TableBlock(
             id="forecast_scenarios_table",
-            title="What-If Budget Scenario Comparison Table",
-            subtitle="Impact of skipping a Catalog edition, shifting Display to SEA, or scaling digital channels +10%",
+            title="Scenario comparison",
             columns=[
-                TableColumn(key="scenario", label="Budget Scenario"),
-                TableColumn(key="sales", label="Forecast Sales", align="right"),
-                TableColumn(key="spend", label="Planned Spend", align="right"),
-                TableColumn(key="delta_sales", label="Δ Sales vs Plan", align="right"),
-                TableColumn(key="delta_spend", label="Δ Spend vs Plan", align="right"),
-                TableColumn(key="marginal_roas", label="Δ Sales / Δ Spend", align="right"),
+                TableColumn(key="scenario", label="Scenario"),
+                TableColumn(key="sales", label="Forecast sales", align="right"),
+                TableColumn(key="spend", label="Planned spend", align="right"),
+                TableColumn(key="delta_sales", label="Δ sales", align="right"),
+                TableColumn(key="delta_spend", label="Δ spend", align="right"),
+                TableColumn(key="marginal_roas", label="Δ sales / Δ spend", align="right"),
             ],
             rows=scen_rows,
+            caption=(
+                "Skipping a catalog saves its cost but loses roughly the same in sales (catalog ROI ≈ 1). Moving Display "
+                "budget to SEA rides on SEA's upward-biased ROI and should be tested before acting on it."
+            ),
         ),
         TableBlock(
             id="forecast_weekly_plan_table",
-            title="Submitted Weekly Media Budget Plan by Channel",
-            subtitle="Planned weekly spend (€) across the 7 paid channels in the forecast window",
+            title="Budget plan by week and channel",
+            subtitle="Example plan built from history: same-weekday spend one year earlier × each channel's spend growth.",
             columns=[
-                TableColumn(key="week_ending", label="Week Ending"),
-                *[
-                    TableColumn(key=col, label=CHANNEL_DISPLAY_NAMES.get(col, col), align="right")
-                    for col in plan_df.columns
-                ],
-                TableColumn(key="total", label="Total Spend", align="right"),
+                TableColumn(key="week_ending", label="Week ending"),
+                *[TableColumn(key=col, label=CHANNEL_DISPLAY_NAMES.get(col, col), align="right") for col in plan_df.columns],
+                TableColumn(key="total", label="Total", align="right"),
             ],
             rows=wk_plan_rows,
         ),
-        CalloutBlock(
-            tone="info",
-            title="Interactive Scenario Simulator Available Above",
-            body=(
-                "Use the interactive channel spend multipliers above to test custom budget scenarios over any horizon "
-                "(14 to 90 days) and inspect the resulting daily sales trajectory and 90% prediction intervals."
-            ),
-        ),
     ]
-
     return Section(
         id="forecast_scenarios",
-        title="Forward Budget Forecasting & What-If Scenario Planning",
-        subtitle="Leak-free Q4 back-test, 42-day Jan–Feb 2025 daily sales forecast, and interactive budget scenario simulations",
+        title="Forecast & scenarios",
+        subtitle="Leak-free back-test, the daily forecast for a budget plan, and budget what-if scenarios.",
         blocks=blocks,
     )

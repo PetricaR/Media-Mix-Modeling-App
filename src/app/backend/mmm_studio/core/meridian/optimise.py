@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure
-from mmm_studio.charts.theme import SLATE, TEAL
+from mmm_studio.charts.theme import SLATE, channel_color
 from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES
-from mmm_studio.report.narrative import fmt_eur
+from mmm_studio.report.narrative import fmt_eur, fmt_eur_signed
 from mmm_studio.report.sections import (
     CalloutBlock,
     ChartBlock,
@@ -133,18 +133,28 @@ def optimise_hill_response_curves(
     # Feasible initial guess
     x_init = np.clip(x0 * (budget / max(x0.sum(), 1.0)), [b[0] for b in bounds], [b[1] for b in bounds])
 
-    def neg_total_inc(x: np.ndarray) -> float:
-        return -sum(float(interpolators[ch](x[i])) for i, ch in enumerate(channels))
+    # Solve in € millions with analytic gradients: on raw euros (~1e7–1e8) SLSQP's finite-difference step is lost in
+    # floating-point noise, the gradient comes out as zero and the optimiser returns the starting allocation.
+    scale = 1e6
+    derivs = {ch: interpolators[ch].derivative() for ch in channels}
 
+    def neg_total_inc(u: np.ndarray) -> float:
+        return -sum(float(interpolators[ch](u[i] * scale)) for i, ch in enumerate(channels)) / scale
+
+    def neg_total_inc_grad(u: np.ndarray) -> np.ndarray:
+        return -np.array([float(derivs[ch](u[i] * scale)) for i, ch in enumerate(channels)])
+
+    u_bounds = [(b[0] / scale, b[1] / scale) for b in bounds]
     res = minimize(
         neg_total_inc,
-        x_init,
+        x_init / scale,
+        jac=neg_total_inc_grad,
         method="SLSQP",
-        bounds=bounds,
-        constraints=[{"type": "eq", "fun": lambda x: float(np.sum(x) - budget)}],
-        options={"maxiter": 400, "ftol": 1e-3},
+        bounds=u_bounds,
+        constraints=[{"type": "eq", "fun": lambda u: float(np.sum(u) - budget / scale), "jac": lambda u: np.ones_like(u)}],
+        options={"maxiter": 500, "ftol": 1e-9},
     )
-    x_opt = np.clip(res.x if res.success else x_init, [b[0] for b in bounds], [b[1] for b in bounds])
+    x_opt = np.clip((res.x if res.success else x_init / scale) * scale, [b[0] for b in bounds], [b[1] for b in bounds])
     if x_opt.sum() > 0:
         x_opt = x_opt * (budget / x_opt.sum())
 
@@ -268,8 +278,13 @@ def build_optimiser_section(
     roi_df: pd.DataFrame,
     response_curves: dict[str, pd.DataFrame],
     opt_alloc_df: pd.DataFrame | None = None,
+    native_error: str | None = None,
 ) -> tuple[Section, dict[str, Any]]:
-    """Build the `optimiser` section (`03_budget_optimisation`) and return `(section, default_opt_result)`."""
+    """Build the `optimiser` section (`03_budget_optimisation`) and return `(section, default_opt_result)`.
+
+    The headline numbers come from Meridian's own `BudgetOptimizer` (same total budget, as in notebook 03 §8). If it
+    fails, the section falls back to the response-curve optimiser with ±30 % channel bounds and says so.
+    """
     media_rt = roi_df.drop(index="All Channels", errors="ignore")
     cur_spend_map = {str(ch): float(media_rt.loc[ch, "spend"]) for ch in media_rt.index if ch in response_curves}
     opt_res = optimise_hill_response_curves(
@@ -279,7 +294,9 @@ def build_optimiser_section(
         max_pct=1.30,
     )
 
+    method = "Response-curve optimiser (±30 % per channel)"
     if opt_alloc_df is not None and len(opt_alloc_df) > 0:
+        method = "Meridian BudgetOptimizer (same total budget)"
         # Override default table with Meridian native BudgetOptimizer output if provided
         allocs = []
         for ch, r in opt_alloc_df.iterrows():
@@ -348,25 +365,24 @@ def build_optimiser_section(
     fig_opt = bar_figure(
         categories=labels,
         series=[
-            {"name": "Historical Spend (€M)", "values": cur_m, "color": SLATE},
-            {"name": "Optimised Spend (€M)", "values": opt_m, "color": TEAL},
+            {"name": "Current spend (€M)", "values": cur_m, "color": SLATE},
+            {"name": "Optimised spend (€M)", "values": opt_m, "colors": [channel_color(lbl) for lbl in labels]},
         ],
         barmode="group",
         orientation="h",
-        title="Same Total Budget Re-Allocated: Historical vs Optimised Channel Spend (€M)",
-        subtitle=f"Total 2-year media budget = {fmt_eur(opt_res['total_budget'])}; expected incremental sales lift = +{opt_res['lift_pct']:.1f}% ({fmt_eur(opt_res['lift_eur'])})",
-        xaxis_title="2-Year Channel Spend (€ Millions)",
+        xaxis_title="Spend over the modelling window (€M)",
     )
+    lift_sign = "+" if opt_res["lift_pct"] >= 0 else ""
 
     table_rows = [
         {
             "channel": a["label"],
             "cur_spend": fmt_eur(a["current_spend"]),
             "opt_spend": fmt_eur(a["optimised_spend"]),
-            "delta_spend": f"{'+' if a['spend_delta'] >= 0 else ''}{fmt_eur(a['spend_delta'])} ({a['spend_delta_pct']:+.1f}%)",
+            "delta_spend": f"{fmt_eur_signed(a['spend_delta'])} ({a['spend_delta_pct']:+.1f}%)",
             "cur_inc": fmt_eur(a["current_inc_sales"]),
             "opt_inc": fmt_eur(a["optimised_inc_sales"]),
-            "opt_roi": f"{a['optimised_roi']:.2f}x",
+            "opt_roi": f"{a['optimised_roi']:.2f}×",
         }
         for a in sorted(opt_res["allocations"], key=lambda x: x["current_spend"], reverse=True)
     ]
@@ -375,50 +391,52 @@ def build_optimiser_section(
         KpisBlock(
             items=[
                 KpiItem(
-                    label="Total Optimised Media Budget",
+                    label="Total media budget",
                     value=fmt_eur(opt_res["total_budget"]),
-                    delta="Budget-neutral reallocation",
+                    delta="Unchanged: re-allocation only",
                     status="neutral",
                 ),
                 KpiItem(
-                    label="Historical Incremental Sales",
+                    label="Incremental sales, current mix",
                     value=fmt_eur(opt_res["current_inc_sales"]),
-                    delta="Current allocation baseline",
+                    delta="Posterior mean",
                     status="neutral",
                 ),
                 KpiItem(
-                    label="Optimised Incremental Sales",
+                    label="Incremental sales, optimised",
                     value=fmt_eur(opt_res["optimised_inc_sales"]),
-                    delta=f"+{opt_res['lift_pct']:.1f}% (+{fmt_eur(opt_res['lift_eur'])})",
-                    status="success",
+                    delta=f"{lift_sign}{opt_res['lift_pct']:.1f}% ({fmt_eur_signed(opt_res['lift_eur'])})",
+                    status="success" if opt_res["lift_pct"] >= 0 else "warn",
                 ),
                 KpiItem(
-                    label="Primary Reallocation Vector",
+                    label="Main re-allocation",
                     value=reallocation_vector,
-                    delta="Subject to SEA geo-lift check",
-                    status="warn",
+                    delta="Validate SEA with a test first" if "SEA" in reallocation_vector else method,
+                    status="warn" if "SEA" in reallocation_vector else "neutral",
                 ),
             ]
         ),
         CalloutBlock(
             tone="warn",
-            title="Decision Guardrail Before Moving Budget Into SEA",
+            title="The optimiser takes the model's ROIs at face value",
             body=(
-                "The response-curve optimiser takes posterior ROIs at face value and shifts budget from saturated Display into SEA. "
-                "Because SEA spend follows organic search demand, run a geo or time-based hold-out test on SEA before executing large budget shifts. "
-                "Use the interactive controls above to impose tighter channel guardrails (e.g. ±15% max shift)."
+                f"{method}: it moves budget along each channel's response curve toward the highest marginal return "
+                f"({reallocation_vector}). A push into SEA inherits SEA's upward-biased ROI (its cost follows search demand), "
+                "so a geo or hold-out test on SEA should come before any budget is actually moved. Use the controls above to "
+                "set tighter per-channel bounds or a different total budget."
+                + (f"\n\nMeridian's BudgetOptimizer was not available for this run ({native_error})." if native_error else "")
             ),
         ),
         ChartBlock(
             id="optimiser_allocation_chart",
-            title="Budget Re-Allocation: Current vs Optimised Spend by Channel (€M)",
-            subtitle="Constrained Hill response-curve optimisation at constant total budget",
+            title="Same budget, re-allocated: current vs optimised spend by channel",
+            subtitle=f"Total budget {fmt_eur(opt_res['total_budget'])}; incremental sales {lift_sign}{opt_res['lift_pct']:.1f}% ({method}).",
             figure=fig_opt,
         ),
         TableBlock(
             id="optimiser_allocation_table",
-            title="Channel-Level Budget Optimisation Table (2023–2024 Window)",
-            subtitle="Comparison of current vs optimised spend and expected incremental revenue",
+            title="Budget optimisation by channel",
+            subtitle="Current vs optimised spend and expected incremental sales over the modelling window",
             columns=[
                 TableColumn(key="channel", label="Channel"),
                 TableColumn(key="cur_spend", label="Current Spend", align="right"),
@@ -434,8 +452,8 @@ def build_optimiser_section(
 
     sec = Section(
         id="optimiser",
-        title="Budget Optimisation & Reallocation Simulator",
-        subtitle="Constrained non-linear allocation across channel Hill saturation curves",
+        title="Budget optimiser",
+        subtitle="Same total budget, re-allocated along the fitted response curves (notebook 03 §8).",
         blocks=blocks,
     )
     return sec, opt_res

@@ -7,6 +7,7 @@ import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure, heatmap_figure, line_figure, small_multiples_figure
 from mmm_studio.charts.theme import COPPER, NAVY, TEAL, channel_color
+from mmm_studio.core.features import complete_years
 from mmm_studio.core.schema import DataRoleConfig
 from mmm_studio.report.narrative import fmt_eur, fmt_pct
 from mmm_studio.report.sections import (
@@ -30,13 +31,14 @@ def build_explore_spend_section(
     total_cost_sum = float(wide_df["total_cost"].sum())
     paid_sales_sum = float(wide_df["paid_sales"].sum())
 
-    w23 = wide_df[wide_df.index.year == 2023]
-    w24 = wide_df[wide_df.index.year == 2024]
-    yoy_spend_pct = (
-        100.0 * (float(w24["total_cost"].sum()) / max(float(w23["total_cost"].sum()), 1.0) - 1.0)
-        if len(w23) and len(w24)
-        else 0.0
-    )
+    full = complete_years(wide_df)
+    years = sorted(set(pd.DatetimeIndex(full.index).year))
+    y_prev, y_last = (years[-2], years[-1]) if len(years) >= 2 else (years[0], years[0])
+    w23 = full[full.index.year == y_prev]
+    w24 = full[full.index.year == y_last]
+    yoy_spend_pct = 100.0 * (float(w24["total_cost"].sum()) / max(float(w23["total_cost"].sum()), 1.0) - 1.0)
+    yoy_sales_pct = 100.0 * (float(w24["total_sales"].sum()) / max(float(w23["total_sales"].sum()), 1.0) - 1.0)
+    cost_ratio = {yr: 100.0 * float(w["total_cost"].sum()) / max(float(w["total_sales"].sum()), 1.0) for yr, w in ((y_prev, w23), (y_last, w24))}
 
     spend_rows = []
     ch_ordered = []
@@ -68,15 +70,18 @@ def build_explore_spend_section(
                 "paid_sales_share": fmt_pct(s_share),
                 "apparent_roas": f"{roas:.2f}×",
                 "active_days": f"{active_days}/{len(wide_df)}",
-                "mean_daily_spend": fmt_eur(float(c_ser.mean())),
+                "mean_daily_spend": fmt_eur(float(c_ser[c_ser > 0].mean())) if active_days else "—",
+                "max_day": fmt_eur(float(c_ser.max())),
                 "yoy_spend": fmt_pct(yoy_c, signed=True),
                 "_c_share": c_share,
+                "_c_sum": c_sum,
                 "_s_share": s_share,
                 "_roas": roas,
             }
         )
 
     spend_rows.sort(key=lambda r: r["_c_share"], reverse=True)
+    meta = {r["channel"]: {"share": r["_c_share"], "sales_share": r["_s_share"], "roas": r["_roas"], "spend": r["_c_sum"]} for r in spend_rows}
     for r in spend_rows:
         ch_ordered.append(r["channel"])
         spend_shares.append(round(r["_c_share"], 2))
@@ -85,6 +90,7 @@ def build_explore_spend_section(
         r.pop("_c_share", None)
         r.pop("_s_share", None)
         r.pop("_roas", None)
+        r.pop("_c_sum", None)
 
     # 1. Spend share vs Paid Sales share & Apparent ROAS
     fig_share = bar_figure(
@@ -100,8 +106,8 @@ def build_explore_spend_section(
         height=370,
     )
 
-    # 2. Monthly spend vs total sales over time
-    monthly = wide_df.resample("ME").sum()
+    # 2. Monthly spend vs total sales over time (complete years)
+    monthly = full.resample("ME").sum()
     m_labels = [d.strftime("%Y-%m") for d in monthly.index]
     fig_time = line_figure(
         x=m_labels,
@@ -215,57 +221,81 @@ def build_explore_spend_section(
         title="Binned Dose–Response Curves: Channel Spend (k€) vs Daily Total Sales (k€)",
     )
 
+    cat = config.print_event_channels[0] if config.print_event_channels else None
+    cat_meta = meta.get(cat, {}) if cat else {}
+    n_sends = int((wide_df[f"cost_{slug_map[cat]}"] > 0).sum()) if cat else 0
+    cat_mean_send = float(wide_df[f"cost_{slug_map[cat]}"][wide_df[f"cost_{slug_map[cat]}"] > 0].mean()) if n_sends else 0.0
+    top_roas = max(meta, key=lambda c: meta[c]["roas"]) if meta else None
+    low_roas = min(meta, key=lambda c: meta[c]["roas"]) if meta else None
+    thu_idx = idx_matrix[ch_ordered.index(cat)][3] if cat in ch_ordered else None
+    weekly = full[["total_sales", "total_cost"]].resample("W-SUN").sum()
+    wk_counts = full["total_sales"].resample("W-SUN").size()
+    weekly = weekly[wk_counts == 7]
+    weekly_r = float(weekly["total_sales"].corr(weekly["total_cost"])) if len(weekly) > 3 else float("nan")
+    callout_body = (
+        (
+            f"**{cat}** takes **{cat_meta['share']:.1f}% of paid spend** ({fmt_eur(cat_meta['spend'])}) but only "
+            f"**{cat_meta['sales_share']:.1f}% of last-touch paid-channel sales** (attributed ROAS {cat_meta['roas']:.2f}): its whole "
+            "print and postage cost is booked on the send-out day, while orders arrive over the following weeks and are often "
+            "credited to SEA, SEO and Direct Type-in. "
+            if cat_meta
+            else ""
+        )
+        + (
+            f"**{top_roas}** looks most efficient (ROAS {meta[top_roas]['roas']:.2f}) and **{low_roas}** least ({meta[low_roas]['roas']:.2f}). "
+            if top_roas and low_roas
+            else ""
+        )
+        + "These ROAS are not incremental: last-touch attribution over-credits lower-funnel channels and under-credits the "
+        "catalog's halo — exactly the gap the MMM closes."
+    )
+
     return Section(
         id="explore_spend",
-        title="Marketing Spend Structure & Cadence",
-        subtitle="Budget allocation across the 7 paid levers, weekday cadence, and empirical dose-response shapes.",
+        title="Marketing investment",
+        subtitle=f"Budget allocation across the {len(ch_ordered)} paid channels, flighting, weekday cadence and raw spend–sales shapes.",
         blocks=[
             KpisBlock(
                 items=[
-                    KpiItem(label="Total 2-Year Spend", value=fmt_eur(total_cost_sum), delta=f"Mean {fmt_eur(float(wide_df['total_cost'].mean()))}/day"),
-                    KpiItem(label="2024 vs 2023 Spend", value=fmt_pct(yoy_spend_pct, signed=True), delta="vs +20.7% sales growth", status="success"),
-                    KpiItem(label="Catalog Share of Spend", value=spend_rows[0]["spend_share"], delta=f"{spend_rows[0]['total_spend']} across 28 editions"),
-                    KpiItem(label="Digital Share of Spend", value=fmt_pct(100.0 * float(wide_df["digital_cost"].sum()) / max(total_cost_sum, 1.0)), delta="6 continuous digital levers"),
+                    KpiItem(label="Total paid spend", value=fmt_eur(total_cost_sum), delta=f"Mean {fmt_eur(float(wide_df['total_cost'].mean()))}/day over {len(wide_df)} days"),
+                    KpiItem(label=f"{y_last} vs {y_prev} spend", value=fmt_pct(yoy_spend_pct, signed=True), delta=f"vs {fmt_pct(yoy_sales_pct, signed=True)} sales growth", status="success" if yoy_spend_pct < yoy_sales_pct else "warn"),
+                    KpiItem(label=f"{cat or 'Print'} share of spend", value=fmt_pct(cat_meta.get('share', 0.0)), delta=f"{n_sends} send-outs, Ø {fmt_eur(cat_mean_send)} each"),
+                    KpiItem(label="Marketing cost ratio", value=f"{cost_ratio[y_last]:.1f}%", delta=f"spend / sales ({cost_ratio[y_prev]:.1f}% in {y_prev})"),
                 ]
             ),
             CalloutBlock(
                 tone="warn",
-                title="Why Apparent Last-Touch ROAS Misleads Budget Allocation",
-                body=(
-                    "Catalog accounts for **55.5% of paid spend** (€46.5M) but only **18.0% of last-touch paid sales** "
-                    "(apparent ROAS 1.43×), because its entire printing & postage cost is booked on a single Thursday send-out day "
-                    "while the induced orders arrive over the next 14–21 days and spill over into SEA, SEO, and Direct Type-in. "
-                    "Conversely, Affiliate (`17.6×` apparent ROAS) pays commission on realised orders. Proper adstock + Bayesian MMM resolves this."
-                ),
+                title="Why last-touch ROAS misleads budget allocation",
+                body=callout_body,
             ),
             ChartBlock(
                 id="spend_vs_sales_share",
                 title="Share of Marketing Spend vs Share of Attributed Paid Sales",
-                subtitle="Comparison across the 7 paid media levers.",
+                subtitle=f"Across the {len(ch_ordered)} paid channels.",
                 figure=fig_share,
             ),
             ChartBlock(
                 id="spend_vs_sales_time",
                 title="Monthly Total Sales vs Digital and Catalog Spend",
-                subtitle="2024 spend grew +12.4% while total sales grew +20.7%.",
+                subtitle=f"{y_last} spend {fmt_pct(yoy_spend_pct, signed=True)} while total sales {fmt_pct(yoy_sales_pct, signed=True)}; weekly spend vs weekly sales r = {weekly_r:.2f} (budgets follow the expected season).",
                 figure=fig_time,
             ),
             ChartBlock(
                 id="spend_small_multiples",
                 title="Daily Spend Trajectories by Paid Channel (k€/day)",
-                subtitle="Catalog is a 28-impulse point process (~€1.66M per edition); the 6 digital channels run continuously.",
+                subtitle=f"{cat or 'The print channel'} is pulsed ({n_sends} send-outs, Ø {fmt_eur(cat_mean_send)}); digital channels spend every day.",
                 figure=fig_sm,
             ),
             ChartBlock(
                 id="spend_weekday_index",
                 title="Paid Channel × Weekday Spend Index (100 = Channel Mean)",
-                subtitle="Catalog spikes on Thursdays (index ~650); digital channels follow Sunday/Monday consumer search demand.",
+                subtitle=(f"{cat} cost lands on Thursdays (index {thu_idx:.0f}); " if thu_idx is not None else "") + "digital channels lean to the weekend and Monday campaign launches.",
                 figure=fig_dow,
             ),
             ChartBlock(
                 id="spend_response",
                 title="Empirical Dose–Response Curves (Spend vs Total Sales)",
-                subtitle="Octile-binned mean sales response showing diminishing marginal returns at high daily spend.",
+                subtitle="Octile-binned mean total sales by daily spend (catalog: 14-day rolling spend); indicative only — spend and sales share the season.",
                 figure=fig_resp,
             ),
             TableBlock(
@@ -278,7 +308,8 @@ def build_explore_spend_section(
                     TableColumn(key="paid_sales_share", label="Paid Sales Share", align="right"),
                     TableColumn(key="apparent_roas", label="Apparent ROAS", align="right"),
                     TableColumn(key="active_days", label="Active Days", align="right"),
-                    TableColumn(key="mean_daily_spend", label="Mean/Day", align="right"),
+                    TableColumn(key="mean_daily_spend", label="Mean / active day", align="right"),
+                    TableColumn(key="max_day", label="Max day", align="right"),
                     TableColumn(key="yoy_spend", label="YoY Spend", align="right"),
                 ],
                 rows=spend_rows,

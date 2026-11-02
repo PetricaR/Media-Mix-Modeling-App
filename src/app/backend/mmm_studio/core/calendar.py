@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from mmm_studio.core.features import black_friday
+
 DEFAULT_DIGITAL_ALPHAS: dict[str, float] = {
     "sea": 0.15,
     "affiliate": 0.20,
@@ -34,9 +36,14 @@ def delayed_binomial_adstock(
     max_lag: int = 21,
     decay: float = 0.88,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Delayed adstock kernel peaking at `peak_lag` days and decaying over `max_lag` days."""
+    """Delayed adstock kernel w(k) ∝ (k + 1)^a · decay^k that peaks at `peak_lag` days and fades over `max_lag` days.
+
+    The exponent is a = −ln(decay) · (peak_lag + 1), which puts the maximum exactly at k = peak_lag (using `peak_lag`
+    itself as the exponent would push the peak out to roughly day 22 for decay 0.88).
+    """
     lags = np.arange(0, max_lag + 1, dtype=float)
-    weights = np.power(lags + 1.0, peak_lag) * np.power(decay, lags)
+    exponent = -np.log(decay) * (peak_lag + 1.0)
+    weights = np.power(lags + 1.0, exponent) * np.power(decay, lags)
     weights = weights / weights.sum()
     arr = np.asarray(x, dtype=float)
     convolved = np.convolve(arr, weights, mode="full")[: len(arr)]
@@ -75,6 +82,7 @@ def fourier_terms(
 def german_holiday_flags(dates: pd.DatetimeIndex) -> pd.DataFrame:
     """Build German federal holiday and major retail calendar indicators."""
     import holidays
+    from dateutil.easter import easter
 
     years = sorted(set(dates.year.tolist()))
     de_holidays = holidays.country_holidays("DE", years=years)
@@ -88,17 +96,14 @@ def german_holiday_flags(dates: pd.DatetimeIndex) -> pd.DataFrame:
     black_week = np.zeros(len(dates), dtype=int)
     cyber_week = np.zeros(len(dates), dtype=int)
     for yr in years:
-        nov = pd.date_range(f"{yr}-11-01", f"{yr}-11-30", freq="D")
-        fridays = nov[nov.dayofweek == 4]
-        if len(fridays) >= 4:
-            bf = fridays[3]
-            bw_start = bf - pd.Timedelta(days=4)
-            bw_end = bf + pd.Timedelta(days=3)
-            cw_end = bf + pd.Timedelta(days=10)
-            black_week |= ((dates >= bw_start) & (dates <= bw_end)).astype(int)
-            cyber_week |= ((dates > bw_end) & (dates <= cw_end)).astype(int)
+        bf = black_friday(yr)
+        bw_start = bf - pd.Timedelta(days=4)
+        bw_end = bf + pd.Timedelta(days=3)
+        cw_end = bf + pd.Timedelta(days=10)
+        black_week |= ((dates >= bw_start) & (dates <= bw_end)).astype(int)
+        cyber_week |= ((dates > bw_end) & (dates <= cw_end)).astype(int)
 
-    easter_sundays = [pd.Timestamp(yr, 4, 9) if yr == 2023 else pd.Timestamp(yr, 3, 31) for yr in years]
+    easter_sundays = [pd.Timestamp(easter(yr)) for yr in years]
     pre_easter = np.zeros(len(dates), dtype=int)
     for es in easter_sundays:
         pre_easter |= ((dates >= es - pd.Timedelta(days=10)) & (dates < es)).astype(int)

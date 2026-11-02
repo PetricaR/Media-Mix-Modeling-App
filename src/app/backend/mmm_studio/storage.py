@@ -62,7 +62,7 @@ class LocalStorage(ArtifactStorage):
     def _resolve(self, key: str) -> Path:
         clean_key = key.lstrip("/")
         target = (self.base_dir / clean_key).resolve()
-        if not str(target).startswith(str(self.base_dir)):
+        if target != self.base_dir and not target.is_relative_to(self.base_dir):
             raise ValueError(f"Invalid storage key traversal: {key}")
         return target
 

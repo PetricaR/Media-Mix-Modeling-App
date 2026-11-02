@@ -79,3 +79,46 @@ def test_all_eda_sections_build_cleanly(
     assert float(halo_dict["total_sales"]) == pytest.approx(
         golden_data["halo_uplift_7d_pct"]["total_sales"], abs=1.0
     )
+
+
+def test_eda_numbers_match_notebooks_01_and_01b(
+    profiled_case_study: tuple[pd.DataFrame, DataProfile],
+    wide_model: pd.DataFrame,
+    golden_data: dict[str, Any],
+) -> None:
+    from mmm_studio.core.eda.notebook_stats import catalog_event_study, correlation_robustness
+    from mmm_studio.core.metrics import in_sample_naive_baselines
+    from mmm_studio.report.facts import compute_case_facts
+
+    _, profile = profiled_case_study
+    cfg = profile.role_config
+    panel = add_calendar_and_adstock_features(wide_model, config=cfg)
+    y = panel["total_sales"]
+    target = golden_data["target_summary"]
+    assert len(panel) == golden_data["calendar_days"]
+    assert y.mean() == pytest.approx(target["mean_daily_sales"], abs=1)
+    assert y.std() == pytest.approx(target["std_daily_sales"], abs=1)
+
+    naive = {r["model"]: r["MAE_over_mean"] for _, r in in_sample_naive_baselines(y).iterrows()}
+    gold_naive = golden_data["naive_baselines_mae_over_mean"]
+    assert naive["Naive: constant mean"] == pytest.approx(gold_naive["constant_mean"], abs=0.001)
+    assert naive["Naive: weekday mean"] == pytest.approx(gold_naive["weekday_mean"], abs=0.001)
+    assert naive["Naive: lag-7 (last week)"] == pytest.approx(gold_naive["lag_7"], abs=0.001)
+    assert naive["Naive: lag-1 (yesterday, 1-step)"] == pytest.approx(gold_naive["lag_1"], abs=0.001)
+
+    facts = compute_case_facts(panel, cfg)
+    assert facts["yoy_sales_pct"] == pytest.approx(golden_data["yoy_growth"]["sales_growth_2024_vs_2023_pct"], abs=0.05)
+    assert facts["yoy_spend_pct"] == pytest.approx(golden_data["yoy_growth"]["spend_growth_2024_vs_2023_pct"], abs=0.05)
+    assert facts["paid_share_pct"] == pytest.approx(golden_data["yoy_growth"]["paid_share_attributed_sales_pct"], abs=0.05)
+    assert facts["catalog_best_lag"] == 3
+    assert facts["catalog_best_lag_r"] == pytest.approx(golden_data["catalog_lag_3_corr"], abs=0.005)
+    assert facts["top25_after_sendout"] == 20
+    assert facts["missing_channel_days"] == {k: v for k, v in golden_data["missing_channel_days"].items() if k != "total"}
+    for ch, ref in golden_data["halo_uplift_7d_pct"].items():
+        assert facts["halo_7d"][ch] == pytest.approx(ref, abs=0.6)
+
+    study = catalog_event_study(panel)
+    assert study.loc[3, "lift"] == pytest.approx(0.99, abs=0.005)
+    robust = correlation_robustness(panel, cfg)
+    assert robust.loc["SEA", "weekly"] == pytest.approx(0.83, abs=0.005)
+    assert robust.loc["Display", "deseasonalised"] == pytest.approx(0.39, abs=0.005)

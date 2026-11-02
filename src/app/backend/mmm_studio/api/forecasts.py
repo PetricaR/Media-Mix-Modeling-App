@@ -15,14 +15,15 @@ from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db, requi
 from mmm_studio.core.meridian.forecast import (
     PlanValidationError,
     build_example_plan,
-    fast_forecast_from_multipliers,
+    scenario_payload,
     validate_plan,
 )
 from mmm_studio.core.meridian.spec import MeridianSpecConfig
 from mmm_studio.core.schema import extract_role_config
 from mmm_studio.db.models import ForecastRun, Run, ScenarioRun
 from mmm_studio.jobs.app import count_active_queue_jobs, defer_task, get_queue_position, sweep_stale_runs
-from mmm_studio.jobs.tasks import run_forecast_job, run_scenario_job
+from mmm_studio.jobs.tasks import default_forecast_keys, run_forecast_job, run_scenario_job
+from mmm_studio.pipeline.context import model_panel_key
 from mmm_studio.settings import Settings
 from mmm_studio.storage import StorageBackend
 
@@ -43,73 +44,54 @@ def _paid_channels_for_run(run: Run | None, wide_df: pd.DataFrame) -> list[str]:
 
 
 def _load_wide_df(storage: StorageBackend, run_id: str) -> pd.DataFrame:
-    wide_key = f"runs/{run_id}/data/wide_2023_2024.parquet"
-    if not storage.exists(wide_key):
+    wide_key = model_panel_key(storage, run_id)
+    if wide_key is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Daily wide dataset is not yet ready for run {run_id}. Wait for ingestion to complete.",
+            detail=f"The daily modelling panel is not ready yet for run {run_id}. Wait for ingestion to complete.",
         )
     return pd.read_parquet(io.BytesIO(storage.read_bytes(wide_key)))
 
 
 def _ensure_default_forecast(db: Session, storage: StorageBackend, run_id: str) -> ForecastRun | None:
-    """Ensure a `default_{run_id}` ForecastRun row exists if the run has a wide dataset or default forecast."""
+    """Expose the run's example-plan forecast (stage s14) as the `default_{run_id}` ForecastRun once it exists.
+
+    Nothing is created before the Meridian forecast has run, so the page never shows a placeholder as a result.
+    A row created by an older version (without `source = pipeline`) is rebuilt from the real data.
+    """
     default_id = f"default_{run_id}"
     fc = db.get(ForecastRun, default_id)
-    if fc is not None:
+    if fc is not None and (fc.summary or {}).get("source") == "pipeline":
         return fc
 
-    wide_key = f"runs/{run_id}/data/wide_2023_2024.parquet"
-    if not storage.exists(wide_key):
+    daily_keys, plan_keys = default_forecast_keys(run_id)
+    daily_key = next((k for k in daily_keys if storage.exists(k)), None)
+    plan_key = next((k for k in plan_keys if storage.exists(k)), None)
+    if daily_key is None or plan_key is None:
+        if fc is not None:
+            db.delete(fc)
+            db.commit()
         return None
 
-    fc_daily_key = f"runs/{run_id}/data/forecast_2025_01_daily.parquet"
-    fc_plan_key = f"runs/{run_id}/data/forecast_2025_01_plan.parquet"
+    base_daily = pd.read_parquet(io.BytesIO(storage.read_bytes(daily_key)))
+    base_plan = pd.read_parquet(io.BytesIO(storage.read_bytes(plan_key)))
+    res_payload = scenario_payload(base_daily, base_plan, base_daily, base_plan, "Meridian refit (pipeline example plan)")
     result_key = f"runs/{run_id}/forecasts/{default_id}/result.json"
-
-    if storage.exists(fc_daily_key) and storage.exists(fc_plan_key):
-        base_daily = pd.read_parquet(io.BytesIO(storage.read_bytes(fc_daily_key)))
-        base_plan = pd.read_parquet(io.BytesIO(storage.read_bytes(fc_plan_key)))
-    else:
-        wide_df = pd.read_parquet(io.BytesIO(storage.read_bytes(wide_key)))
-        run_rec = db.get(Run, run_id)
-        paid_channels = _paid_channels_for_run(run_rec, wide_df)
-        base_plan = build_example_plan(wide_df, days=42, paid_channels=paid_channels)
-        mean_sales = float(wide_df["total_sales"].mean())
-        base_daily = pd.DataFrame(
-            {
-                "forecast": mean_sales,
-                "credible_lo": mean_sales * 0.92,
-                "credible_hi": mean_sales * 1.08,
-                "prediction_lo": mean_sales * 0.85,
-                "prediction_hi": mean_sales * 1.15,
-                "planned_spend": base_plan.sum(axis=1).to_numpy(),
-            },
-            index=base_plan.index,
-        )
-
-    res_payload = fast_forecast_from_multipliers(
-        base_daily=base_daily,
-        base_plan=base_plan,
-        multipliers={},
-        horizon_days=len(base_plan),
-    )
     storage.write_json(result_key, res_payload)
-
-    fc = ForecastRun(
-        id=default_id,
-        run_id=run_id,
-        name="Jan–Feb 2025 Baseline Plan (42d)",
-        status="succeeded",
-        plan_path=fc_plan_key,
-        result_path=result_key,
-        summary={
-            "horizon_days": len(base_plan),
-            "total_forecast_sales": float(base_daily["forecast"].sum()),
-            "total_planned_spend": float(base_daily["planned_spend"].sum()),
-        },
-    )
-    db.add(fc)
+    summary = {
+        "source": "pipeline",
+        "horizon_days": len(base_plan),
+        "start_date": base_plan.index[0].strftime("%Y-%m-%d"),
+        "end_date": base_plan.index[-1].strftime("%Y-%m-%d"),
+        "total_forecast_sales": float(base_daily["forecast"].sum()),
+        "total_planned_spend": float(base_plan.to_numpy().sum()),
+    }
+    name = f"Example plan {summary['start_date']} → {summary['end_date']} ({len(base_plan)} days)"
+    if fc is None:
+        fc = ForecastRun(id=default_id, run_id=run_id, name=name, status="succeeded", plan_path=plan_key, result_path=result_key, summary=summary)
+        db.add(fc)
+    else:
+        fc.name, fc.status, fc.plan_path, fc.result_path, fc.summary, fc.error = name, "succeeded", plan_key, result_key, summary, None
     db.commit()
     db.refresh(fc)
     return fc
@@ -166,6 +148,7 @@ def get_plan_template(
     wide_df = _load_wide_df(storage, run_id)
     paid_channels = _paid_channels_for_run(run, wide_df)
     plan_df = build_example_plan(wide_df, days=days, paid_channels=paid_channels)
+    plan_df = plan_df.round(2)
     csv_bytes = plan_df.reset_index().to_csv(index=False).encode("utf-8")
     return Response(
         content=csv_bytes,
@@ -306,6 +289,12 @@ def create_scenario(
     fc = db.get(ForecastRun, forecast_id)
     if not fc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Forecast {forecast_id} not found.")
+    if fc.status != "succeeded":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Forecast {forecast_id} is {fc.status}; scenarios can run once it has succeeded.",
+        )
+    run = db.get(Run, fc.run_id)
 
     scenario_id = f"sc_{uuid.uuid4().hex[:10]}"
     sc = ScenarioRun(
@@ -316,6 +305,8 @@ def create_scenario(
         inputs={
             "multipliers": payload.multipliers,
             "horizon_days": payload.horizon_days,
+            # Lets the interactive worker's cache tell a re-run's model apart from the previous one
+            "cache_version": run.updated_at.isoformat() if run and run.updated_at else "",
         },
         status="queued",
     )

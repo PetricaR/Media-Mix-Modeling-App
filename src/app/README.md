@@ -1,6 +1,6 @@
 # MMM Studio — Standalone Marketing Mix Modelling Web Application
 
-**MMM Studio** (`src/app/`) is a self-contained, full-stack web application and CLI pipeline for Bayesian Marketing Mix Modelling (Google Meridian v2.1.0), OLS benchmarking, exploratory data analysis, constrained budget optimisation, and out-of-sample budget-plan forecasting.
+**MMM Studio** (`src/app/`), branded with Tchibo's design tokens and labelled as an independent case-study prototype, is a self-contained, full-stack web application and CLI pipeline for Bayesian Marketing Mix Modelling (Google Meridian v2.1.0), OLS benchmarking, exploratory data analysis, constrained budget optimisation, and out-of-sample budget-plan forecasting.
 
 ## Architectural Isolation
 
@@ -19,18 +19,19 @@ You can execute the full 15-stage pipeline directly from the command line agains
 cd src/app/backend
 uv sync --extra worker
 
-# Fast EDA + Feature Preparation + OLS Benchmarks (~5 seconds)
+# Fast EDA + data preparation + OLS benchmark (~5 seconds)
 uv run python -m mmm_studio.cli run \
   --input ../../../data/DataScienceMarketingUseCase.xlsx \
   --out ../../.app_data/runs/cli_demo \
   --profile quick \
   --skip-meridian
 
-# Full Pipeline including Google Meridian Bayesian MCMC + 3 HTML Reports + 42d Forecast
+# Full pipeline with Google Meridian, matching notebooks 03–05 (~15–25 min on a laptop CPU):
+# final fit + forward hold-out, ROI/optimiser/HTML reports, back-test, 42-day forecast, selection grid
 uv run python -m mmm_studio.cli run \
   --input ../../../data/DataScienceMarketingUseCase.xlsx \
   --out ../../.app_data/runs/cli_full \
-  --profile quick
+  --profile full
 ```
 *(Both `--input` / `--workbook` and `--profile {full,quick,smoke}` / `--fast` / `--smoke` are supported.)*
 
@@ -61,9 +62,11 @@ docker compose -f src/app/docker-compose.yml up --build
 cd src/app/backend
 uv run uvicorn mmm_studio.main:app --reload --port 8000
 
-# Terminal 2 — Procrastinate Worker (analysis, meridian, interactive queues)
+# Terminals 2–4 — one Procrastinate worker per queue (so scenarios never wait behind a Meridian fit)
 cd src/app/backend
-uv run python -m mmm_studio.cli worker --queue all
+uv run python -m mmm_studio.cli worker --queue analysis
+uv run python -m mmm_studio.cli worker --queue meridian
+uv run python -m mmm_studio.cli worker --queue interactive
 
 # Terminal 3 — React + Vite Frontend
 cd src/app/frontend

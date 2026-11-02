@@ -59,6 +59,51 @@ def api_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_rate_limiter()
 
 
+def _seed_meridian_artifacts(run_id: str) -> None:
+    """Write the files the Meridian stages produce, with simple curves, so the interactive jobs can be tested fast."""
+    import io
+
+    import numpy as np
+    import pandas as pd
+
+    from mmm_studio.core.meridian.forecast import build_example_plan
+
+    storage = get_storage()
+    wide = pd.read_parquet(io.BytesIO(storage.read_bytes(f"runs/{run_id}/data/wide_model.parquet")))
+    channels = ["sea", "catalog", "display", "display_network", "social_media", "psm"]
+    roi = pd.DataFrame(
+        {
+            "spend": [float(wide[f"cost_{c}"].sum()) for c in channels],
+            "roi": [8.0, 1.0, 0.7, 1.2, 0.7, 2.5],
+            "mroi": [4.5, 0.8, 0.2, 0.5, 0.3, 1.2],
+            "pct_of_contribution": [55.0, 6.0, 3.0, 1.0, 1.0, 1.0],
+        },
+        index=pd.Index(channels, name="channel"),
+    )
+    curves = {}
+    for c, r in roi.iterrows():
+        mult = np.round(np.arange(0, 2.01, 0.05), 2)
+        inc = r["roi"] * r["spend"] * (1 - np.exp(-mult)) / (1 - np.exp(-1))
+        curves[c] = [{"multiplier": float(m), "spend": float(m * r["spend"]), "mean": float(v), "ci_lo": float(0.8 * v), "ci_hi": float(1.2 * v)} for m, v in zip(mult, inc)]
+    plan = build_example_plan(wide, days=42)
+    daily = pd.DataFrame(
+        {
+            "forecast": 1.0e6,
+            "credible_lo": 0.95e6,
+            "credible_hi": 1.05e6,
+            "prediction_lo": 0.85e6,
+            "prediction_hi": 1.15e6,
+            "planned_spend": plan.sum(axis=1).to_numpy(),
+        },
+        index=plan.index,
+    )
+    for name, frame in (("meridian_roi", roi), ("forecast_daily", daily), ("forecast_plan", plan)):
+        buf = io.BytesIO()
+        frame.to_parquet(buf, index=True)
+        storage.write_bytes(f"runs/{run_id}/data/{name}.parquet", buf.getvalue())
+    storage.write_json(f"runs/{run_id}/data/response_curves.json", curves)
+
+
 def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     client, _ = api_env
 
@@ -136,10 +181,21 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     assert r_tpl.status_code == 200
     assert "date,sea,catalog" in r_tpl.text
 
+    # Without a Meridian fit there is no forecast and no optimiser: nothing may be invented
+    default_fc_id = f"default_{run_id}"
     r_fcs = client.get(f"/api/v1/runs/{run_id}/forecasts")
     assert r_fcs.status_code == 200
-    default_fc_id = f"default_{run_id}"
-    assert any(f["id"] == default_fc_id for f in r_fcs.json()["forecasts"])
+    assert all(f["id"] != default_fc_id for f in r_fcs.json()["forecasts"])
+    r_opt_early = client.post(f"/api/v1/runs/{run_id}/optimisations", json={})
+    assert r_opt_early.status_code == 409
+
+    # Seed the artifacts a Meridian run writes (ROI table, response curves, example-plan forecast)
+    _seed_meridian_artifacts(run_id)
+
+    r_fcs = client.get(f"/api/v1/runs/{run_id}/forecasts")
+    assert any(f["id"] == default_fc_id and f["status"] == "succeeded" for f in r_fcs.json()["forecasts"])
+    r_fc = client.get(f"/api/v1/forecasts/{default_fc_id}")
+    assert r_fc.json()["result"]["scenario_total_sales"] > 0
 
     r_sc = client.post(
         f"/api/v1/forecasts/{default_fc_id}/scenarios",
@@ -153,8 +209,12 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     r_sc_done = client.get(f"/api/v1/scenarios/{sc_id}")
     assert r_sc_done.status_code == 200
     sc_payload = r_sc_done.json()
-    assert sc_payload["status"] == "succeeded"
-    assert sc_payload["result"]["delta_sales"] > 0
+    assert sc_payload["status"] == "succeeded", sc_payload.get("error")
+    result = sc_payload["result"]
+    assert result["delta_sales"] > 0
+    assert "delta_sales_pct" in result and result["channel_summary"]
+    aff = next(r for r in result["channel_summary"] if r["slug"] == "affiliate")
+    assert aff["delta_spend"] == 0  # Affiliate is a control: its multiplier is ignored
 
     # 7. Interactive budget optimiser
     r_opt = client.post(
@@ -169,19 +229,21 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     r_opt_done = client.get(f"/api/v1/optimisations/{opt_id}")
     assert r_opt_done.status_code == 200
     opt_payload = r_opt_done.json()
-    assert opt_payload["status"] == "succeeded"
+    assert opt_payload["status"] == "succeeded", opt_payload.get("error")
     assert len(opt_payload["result"]["channels"]) == 6
     assert len(opt_payload["result"]["allocations"]) == 6
     first_alloc = opt_payload["result"]["allocations"][0]
     for key in ("channel_label", "current_spend", "optimal_spend", "delta_pct", "expected_incremental_sales", "roi", "mroi"):
         assert key in first_alloc
-    assert "expected_uplift_sales" in opt_payload["result"]
-    assert "expected_uplift_pct" in opt_payload["result"]
+    assert abs(sum(a["optimal_spend"] for a in opt_payload["result"]["allocations"]) - opt_payload["result"]["total_budget"]) < 10
 
     r_opts_list = client.get(f"/api/v1/runs/{run_id}/optimisations")
     assert r_opts_list.status_code == 200
     assert r_opts_list.json()["run_id"] == run_id
     assert len(r_opts_list.json()["optimisations"]) == 1
+
+    # A finished run cannot be cancelled; a re-run resets its stages
+    assert client.post(f"/api/v1/runs/{run_id}/cancel").status_code == 409
 
     # 8. Artifacts listing & streaming
     r_arts = client.get(f"/api/v1/runs/{run_id}/artifacts")

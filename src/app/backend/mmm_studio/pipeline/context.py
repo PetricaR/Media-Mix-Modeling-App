@@ -14,6 +14,24 @@ from mmm_studio.core.schema import DataProfile, DataRoleConfig
 from mmm_studio.report.sections import Section
 from mmm_studio.storage import ArtifactStorage
 
+# Daily modelling panel (the full calendar, as in notebooks 02–05). Runs created before the rename stored it as
+# `wide_2023_2024`, so readers fall back to that key.
+MODEL_PANEL_NAME = "wide_model"
+LEGACY_MODEL_PANEL_NAME = "wide_2023_2024"
+
+
+def model_panel_key(storage: ArtifactStorage, run_id: str) -> str | None:
+    """Return the storage key of a run's modelling panel, or None when ingestion has not produced it yet."""
+    for name in (MODEL_PANEL_NAME, LEGACY_MODEL_PANEL_NAME):
+        key = f"runs/{run_id}/data/{name}.parquet"
+        if storage.exists(key):
+            return key
+    return None
+
+
+class StageSkipped(Exception):
+    """Raised by a stage that does not apply to this run (e.g. the model-selection grid on a quick profile)."""
+
 
 @dataclass
 class RunContext:
@@ -28,6 +46,7 @@ class RunContext:
     on_stage_start: Callable[[str], None] | None = None
     on_stage_complete: Callable[[str], None] | None = None
     on_stage_error: Callable[[str, str], None] | None = None
+    on_stage_skipped: Callable[[str, str], None] | None = None
     on_heartbeat: Callable[[], None] | None = None
     is_cancelled: Callable[[], bool] | None = None
     spawn_meridian_child: bool = False
@@ -91,8 +110,11 @@ class RunContext:
         return pq_key
 
     def load_dataframe(self, name: str) -> pd.DataFrame:
-        raw = self.storage.read_bytes(self.key(f"data/{name}.parquet"))
-        return pd.read_parquet(io.BytesIO(raw))
+        if name == MODEL_PANEL_NAME:
+            key = model_panel_key(self.storage, self.run_id) or self.key(f"data/{name}.parquet")
+        else:
+            key = self.key(f"data/{name}.parquet")
+        return pd.read_parquet(io.BytesIO(self.storage.read_bytes(key)))
 
     def save_json(self, rel_path: str, payload: Any) -> str:
         return self.storage.write_json(self.key(rel_path), payload)

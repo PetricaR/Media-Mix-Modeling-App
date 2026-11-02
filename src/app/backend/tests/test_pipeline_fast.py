@@ -63,11 +63,11 @@ def test_cli_fast_pipeline_generates_all_analysis_sections(
     assert total_charts >= 45
 
     # Check data artifacts
-    assert (run_dir / "data" / "wide_2023_2024.csv").exists()
+    assert (run_dir / "data" / "wide_model.csv").exists()
     assert (run_dir / "data" / "meridian_input.csv").exists()
 
     # Check profile matches golden
     profile = json.loads((run_dir / "meta" / "profile.json").read_text(encoding="utf-8"))
     assert profile["raw_row_count"] == golden_data["raw_row_count"]
     assert profile["calendar_days"] == golden_data["calendar_days"]
-    assert profile["modelling_days"] == 731
+    assert profile["modelling_days"] == golden_data["calendar_days"]  # notebooks keep 2025-01-01

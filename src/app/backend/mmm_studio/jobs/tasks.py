@@ -16,7 +16,7 @@ from procrastinate import JobContext
 from mmm_studio.core.schema import DataProfile, DataRoleConfig, default_role_config, extract_role_config
 from mmm_studio.db.models import ForecastRun, OptimisationRun, Run, ScenarioRun, StageProgress, utcnow
 from mmm_studio.db.session import get_session_factory
-from mmm_studio.pipeline.context import RunContext
+from mmm_studio.pipeline.context import RunContext, model_panel_key
 from mmm_studio.pipeline.stages import (
     STAGE_DEFINITIONS,
     run_analysis_stages,
@@ -47,26 +47,30 @@ def _cache_put(key: str, value: dict[str, Any]) -> None:
             _INTERACTIVE_CACHE.popitem(last=False)
 
 
-def ensure_stage_rows(run_id: str, skip_meridian: bool = False, sqlalchemy_url: str | None = None) -> None:
-    """Create initial StageProgress rows for a Run if not already present."""
+def ensure_stage_rows(
+    run_id: str,
+    skip_meridian: bool = False,
+    sqlalchemy_url: str | None = None,
+    reset: bool = False,
+) -> None:
+    """Create the StageProgress rows of a Run; with `reset=True` (a re-run) every stage goes back to pending."""
     SessionLocal = get_session_factory(sqlalchemy_url)
     with SessionLocal() as db:
-        existing = {
-            s.key for s in db.query(StageProgress).filter(StageProgress.run_id == run_id).all()
-        }
+        existing = {s.key: s for s in db.query(StageProgress).filter(StageProgress.run_id == run_id).all()}
+        defined = {key for key, _, _ in STAGE_DEFINITIONS}
         for idx, (key, label, queue) in enumerate(STAGE_DEFINITIONS):
-            if key not in existing:
-                status = "skipped" if (skip_meridian and queue == "meridian") else "pending"
-                db.add(
-                    StageProgress(
-                        run_id=run_id,
-                        order_idx=idx,
-                        key=key,
-                        label=label,
-                        queue=queue,
-                        status=status,
-                    )
-                )
+            status = "skipped" if (skip_meridian and queue == "meridian") else "pending"
+            row = existing.get(key)
+            if row is None:
+                db.add(StageProgress(run_id=run_id, order_idx=idx, key=key, label=label, queue=queue, status=status))
+            elif reset:
+                row.order_idx, row.label, row.queue, row.status = idx, label, queue, status
+                row.started_at = row.finished_at = None
+                row.error = None
+        if reset:
+            for key, row in existing.items():
+                if key not in defined:
+                    db.delete(row)
         db.commit()
 
 
@@ -185,6 +189,20 @@ def _build_run_context(
                 st.error = err_msg
                 sdb.commit()
 
+    def on_stage_skipped(stage_key: str, reason: str) -> None:
+        hb.touch()
+        with SessionLocal() as sdb:
+            st = (
+                sdb.query(StageProgress)
+                .filter(StageProgress.run_id == run_id, StageProgress.key == stage_key)
+                .first()
+            )
+            if st:
+                st.status = "skipped"
+                st.finished_at = utcnow()
+                st.error = reason
+                sdb.commit()
+
     spawn_child = (
         hb.job_context is not None
         and os.environ.get("MMM_SPAWN_MERIDIAN_CHILD", "true").lower() in ("1", "true", "yes")
@@ -199,6 +217,7 @@ def _build_run_context(
         on_stage_start=on_stage_start,
         on_stage_complete=on_stage_complete,
         on_stage_error=on_stage_error,
+        on_stage_skipped=on_stage_skipped,
         on_heartbeat=hb.touch,
         is_cancelled=lambda: hb.cancelled,
         spawn_meridian_child=spawn_child,
@@ -244,12 +263,14 @@ def execute_analysis_job(
 
         with SessionLocal() as db:
             run_rec = db.get(Run, run_id)
-            s15 = (
+            meridian_stages = (
                 db.query(StageProgress)
-                .filter(StageProgress.run_id == run_id, StageProgress.key == "s15_finalize")
-                .first()
+                .filter(StageProgress.run_id == run_id, StageProgress.queue == "meridian")
+                .all()
             )
-            meridian_done = s15 is not None and s15.status == "succeeded"
+            meridian_done = bool(meridian_stages) and all(
+                st.status in ("succeeded", "failed", "skipped") for st in meridian_stages
+            ) and any(st.status == "succeeded" for st in meridian_stages)
             if not meridian_done:
                 ctx.save_json("meta/summary.json", summary)
             if run_rec and run_rec.status != "cancelled":
@@ -301,12 +322,11 @@ def execute_meridian_job(
     t0 = time.monotonic()
     try:
         ctx = _build_run_context(run_id, hb, sqlalchemy_url=sqlalchemy_url)
-        # Ensure analysis stages completed first if wide_2023_2024 is not yet in storage.
-        # When analysis and meridian jobs are queued together on separate workers, wait briefly
-        # for an active analysis stage to produce wide_2023_2024.parquet before running it here.
-        if not ctx.storage.exists(ctx.key("data/wide_2023_2024.parquet")):
+        # The Meridian stages need the modelling panel written by `s01_ingest`. When both jobs run on separate workers,
+        # wait for an active analysis job to produce it before falling back to running the analysis stages here.
+        if model_panel_key(ctx.storage, run_id) is None:
             wait_deadline = time.monotonic() + 60.0
-            while not ctx.storage.exists(ctx.key("data/wide_2023_2024.parquet")):
+            while model_panel_key(ctx.storage, run_id) is None:
                 with SessionLocal() as db:
                     prep_stage = (
                         db.query(StageProgress)
@@ -329,7 +349,7 @@ def execute_meridian_job(
                     break
                 hb.touch()
                 time.sleep(0.5)
-            if not ctx.storage.exists(ctx.key("data/wide_2023_2024.parquet")):
+            if model_panel_key(ctx.storage, run_id) is None:
                 run_analysis_stages(ctx)
 
         run_meridian_stages(ctx)
@@ -383,19 +403,72 @@ def execute_meridian_job(
         hb.stop()
 
 
+def _read_parquet(storage: Any, key: str) -> pd.DataFrame:
+    return pd.read_parquet(io.BytesIO(storage.read_bytes(key)))
+
+
+def _first_existing(storage: Any, keys: list[str]) -> str | None:
+    return next((k for k in keys if storage.exists(k)), None)
+
+
+def default_forecast_keys(run_id: str) -> tuple[list[str], list[str]]:
+    """Daily-forecast and plan keys of the run's example forecast (current names first, then pre-rename names)."""
+    return (
+        [f"runs/{run_id}/data/forecast_daily.parquet", f"runs/{run_id}/data/forecast_2025_01_daily.parquet"],
+        [f"runs/{run_id}/data/forecast_plan.parquet", f"runs/{run_id}/data/forecast_2025_01_plan.parquet"],
+    )
+
+
+def _load_forecast_context(storage: Any, run_id: str, forecast_id: str) -> dict[str, Any]:
+    """Load base daily forecast, plan, history, spec and (when available) the fitted forecast model of a forecast."""
+    from mmm_studio.core.meridian.spec import MeridianSpecConfig, load_meridian_model
+
+    if forecast_id.startswith("default_"):
+        daily_keys, plan_keys = default_forecast_keys(run_id)
+        model_key = f"runs/{run_id}/models/meridian_forecast.binpb"
+    else:
+        daily_keys = [f"runs/{run_id}/forecasts/{forecast_id}/daily.parquet"]
+        plan_keys = [f"runs/{run_id}/forecasts/{forecast_id}/plan.parquet"]
+        model_key = f"runs/{run_id}/forecasts/{forecast_id}/meridian_forecast.binpb"
+    daily_key, plan_key = _first_existing(storage, daily_keys), _first_existing(storage, plan_keys)
+    if daily_key is None or plan_key is None:
+        raise RuntimeError("The forecast has no results yet; wait for it to finish before running scenarios.")
+    panel_key = model_panel_key(storage, run_id)
+    cfg_key = f"runs/{run_id}/meta/config.json"
+    config_obj = extract_role_config(storage.read_json(cfg_key)) if storage.exists(cfg_key) else default_role_config()
+    history = _read_parquet(storage, panel_key) if panel_key else None
+    spec_cfg = MeridianSpecConfig.from_role_config(config_obj, index=history.index if history is not None else None)
+    out: dict[str, Any] = {
+        "base_daily": _read_parquet(storage, daily_key),
+        "base_plan": _read_parquet(storage, plan_key),
+        "history": history,
+        "spec_cfg": spec_cfg,
+        "config": config_obj,
+        "mmm": None,
+    }
+    if history is not None and storage.exists(model_key):
+        import tempfile
+        from pathlib import Path
+
+        tmp = Path(tempfile.mkdtemp(prefix=f"sc_{run_id}_")) / "meridian_forecast.binpb"
+        tmp.write_bytes(storage.read_bytes(model_key))
+        out["mmm"] = load_meridian_model(tmp)
+    roi_key = f"runs/{run_id}/data/meridian_roi.parquet"
+    if storage.exists(roi_key):
+        roi = _read_parquet(storage, roi_key).drop(index="All Channels", errors="ignore")
+        out["mroi"] = {str(c): float(v) for c, v in roi["mroi"].items()}
+    return out
+
+
 def execute_forecast_job(
     forecast_id: str,
     job_context: JobContext | None = None,
     sqlalchemy_url: str | None = None,
 ) -> None:
-    """Execute a budget-plan forecast refit on the `meridian` queue."""
-    from mmm_studio.core.meridian.fit import FAST_SAMPLING, SMOKE_SAMPLING
-    from mmm_studio.core.meridian.forecast import (
-        fast_forecast_from_multipliers,
-        forecast_budget_plan,
-        validate_plan,
-    )
+    """Refit Meridian on history + the uploaded plan window (`meridian` queue), as in notebook 05."""
+    from mmm_studio.core.meridian.forecast import forecast_budget_plan, scenario_payload, validate_plan
     from mmm_studio.core.meridian.spec import MeridianSpecConfig, save_meridian_model
+    from mmm_studio.pipeline.stages import _sampling_for, _sampling_label
 
     SessionLocal = get_session_factory(sqlalchemy_url)
     storage = get_storage()
@@ -408,90 +481,44 @@ def execute_forecast_job(
         plan_path = fc.plan_path
         run_rec = db.get(Run, run_id)
         run_profile = run_rec.profile if run_rec else "quick"
+        seed = int(((run_rec.config if run_rec else None) or {}).get("seed", 0))
         config_dict = (run_rec.config if run_rec else None) or {}
         fc.status = "running"
         fc.heartbeat_at = utcnow()
         db.commit()
 
     config_obj = extract_role_config(config_dict)
-
     hb = _HeartbeatMonitor(ForecastRun, forecast_id, job_context=job_context, sqlalchemy_url=sqlalchemy_url)
     hb.start()
     try:
-        wide_bytes = storage.read_bytes(f"runs/{run_id}/data/wide_2023_2024.parquet")
-        wide_2023_2024 = pd.read_parquet(io.BytesIO(wide_bytes))
+        panel_key = model_panel_key(storage, run_id)
+        if panel_key is None:
+            raise RuntimeError("The run's modelling panel is missing; re-run the analysis first.")
+        history = _read_parquet(storage, panel_key)
+        spec_cfg = MeridianSpecConfig.from_role_config(config_obj, index=history.index)
+        plan_df = pd.read_csv(io.BytesIO(storage.read_bytes(plan_path)))
+        plan_clean = validate_plan(plan_df, last_history_date=pd.Timestamp(history.index.max()), paid_channels=spec_cfg.paid_slugs)
 
-        # Check if user requested fast multiplier mode or full refit
-        sampling = SMOKE_SAMPLING if run_profile == "smoke" else FAST_SAMPLING
-        spec_cfg = MeridianSpecConfig.from_role_config(config_obj, index=wide_2023_2024.index)
+        sampling = _sampling_for(run_profile, "main")
+        fc_daily, fc_mmm, _ = forecast_budget_plan(history, plan_clean, cfg=spec_cfg, sampling=sampling, seed=seed)
+        if hb.cancelled:
+            raise InterruptedError("Forecast cancelled.")
 
-        raw_plan = storage.read_bytes(plan_path)
-        plan_df = pd.read_csv(io.BytesIO(raw_plan))
-        plan_clean = validate_plan(
-            plan_df,
-            last_history_date=pd.Timestamp(wide_2023_2024.index.max()),
-            paid_channels=spec_cfg.paid_slugs,
-        )
-
-        # If a default forecast already exists on the exact same date index, or if we refit:
-        default_fc_key = f"runs/{run_id}/data/forecast_2025_01_daily.parquet"
-        default_plan_key = f"runs/{run_id}/data/forecast_2025_01_plan.parquet"
-        if run_profile == "smoke" and storage.exists(default_fc_key) and storage.exists(default_plan_key):
-            base_daily = pd.read_parquet(io.BytesIO(storage.read_bytes(default_fc_key)))
-            base_plan = pd.read_parquet(io.BytesIO(storage.read_bytes(default_plan_key)))
-            if len(plan_clean) <= len(base_daily):
-                res = fast_forecast_from_multipliers(
-                    base_daily=base_daily,
-                    base_plan=base_plan,
-                    multipliers={},
-                    horizon_days=len(plan_clean),
-                )
-                result_key = f"runs/{run_id}/forecasts/{forecast_id}/result.json"
-                storage.write_json(result_key, res)
-                with SessionLocal() as db:
-                    fc = db.get(ForecastRun, forecast_id)
-                    if fc:
-                        fc.status = "succeeded"
-                        fc.result_path = result_key
-                        fc.summary = {
-                            "horizon_days": res["horizon_days"],
-                            "total_forecast_sales": res["scenario_total_sales"],
-                            "total_planned_spend": res["scenario_total_spend"],
-                        }
-                        db.commit()
-                return
-
-        fc_daily, fc_mmm, _ = forecast_budget_plan(
-            wide_2023_2024,
-            plan_clean,
-            cfg=spec_cfg,
-            sampling=sampling,
-            seed=0,
-        )
-
-        # Save daily parquet and model binary for subsequent fast scenarios on this forecast window
-        buf = io.BytesIO()
-        fc_daily.to_parquet(buf, index=True)
-        storage.write_bytes(f"runs/{run_id}/forecasts/{forecast_id}/daily.parquet", buf.getvalue())
-
-        pbuf = io.BytesIO()
-        plan_clean.to_parquet(pbuf, index=True)
-        storage.write_bytes(f"runs/{run_id}/forecasts/{forecast_id}/plan.parquet", pbuf.getvalue())
+        base = f"runs/{run_id}/forecasts/{forecast_id}"
+        for name, frame in (("daily", fc_daily), ("plan", plan_clean)):
+            buf = io.BytesIO()
+            frame.to_parquet(buf, index=True)
+            storage.write_bytes(f"{base}/{name}.parquet", buf.getvalue())
+        storage.write_bytes(f"{base}/forecast.csv", fc_daily.round(0).to_csv().encode("utf-8"), content_type="text/csv; charset=utf-8")
 
         import tempfile
         from pathlib import Path
 
-        tmp_dir = Path(tempfile.mkdtemp(prefix=f"fc_{forecast_id}_"))
-        bin_path = save_meridian_model(fc_mmm, tmp_dir / "meridian_forecast.binpb")
-        storage.write_bytes(f"runs/{run_id}/forecasts/{forecast_id}/meridian_forecast.binpb", bin_path.read_bytes())
+        bin_path = save_meridian_model(fc_mmm, Path(tempfile.mkdtemp(prefix=f"fc_{forecast_id}_")) / "meridian_forecast.binpb")
+        storage.write_bytes(f"{base}/meridian_forecast.binpb", bin_path.read_bytes())
 
-        res_payload = fast_forecast_from_multipliers(
-            base_daily=fc_daily,
-            base_plan=plan_clean,
-            multipliers={},
-            horizon_days=len(plan_clean),
-        )
-        result_key = f"runs/{run_id}/forecasts/{forecast_id}/result.json"
+        res_payload = scenario_payload(fc_daily, plan_clean, fc_daily, plan_clean, f"Meridian refit ({_sampling_label(sampling)})")
+        result_key = f"{base}/result.json"
         storage.write_json(result_key, res_payload)
 
         with SessionLocal() as db:
@@ -501,11 +528,19 @@ def execute_forecast_job(
                 fc.result_path = result_key
                 fc.summary = {
                     "horizon_days": len(plan_clean),
+                    "start_date": plan_clean.index[0].strftime("%Y-%m-%d"),
+                    "end_date": plan_clean.index[-1].strftime("%Y-%m-%d"),
                     "total_forecast_sales": float(fc_daily["forecast"].sum()),
                     "total_planned_spend": float(fc_daily["planned_spend"].sum()),
-                    "credible_90_lo": float(fc_daily["credible_lo"].sum()),
-                    "credible_90_hi": float(fc_daily["credible_hi"].sum()),
+                    "prediction_90_lo": float(fc_daily["prediction_lo"].sum()),
+                    "prediction_90_hi": float(fc_daily["prediction_hi"].sum()),
                 }
+                db.commit()
+    except InterruptedError:
+        with SessionLocal() as db:
+            fc = db.get(ForecastRun, forecast_id)
+            if fc:
+                fc.status = "cancelled"
                 db.commit()
     except Exception as exc:
         logger.exception("Forecast job %s failed", forecast_id)
@@ -524,8 +559,11 @@ def execute_scenario_job(
     scenario_id: str,
     sqlalchemy_url: str | None = None,
 ) -> None:
-    """Evaluate a what-if scenario on the `interactive` queue using the warm LRU cache."""
-    from mmm_studio.core.meridian.forecast import build_example_plan, fast_forecast_from_multipliers
+    """Evaluate a what-if scenario with the fitted forecast model (warm LRU cache, `interactive` queue)."""
+    from mmm_studio.core.meridian.forecast import (
+        fast_forecast_from_multipliers,
+        model_scenario_from_multipliers,
+    )
 
     SessionLocal = get_session_factory(sqlalchemy_url)
     storage = get_storage()
@@ -541,61 +579,38 @@ def execute_scenario_job(
         db.commit()
 
     try:
-        cfg_key = f"runs/{run_id}/meta/config.json"
-        if storage.exists(cfg_key):
-            config_obj = extract_role_config(storage.read_json(cfg_key))
-        else:
-            config_obj = default_role_config()
-        paid_channels = config_obj.paid_slugs or None
-
-        cache_key = f"{run_id}:{forecast_id}"
+        cache_key = f"{run_id}:{forecast_id}:{inputs.get('cache_version', '')}"
         cached = _cache_get(cache_key)
         if cached is None:
-            fc_daily_key = f"runs/{run_id}/forecasts/{forecast_id}/daily.parquet"
-            fc_plan_key = f"runs/{run_id}/forecasts/{forecast_id}/plan.parquet"
-            if storage.exists(fc_daily_key) and storage.exists(fc_plan_key):
-                base_daily = pd.read_parquet(io.BytesIO(storage.read_bytes(fc_daily_key)))
-                base_plan = pd.read_parquet(io.BytesIO(storage.read_bytes(fc_plan_key)))
-            elif storage.exists(f"runs/{run_id}/data/forecast_2025_01_daily.parquet"):
-                base_daily = pd.read_parquet(
-                    io.BytesIO(storage.read_bytes(f"runs/{run_id}/data/forecast_2025_01_daily.parquet"))
-                )
-                base_plan = pd.read_parquet(
-                    io.BytesIO(storage.read_bytes(f"runs/{run_id}/data/forecast_2025_01_plan.parquet"))
-                )
-            else:
-                wide_df = pd.read_parquet(
-                    io.BytesIO(storage.read_bytes(f"runs/{run_id}/data/wide_2023_2024.parquet"))
-                )
-                base_plan = build_example_plan(wide_df, days=42, paid_channels=paid_channels)
-                mean_sales = float(wide_df["total_sales"].mean())
-                base_daily = pd.DataFrame(
-                    {
-                        "forecast": mean_sales,
-                        "credible_lo": mean_sales * 0.92,
-                        "credible_hi": mean_sales * 1.08,
-                        "prediction_lo": mean_sales * 0.85,
-                        "prediction_hi": mean_sales * 1.15,
-                        "planned_spend": base_plan.sum(axis=1).to_numpy(),
-                    },
-                    index=base_plan.index,
-                )
-            cached = {"base_daily": base_daily, "base_plan": base_plan}
+            cached = _load_forecast_context(storage, run_id, forecast_id)
             _cache_put(cache_key, cached)
 
         multipliers = {str(k): float(v) for k, v in (inputs.get("multipliers") or {}).items()}
-        # Commission channels (e.g. affiliate) are locked at 1.0 because they are controls
-        for comm_ch in config_obj.commission_channels:
-            multipliers.pop(comm_ch, None)
-        multipliers.pop("affiliate", None)
+        for locked in (*cached["config"].commission_channels, *cached["spec_cfg"].as_controls):
+            multipliers.pop(locked, None)
         horizon_days = int(inputs.get("horizon_days", len(cached["base_plan"])))
 
-        res = fast_forecast_from_multipliers(
-            base_daily=cached["base_daily"],
-            base_plan=cached["base_plan"],
-            multipliers=multipliers,
-            horizon_days=horizon_days,
-        )
+        if cached["mmm"] is not None:
+            res = model_scenario_from_multipliers(
+                cached["mmm"],
+                cached["history"],
+                cached["base_daily"],
+                cached["base_plan"],
+                cached["spec_cfg"],
+                multipliers=multipliers,
+                horizon_days=horizon_days,
+            )
+        elif cached.get("mroi"):
+            res = fast_forecast_from_multipliers(
+                cached["base_daily"],
+                cached["base_plan"],
+                multipliers=multipliers,
+                horizon_days=horizon_days,
+                mroi_map=cached["mroi"],
+                catalog_shift=cached["spec_cfg"].catalog_shift,
+            )
+        else:
+            raise RuntimeError("Neither the fitted forecast model nor the run's marginal ROIs are available.")
         result_key = f"runs/{run_id}/scenarios/{scenario_id}/result.json"
         storage.write_json(result_key, res)
 
@@ -605,6 +620,7 @@ def execute_scenario_job(
                 sc.status = "succeeded"
                 sc.result_path = result_key
                 sc.summary = {
+                    "method": res["method"],
                     "base_total_sales": res["base_total_sales"],
                     "scenario_total_sales": res["scenario_total_sales"],
                     "delta_sales": res["delta_sales"],
@@ -627,7 +643,7 @@ def execute_optimiser_job(
     optimisation_id: str,
     sqlalchemy_url: str | None = None,
 ) -> None:
-    """Evaluate a constrained budget optimisation on the `interactive` queue."""
+    """Constrained budget optimisation along the run's posterior response curves (`interactive` queue)."""
     from mmm_studio.core.meridian.optimise import solve_constrained_optimisation
 
     SessionLocal = get_session_factory(sqlalchemy_url)
@@ -643,108 +659,35 @@ def execute_optimiser_job(
         db.commit()
 
     try:
-        cache_key = f"opt:{run_id}"
+        cache_key = f"opt:{run_id}:{inputs.get('cache_version', '')}"
         cached = _cache_get(cache_key)
         if cached is None:
             roi_key = f"runs/{run_id}/data/meridian_roi.parquet"
             rc_key = f"runs/{run_id}/data/response_curves.json"
-            if storage.exists(roi_key) and storage.exists(rc_key):
-                roi_df = pd.read_parquet(io.BytesIO(storage.read_bytes(roi_key)))
-                rc_raw = storage.read_json(rc_key)
-                response_curves = {ch: pd.DataFrame(rows) for ch, rows in rc_raw.items()}
-            else:
-                # Fallback reference curves if Meridian hasn't finished yet
-                wide_df = pd.read_parquet(
-                    io.BytesIO(storage.read_bytes(f"runs/{run_id}/data/wide_2023_2024.parquet"))
-                )
-                cfg_key = f"runs/{run_id}/meta/config.json"
-                if storage.exists(cfg_key):
-                    config_obj = extract_role_config(storage.read_json(cfg_key))
-                    channels = [
-                        s for s in config_obj.paid_slugs if s not in config_obj.commission_channels
-                    ] or [
-                        "sea",
-                        "catalog",
-                        "display",
-                        "psm",
-                        "display_network",
-                        "social_media",
-                    ]
-                else:
-                    channels = ["sea", "catalog", "display", "psm", "display_network", "social_media"]
-                ref_rois = {
-                    "sea": 8.04,
-                    "social_media": 1.85,
-                    "psm": 1.42,
-                    "catalog": 1.01,
-                    "display_network": 0.65,
-                    "display": 0.42,
-                }
-                rows = []
-                response_curves = {}
-                for ch in channels:
-                    sp = float(wide_df[f"cost_{ch}"].sum()) if f"cost_{ch}" in wide_df.columns else 1_000_000.0
-                    if ch in ref_rois:
-                        roi_val = ref_rois[ch]
-                    elif f"cost_{ch}" in wide_df.columns and "total_sales" in wide_df.columns:
-                        corr = float(wide_df[f"cost_{ch}"].corr(wide_df["total_sales"]))
-                        roi_val = round(max(0.3, min(10.0, 1.0 + max(0.0, corr) * 3.0)), 2)
-                    else:
-                        roi_val = 1.2
-                    inc = sp * roi_val
-                    rows.append(
-                        {
-                            "channel": ch,
-                            "spend": sp,
-                            "incremental": inc,
-                            "roi": roi_val,
-                            "roi_lo": roi_val * 0.7,
-                            "roi_hi": roi_val * 1.3,
-                            "mroi": roi_val * 0.65,
-                            "mroi_lo": roi_val * 0.4,
-                            "mroi_hi": roi_val * 0.9,
-                            "pct_of_contribution": 10.0,
-                        }
-                    )
-                    mults = [round(x * 0.05, 2) for x in range(41)]
-                    response_curves[ch] = pd.DataFrame(
-                        {
-                            "multiplier": mults,
-                            "spend": [m * sp for m in mults],
-                            "mean": [inc * (m ** (0.85 if ch == "catalog" else 0.62)) for m in mults],
-                            "ci_lo": [inc * 0.75 * (m ** 0.62) for m in mults],
-                            "ci_hi": [inc * 1.25 * (m ** 0.62) for m in mults],
-                        }
-                    )
-                roi_df = pd.DataFrame(rows).set_index("channel")
+            if not (storage.exists(roi_key) and storage.exists(rc_key)):
+                raise RuntimeError("The optimiser needs the Meridian response curves; wait for the Meridian fit to finish.")
+            roi_df = _read_parquet(storage, roi_key)
+            response_curves = {ch: pd.DataFrame(rows) for ch, rows in storage.read_json(rc_key).items()}
             cached = {"roi_df": roi_df, "response_curves": response_curves}
             _cache_put(cache_key, cached)
 
         roi_df = cached["roi_df"]
-        response_curves = cached["response_curves"]
         ch_rows = roi_df.drop(index="All Channels", errors="ignore")
-        default_budget = float(ch_rows["spend"].sum())
-
-        total_budget = float(inputs.get("total_budget") or default_budget)
+        total_budget = float(inputs.get("total_budget") or float(ch_rows["spend"].sum()))
         bounds_raw = inputs.get("channel_bounds") or {}
         channel_bounds = {
             str(ch): (float(b[0]), float(b[1]))
             for ch, b in bounds_raw.items()
             if isinstance(b, (list, tuple)) and len(b) == 2
         }
-        default_bounds = (
-            float(inputs.get("min_multiplier", 0.7)),
-            float(inputs.get("max_multiplier", 1.3)),
-        )
-        include_catalog = bool(inputs.get("include_catalog", True))
-
+        default_bounds = (float(inputs.get("min_multiplier", 0.7)), float(inputs.get("max_multiplier", 1.3)))
         res = solve_constrained_optimisation(
             roi_df=roi_df,
-            response_curves=response_curves,
+            response_curves=cached["response_curves"],
             total_budget=total_budget,
             channel_bounds=channel_bounds or None,
             default_bounds=default_bounds,
-            include_catalog=include_catalog,
+            include_catalog=bool(inputs.get("include_catalog", True)),
         )
         result_key = f"runs/{run_id}/optimisations/{optimisation_id}/result.json"
         storage.write_json(result_key, res)

@@ -9,25 +9,13 @@ export const PreparationPage: React.FC<{ runId: string | null }> = ({ runId }) =
 
   return (
     <Box>
-      {runId && (
-        <Stack direction="row" spacing={1.5} justifyContent="flex-end" sx={{ mb: 2 }}>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<DownloadIcon fontSize="small" />}
-            href={`/api/v1/runs/${runId}/artifacts/data/wide_2023_2024.parquet`}
-            target="_blank"
-          >
-            Download wide_2023_2024.parquet
+      {runId && section && (
+        <Stack direction="row" spacing={1.5} justifyContent="flex-end" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon fontSize="small" />} href={`/api/v1/runs/${runId}/artifacts/data/wide_model.csv?download=true`}>
+            Wide daily table (CSV)
           </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<DownloadIcon fontSize="small" />}
-            href={`/api/v1/runs/${runId}/artifacts/data/meridian_input.parquet`}
-            target="_blank"
-          >
-            Download meridian_input.parquet
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon fontSize="small" />} href={`/api/v1/runs/${runId}/artifacts/data/meridian_input.csv?download=true`}>
+            Meridian input table (CSV)
           </Button>
         </Stack>
       )}

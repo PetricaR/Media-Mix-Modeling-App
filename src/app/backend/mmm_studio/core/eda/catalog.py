@@ -7,7 +7,12 @@ import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure, line_figure, small_multiples_figure
 from mmm_studio.charts.theme import COPPER, NAVY, SLATE, TEAL, channel_color
-from mmm_studio.core.calendar import delayed_binomial_adstock
+from mmm_studio.core.eda.notebook_stats import (
+    catalog_decay,
+    catalog_event_study,
+    catalog_halo_0_6,
+    per_sendout_lifts,
+)
 from mmm_studio.core.schema import DataRoleConfig
 from mmm_studio.report.narrative import fmt_eur, fmt_pct
 from mmm_studio.report.sections import (
@@ -99,13 +104,13 @@ def build_explore_catalog_section(
     fig_event_study = line_figure(
         x=taus,
         series=[
-            {"name": "Total Sales 90% CI Upper", "y": tot_hi, "color": "rgba(27,79,114,0)", "showlegend": False},
+            {"name": "Total Sales 90% CI Upper", "y": tot_hi, "color": "rgba(0,66,102,0)", "showlegend": False},
             {
                 "name": "Total Sales 90% CI",
                 "y": tot_lo,
-                "color": "rgba(27,79,114,0)",
+                "color": "rgba(0,66,102,0)",
                 "fill": "tonexty",
-                "fillcolor": "rgba(27,79,114,0.15)",
+                "fillcolor": "rgba(0,66,102,0.14)",
             },
             {"name": "Total Sales Mean (k€)", "y": tot_mean, "color": NAVY, "width": 2.6},
             {"name": "Non-Catalog Channels Mean (k€)", "y": non_cat_mean, "color": TEAL, "width": 2.0, "dash": "dash"},
@@ -121,32 +126,41 @@ def build_explore_catalog_section(
         height=390,
     )
 
-    # 3. Empirical Catalog decay vs Geometric (alpha=0.85) & Delayed Binomial Adstock (peak=3d, decay=0.88)
-    k_lags = np.arange(0, 22)
-    emp_excess = np.maximum(np.asarray(cat_mean[7:29]) - float(np.mean(cat_mean[:5])), 0.0)
-    emp_norm = emp_excess / max(float(emp_excess.sum()), 1e-6)
-    geo_w = np.power(0.85, k_lags)
-    geo_w = geo_w / geo_w.sum()
-    _, binom_w = delayed_binomial_adstock(np.ones(22), peak_lag=3.0, max_lag=21, decay=0.88)
-
-    fig_decay = line_figure(
-        x=k_lags.tolist(),
-        series=[
-            {"name": "Empirical Catalog Sales Excess Share", "y": emp_norm, "color": SLATE, "width": 2.0, "mode": "lines+markers"},
-            {"name": "Delayed Binomial Adstock (Peak +3d, α=0.88)", "y": binom_w, "color": COPPER, "width": 2.8},
-            {"name": "Simple Geometric Adstock (α=0.85, Peak Day 0)", "y": geo_w, "color": NAVY, "width": 2.0, "dash": "dot"},
-        ],
-        title="Catalog Impulse Decay Kernel: Empirical vs Delayed Binomial (+3d Peak) & Geometric Adstock",
-        xaxis_title="Days Since Catalog Send-out (k = 0..21)",
-        yaxis_title="Normalized Impulse Weight",
-        height=360,
-    )
+    # 3. How long does the catalog keep selling? (01b §10.3): catalog-attributed sales by day since send-out and
+    #    the cumulative share of their excess over the tail level
+    dec = catalog_decay(wide_df, "sales_catalog") if "sales_catalog" in wide_df else None
+    if dec is not None:
+        days = [int(k) for k in dec["curve"].index]
+        fig_decay = small_multiples_figure(
+            panels=[
+                {
+                    "title": "Mean catalog-attributed sales by day since send-out (k€)",
+                    "x": days,
+                    "xaxis_title": "Days since send-out",
+                    "traces": [
+                        {"name": "Catalog sales", "y": (dec["curve"] / 1e3).round(1).tolist(), "kind": "bar", "color": COPPER},
+                        {"name": "Tail level (days ≥ 21)", "y": [round(dec["floor"] / 1e3, 1)] * len(days), "color": SLATE, "line": {"color": SLATE, "dash": "dash", "width": 1.4}},
+                    ],
+                },
+                {
+                    "title": f"Cumulative share of excess sales: 50 % by day {dec['half_day']}, 90 % by day {dec['p90_day']}",
+                    "x": days,
+                    "xaxis_title": "Days since send-out",
+                    "traces": [{"name": "Cumulative share (%)", "y": (100 * dec["cum_share"]).round(1).tolist(), "color": NAVY, "mode": "lines+markers"}],
+                },
+            ],
+            ncols=2,
+            height_per_row=320,
+        )
+    else:
+        fig_decay = small_multiples_figure(panels=[{"title": "No catalog sales", "x": [], "y": []}], ncols=1)
 
     # 4. Cross-channel Halo Uplift (7 days post send-out vs other days)
     uplifts_7d = compute_halo_uplift_7d(wide_df, config)
-    non_cat_channels = [c for c in config.active_channels if c != "Catalog"]
+    cat_name = config.print_event_channels[0] if config.print_event_channels else "Catalog"
+    non_cat_channels = [c for c in config.active_channels if c != cat_name]
     non_cat_sorted = sorted(non_cat_channels, key=lambda c: uplifts_7d.get(c, 0.0))
-    halo_cats = non_cat_sorted + ["Total Sales (All 12 Channels)"]
+    halo_cats = non_cat_sorted + ["Total sales"]
     halo_vals = [uplifts_7d.get(c, 0.0) for c in non_cat_sorted] + [uplifts_7d["total_sales"]]
 
     fig_halo = bar_figure(
@@ -155,7 +169,8 @@ def build_explore_catalog_section(
             {
                 "name": "7-Day Post-Catalog Uplift vs Other Days (%)",
                 "values": halo_vals,
-                "colors": [COPPER if c.startswith("Total") else channel_color(c) for c in halo_cats],
+                "colors": [COPPER if c == "Total sales" else channel_color(c) for c in halo_cats],
+                "text": [f"{v:+.0f}%" for v in [uplifts_7d.get(c, 0.0) for c in non_cat_sorted] + [uplifts_7d["total_sales"]]],
             }
         ],
         orientation="h",
@@ -191,43 +206,53 @@ def build_explore_catalog_section(
             }
         )
 
+    # Lift of the 7 days from the send-out vs the 7 days before, against circulation (01b §10.5)
+    per_send = per_sendout_lifts(wide_df, "cost_catalog", "impr_catalog")
+    lift_circ_r = float(per_send["circulation"].corr(per_send["lift"])) if len(per_send) > 3 else float("nan")
+    lift_by_year = per_send.groupby(per_send.index.year)["lift"].median() if len(per_send) else pd.Series(dtype=float)
     fig_circ = small_multiples_figure(
         panels=[
             {
-                "title": "7-Day Total Sales (€M) vs Edition Spend (€M)",
-                "xaxis_title": "Catalog Edition Spend (€M)",
-                "yaxis_title": "7-Day Total Sales (€M)",
+                "title": f"{yr}",
+                "xaxis_title": "Circulation (million copies)",
+                "yaxis_title": "7-day lift vs week before (%)",
                 "traces": [
                     {
                         "type": "scatter",
                         "mode": "markers",
-                        "name": "Editions",
-                        "x": ed_spend_m,
-                        "y": ed_sales_7d_m,
-                        "marker": {"color": COPPER, "size": 9},
+                        "name": str(yr),
+                        "x": (per_send.loc[per_send.index.year == yr, "circulation"] / 1e6).round(2).tolist(),
+                        "y": (100 * per_send.loc[per_send.index.year == yr, "lift"]).round(1).tolist(),
+                        "marker": {"color": [SLATE, COPPER][i % 2], "size": 9},
                     }
                 ],
-            },
-            {
-                "title": "7-Day Total Sales (€M) vs Print Circulation (M Copies)",
-                "xaxis_title": "Print Circulation (Million Copies)",
-                "yaxis_title": "7-Day Total Sales (€M)",
-                "traces": [
-                    {
-                        "type": "scatter",
-                        "mode": "markers",
-                        "name": "Editions",
-                        "x": ed_impr_m,
-                        "y": ed_sales_7d_m,
-                        "marker": {"color": NAVY, "size": 9},
-                    }
-                ],
-            },
-        ],
+            }
+            for i, yr in enumerate(sorted(set(per_send.index.year)))
+        ]
+        if len(per_send)
+        else [{"title": "No send-outs", "x": [], "y": []}],
         ncols=2,
-        height_per_row=320,
-        title="Catalog Edition Scale vs 7-Day Post-Sendout Sales (€M)",
+        height_per_row=300,
     )
+    study = catalog_event_study(wide_df)
+    decay = catalog_decay(wide_df, f"sales_{config.slug_map().get(cat_name, 'catalog')}") if "sales_catalog" in wide_df or config.print_event_channels else None
+    halo06, total06, cat06 = catalog_halo_0_6(wide_df, config)
+    lag_r = {k: float(wide_df["total_sales"].corr(wide_df["cost_catalog"].shift(k))) for k in range(0, 22)}
+    best_lag = max(lag_r, key=lag_r.get)
+    halo_top = sorted(((c, v) for c, v in uplifts_7d.items() if c not in ("total_sales", cat_name) and float(wide_df[f"sales_{config.slug_map()[c]}"].sum()) > 0.01 * float(wide_df["total_sales"].sum())), key=lambda t: -t[1])[:5]
+    halo_txt = ", ".join(f"{c} {v:+.0f}%" for c, v in halo_top)
+    peak_lift = float(study.loc[best_lag, "lift"]) if best_lag in study.index else float("nan")
+    study_rows = [
+        {
+            "k": int(k),
+            "mean_sales": fmt_eur(float(r["mean"])),
+            "lift": f"{100 * float(r['lift']):+.0f}%",
+            "n": int(r["n"]),
+        }
+        for k, r in study.loc[0:14].iterrows()
+    ]
+    send_costs = wide_df.loc[sendout_mask, "cost_catalog"]
+    send_impr = wide_df.loc[sendout_mask, "impr_catalog"] if "impr_catalog" in wide_df else pd.Series(dtype=float)
 
     # 6. Matched-Thursday Natural Experiment (Thursdays WITH vs WITHOUT Catalog send-out)
     thu_indices = np.where((wide_df.index.dayofweek == 3) & (np.arange(len(wide_df)) + 7 <= len(wide_df)))[0]
@@ -260,66 +285,83 @@ def build_explore_catalog_section(
 
     return Section(
         id="explore_catalog",
-        title="Catalog Mechanics & Cross-Channel Halo",
-        subtitle="Analysis of the 28 print Catalog send-outs, postal delivery lag (+3d peak), and omnichannel spillover.",
+        title="Catalog deep-dive: delayed effect and halo",
+        subtitle=f"{n_sendouts} send-outs: the delay between booking and effect, how long it lasts, and the lift it gives other channels.",
         blocks=[
             KpisBlock(
                 items=[
                     KpiItem(label="Catalog Send-outs", value=f"{n_sendouts} editions", delta=f"{n_thu} Thu, {n_wed} Wed, {n_fri} Fri"),
-                    KpiItem(label="Peak Impulse Lag", value="+3 Days (Sunday)", delta="r = +0.40 vs -0.01 on day 0", status="success"),
-                    KpiItem(label="7-Day Total Sales Halo", value=fmt_pct(uplifts_7d["total_sales"], signed=True), delta="SEO +20%, Social +20%, Direct +17%", status="success"),
-                    KpiItem(label="Matched-Thursday Lift", value=fmt_eur(net_7d_lift_eur), delta="Cumulative 7-day excess sales", status="success"),
+                    KpiItem(label="Peak response", value=f"+{best_lag} days", delta=f"r = {lag_r[best_lag]:+.2f} vs {lag_r[0]:+.2f} on the send-out day; weekday-adjusted lift {100 * peak_lift:+.0f}%", status="success"),
+                    KpiItem(label="Total sales, 7 days after", value=fmt_pct(uplifts_7d["total_sales"], signed=True), delta=f"vs other days; days 0–6 vs ≥ 14: {100 * total06:+.0f}%", status="success"),
+                    KpiItem(label="Effect duration", value=f"50% by day {decay['half_day']}" if decay else "—", delta=f"90% by day {decay['p90_day']} (catalog-attributed excess)" if decay else ""),
                 ]
             ),
             CalloutBlock(
                 tone="success",
-                title="Key Finding: Catalog Drives a +38.4% Cross-Channel Halo Over the Following 7 Days",
+                title=f"The catalog creates a halo: total sales {uplifts_7d['total_sales']:+.1f}% in the week after a send-out",
                 body=(
-                    "When a print catalog lands in households on Friday/Saturday after a Thursday send-out, customers browse "
-                    "offline and purchase online via **SEO (+20%)**, **Social Media (+20%)**, **Direct Type-in (+17%)**, "
-                    "**Affiliate (+14%)**, and **SEA (+11%)**. Replacing raw Catalog spend with a delayed binomial in-home adstock "
-                    "(`peak_lag = 3d, decay = 0.88`) raises linear model adjusted R² from **0.83 to 0.90** (+7 pp)."
+                    f"Customers browse the catalog and then buy via search or by typing the URL, so sales credited to other channels "
+                    f"rise too: **{halo_txt}**. Catalog-attributed sales in days 0–6 are {100 * cat06:+.0f}% above their tail level. "
+                    "Last-touch attribution credits those channels, so the catalog's attributed ROAS **understates** it — the reason "
+                    "to model **total** sales."
                 ),
             ),
             ChartBlock(
                 id="catalog_sendouts",
                 title="Timeline of All 28 Catalog Send-Outs: Spend (€M) & Print Circulation (M Copies)",
-                subtitle="Bi-weekly to monthly cadence (~€1.66M and ~4.3M copies per edition).",
+                subtitle=(
+                    f"{n_sendouts} editions ({n_thu} on a Thursday); cost {fmt_eur(float(send_costs.min()))}–{fmt_eur(float(send_costs.max()))} "
+                    f"(Ø {fmt_eur(float(send_costs.mean()))}), circulation Ø {float(send_impr.mean()) / 1e6:.2f}M copies."
+                    if n_sendouts
+                    else "No send-outs in the data."
+                ),
                 figure=fig_sendouts,
             ),
             ChartBlock(
                 id="catalog_event_study",
                 title="Event-Study Impulse Response Around Catalog Send-Outs (τ = -7 .. +20 Days)",
-                subtitle="Mean daily sales (k€) ± 90% confidence band across all 28 editions.",
+                subtitle=f"Mean daily sales (k€) around all {n_sendouts} send-outs, with a 90 % band; τ = 0 is the send-out day.",
                 figure=fig_event_study,
             ),
             ChartBlock(
                 id="catalog_decay",
-                title="Empirical Catalog Decay vs Delayed Binomial (+3d Peak) & Geometric Adstock",
-                subtitle="Delayed binomial adstock captures the postal delivery ramp and 2–3 week household shelf life.",
+                title="How long does the catalog keep selling?",
+                subtitle=(
+                    f"Catalog-attributed sales reach 50 % of their excess by day {decay['half_day']} and 90 % by day {decay['p90_day']}: "
+                    "a delayed peak and a 2–3-week tail (priors for the adstock)."
+                    if decay
+                    else "Empirical response vs illustrative adstock kernels."
+                ),
                 figure=fig_decay,
             ),
             ChartBlock(
                 id="catalog_halo",
                 title="Cross-Channel Halo Uplift (7 Days Post Send-Out vs Non-Catalog Baseline)",
-                subtitle="Every digital and organic channel experiences elevated conversions during the 7-day in-home window.",
+                subtitle="Mean daily sales in the 7 days after a send-out vs all other days (notebook 01 definition).",
                 figure=fig_halo,
             ),
             ChartBlock(
                 id="catalog_natural_experiment",
                 title="Matched-Thursday Natural Experiment: Thursdays With vs Without Catalog Send-Out",
-                subtitle="Comparing identical calendar weekdays isolates the Catalog impulse from regular Sunday seasonality.",
+                subtitle="Thursdays with a send-out vs Thursdays without: the same weekdays isolate the catalog from the Sunday pattern.",
                 figure=fig_nat_exp,
             ),
             ChartBlock(
                 id="catalog_lift_vs_circulation",
-                title="7-Day Total Sales vs Edition Spend and Print Circulation",
-                subtitle="Larger circulation editions in Q4 and spring generate the highest 7-day sales volume.",
+                title="Does a bigger catalog lift more?",
+                subtitle=(
+                    f"Median 7-day lift per send-out {100 * float(per_send['lift'].median()):+.0f}% (range {100 * float(per_send['lift'].min()):+.0f}% to "
+                    f"{100 * float(per_send['lift'].max()):+.0f}%); median by year "
+                    + ", ".join(f"{yr} {100 * v:+.0f}%" for yr, v in lift_by_year.items())
+                    + f"; lift vs circulation r = {lift_circ_r:.2f} — content and season matter more than size."
+                    if len(per_send)
+                    else "No send-outs."
+                ),
                 figure=fig_circ,
             ),
             TableBlock(
                 id="catalog_editions_table",
-                title="Catalog Send-Out Editions Log (First 14 & Peak Editions)",
+                title="All catalog send-outs",
                 columns=[
                     TableColumn(key="date", label="Send-out Date"),
                     TableColumn(key="spend", label="Edition Cost", align="right"),
@@ -328,7 +370,19 @@ def build_explore_catalog_section(
                     TableColumn(key="catalog_sales_7d", label="7d Catalog Sales", align="right"),
                     TableColumn(key="total_sales_7d", label="7d Total Sales", align="right"),
                 ],
-                rows=ed_rows[:16],
+                rows=ed_rows,
+            ),
+            TableBlock(
+                id="catalog_event_table",
+                title="Event study: total sales by days since send-out",
+                subtitle="Weekday-adjusted lift vs days ≥ 14 after a send-out (same year and weekday).",
+                columns=[
+                    TableColumn(key="k", label="Days since send-out", align="right"),
+                    TableColumn(key="mean_sales", label="Mean total sales", align="right"),
+                    TableColumn(key="lift", label="Weekday-adjusted lift", align="right"),
+                    TableColumn(key="n", label="Send-outs", align="right"),
+                ],
+                rows=study_rows,
             ),
         ],
     )

@@ -44,18 +44,9 @@ def in_sample_naive_baselines(y: pd.Series) -> pd.DataFrame:
     mean_y = float(y.mean())
 
     def _eval(name: str, pred: pd.Series) -> dict[str, float | str]:
+        # Scored on the days the forecast exists (lags drop the first days), as `evaluate.metrics_table` does.
         valid = pred.dropna()
-        yt = y.loc[valid.index]
-        mae = float((yt - valid).abs().mean())
-        rmse = float(np.sqrt(((yt - valid) ** 2).mean()))
-        mape = float(((yt - valid).abs() / yt).mean())
-        return {
-            "model": name,
-            "MAE": mae,
-            "RMSE": rmse,
-            "MAE_over_mean": mae / mean_y,
-            "MAPE": mape,
-        }
+        return {"model": name, **regression_metrics(y.loc[valid.index], valid)}
 
     pred_mean = pd.Series(mean_y, index=idx)
     pred_dow = y.groupby(idx.dayofweek).transform("mean")

@@ -84,12 +84,23 @@ def create_optimisation(
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
+    if not (
+        storage.exists(f"runs/{run_id}/data/response_curves.json") and storage.exists(f"runs/{run_id}/data/meridian_roi.parquet")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The optimiser needs the Meridian response curves; wait until the Meridian fit has finished.",
+        )
+    if payload.min_multiplier > payload.max_multiplier:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="min_multiplier must not exceed max_multiplier.")
 
     opt_id = f"opt_{uuid.uuid4().hex[:10]}"
+    inputs = payload.model_dump(mode="json")
+    inputs["cache_version"] = run.updated_at.isoformat() if run.updated_at else ""
     opt = OptimisationRun(
         id=opt_id,
         run_id=run_id,
-        inputs=payload.model_dump(mode="json"),
+        inputs=inputs,
         status="queued",
     )
     db.add(opt)

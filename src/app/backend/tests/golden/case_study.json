@@ -55,11 +55,11 @@
     "Social Media": 0.33,
     "Catalog": -0.01
   },
-  "catalog_lag_3_corr": 0.40,
+  "catalog_lag_3_corr": 0.4,
   "naive_baselines_mae_over_mean": {
     "constant_mean": 0.261,
     "weekday_mean": 0.249,
-    "lag_7": 0.260,
+    "lag_7": 0.26,
     "lag_1": 0.191
   },
   "digital_vif_range": {
@@ -78,12 +78,56 @@
     "raw_costs": 0.74,
     "plus_calendar": 0.76,
     "plus_seasonality_trend": 0.83,
-    "catalog_in_home_adstock": 0.90
+    "catalog_in_home_adstock": 0.9
   },
   "meridian_reference": {
     "holdout_q4_2024_mae_over_mean": 0.0853,
     "holdout_q4_2024_r2": 0.8885,
     "holdout_q3_2024_mae_over_mean": 0.1098,
-    "max_rhat": 1.0029
+    "max_rhat": 1.0029,
+    "holdout_q4_2024_mae": 89796,
+    "holdout_q4_2024_rmse": 115140,
+    "holdout_q4_days": 93,
+    "holdout_q3_2024_r2": 0.68,
+    "train_mae_over_mean": 0.0834,
+    "roi": {
+      "sea": 8.4,
+      "catalog": 0.97,
+      "display": 0.66,
+      "display_network": 1.24,
+      "social_media": 0.72,
+      "psm": 2.49
+    }
+  },
+  "ols_benchmark_mae_over_mean": {
+    "q4_2024": {
+      "Naive weekday mean": 0.348,
+      "OLS-1 raw costs": 0.107,
+      "OLS-2 Meridian inputs": 0.096
+    },
+    "q3_2024": {
+      "Naive weekday mean": 0.19,
+      "OLS-1 raw costs": 0.135,
+      "OLS-2 Meridian inputs": 0.14
+    },
+    "walk_forward_mean": {
+      "Naive weekday mean": 0.205,
+      "OLS-1 raw costs": 0.15,
+      "OLS-2 Meridian inputs": 0.095
+    }
+  },
+  "preparation": {
+    "importance_ols_r2": 0.905,
+    "best_catalog_shift_k": [
+      1,
+      2
+    ],
+    "max_digital_vif": 2.41
+  },
+  "forecast_reference": {
+    "plan_start": "2025-01-02",
+    "plan_days": 42,
+    "plan_total_spend": 8008549,
+    "forecast_total_sales": 42585010
   }
 }

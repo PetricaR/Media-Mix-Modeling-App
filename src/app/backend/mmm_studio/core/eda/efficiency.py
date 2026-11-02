@@ -7,7 +7,10 @@ import pandas as pd
 
 from mmm_studio.charts.builders import heatmap_figure, line_figure, small_multiples_figure
 from mmm_studio.charts.theme import COPPER, NAVY, STATUS_WARNING, TEAL, channel_color
+from mmm_studio.core.eda.notebook_stats import social_regime
+from mmm_studio.core.features import complete_years
 from mmm_studio.core.schema import DataRoleConfig
+from mmm_studio.report.facts import AFFILIATE_BREAK, SOCIAL_BREAK
 from mmm_studio.report.narrative import fmt_eur
 from mmm_studio.report.sections import (
     CalloutBlock,
@@ -29,7 +32,7 @@ def build_explore_efficiency_section(
     paid_channels = config.paid_channels
     digital_channels = config.digital_paid_channels
 
-    monthly = wide_df.resample("ME").sum()
+    monthly = complete_years(wide_df).resample("ME").sum()
     m_labels = [d.strftime("%Y-%m") for d in monthly.index]
 
     # 1. Monthly CPC, CPM, CTR across digital channels
@@ -115,13 +118,15 @@ def build_explore_efficiency_section(
         height=390,
     )
 
-    # 3. Social Media structural break on 2024-08-01
+    # 3. Social Media structural break on 2024-08-01: Jan–Jul vs Aug–Dec of the break year (01b §8.3)
     dates_str = [d.strftime("%Y-%m-%d") for d in wide_df.index]
-    soc_pre = wide_df.loc[wide_df.index < "2024-08-01"]
-    soc_post = wide_df.loc[wide_df.index >= "2024-08-01"]
-    soc_cost_pre = float(soc_pre.get("cost_social_media", pd.Series(0.0)).mean())
-    soc_cost_post = float(soc_post.get("cost_social_media", pd.Series(0.0)).mean())
-    soc_mult = soc_cost_post / max(soc_cost_pre, 1.0)
+    has_social = "cost_social_media" in wide_df and wide_df.index.min() < SOCIAL_BREAK < wide_df.index.max()
+    regime = social_regime(wide_df, SOCIAL_BREAK) if has_social else None
+    soc_mult = float(regime.loc["Spend", "ratio"]) if regime is not None else float("nan")
+    soc_cost_pre = float(regime.loc["Spend", "before"]) if regime is not None else float("nan")
+    soc_cost_post = float(regime.loc["Spend", "after"]) if regime is not None else float("nan")
+    soc_sales_mult = float(regime.loc["Attributed sales", "ratio"]) if regime is not None else float("nan")
+    soc_clicks_mult = float(regime.loc["Clicks", "ratio"]) if regime is not None else float("nan")
 
     fig_social = line_figure(
         x=dates_str,
@@ -139,7 +144,7 @@ def build_explore_efficiency_section(
                 "width": 2.2,
             },
         ],
-        title=f"Social Media Structural Break on 2024-08-01 (Daily Spend Jump {soc_mult:.1f}× vs Stable Sales)",
+        title=None,
         xaxis_title="Date",
         yaxis_title="€ / Day",
         vlines=[{"x": "2024-08-01", "color": STATUS_WARNING, "width": 2, "dash": "dash", "label": "2024-08-01 Regime Shift"}],
@@ -150,8 +155,13 @@ def build_explore_efficiency_section(
     aff_cost = wide_df.get("cost_affiliate", pd.Series(0.0, index=wide_df.index))
     aff_sales = wide_df.get("sales_affiliate", pd.Series(1.0, index=wide_df.index))
     comm_rate = np.where(aff_sales > 0, 100.0 * aff_cost / aff_sales, np.nan)
-    comm_pre = float(np.nanmean(comm_rate[wide_df.index < "2024-02-01"]))
-    comm_post = float(np.nanmean(comm_rate[wide_df.index >= "2024-02-01"]))
+    # Commission as a share of sales over each period (ratio of sums, robust to low-sales days)
+    pre_mask, post_mask = wide_df.index < AFFILIATE_BREAK, wide_df.index >= AFFILIATE_BREAK
+    comm_pre = 100.0 * float(aff_cost[pre_mask].sum()) / max(float(aff_sales[pre_mask].sum()), 1.0)
+    comm_post = 100.0 * float(aff_cost[post_mask].sum()) / max(float(aff_sales[post_mask].sum()), 1.0)
+    comm_word = "step-up" if comm_post > comm_pre else "step-down"
+    r_aff = float(aff_cost.corr(aff_sales)) if aff_cost.std() > 0 else float("nan")
+    r_sea = float(wide_df["cost_sea"].corr(wide_df["clicks_sea"])) if "cost_sea" in wide_df and "clicks_sea" in wide_df else float("nan")
 
     fig_aff = line_figure(
         x=dates_str,
@@ -164,7 +174,7 @@ def build_explore_efficiency_section(
                 "width": 2.4,
             },
         ],
-        title=f"Affiliate Effective Commission Rate: Step-Down in Feb 2024 ({comm_pre:.2f}% → {comm_post:.2f}%)",
+        title=None,
         xaxis_title="Date",
         yaxis_title="Commission Rate (%)",
         vlines=[{"x": "2024-02-01", "color": COPPER, "width": 2, "dash": "dash", "label": "2024-02-01 Commission Shift"}],
@@ -173,26 +183,27 @@ def build_explore_efficiency_section(
 
     return Section(
         id="explore_efficiency",
-        title="Funnel Efficiency & Structural Regime Breaks",
+        title="Media efficiency and regime breaks",
         subtitle="Unit-cost dynamics (CPC, CPM, CTR), within-channel funnel correlations, and the two 2024 regime shifts.",
         blocks=[
             KpisBlock(
                 items=[
-                    KpiItem(label="Social Media Break", value=f"{soc_mult:.1f}× Spend", delta=f"{fmt_eur(soc_cost_pre)}/d → {fmt_eur(soc_cost_post)}/d (Aug 2024)", status="warn"),
-                    KpiItem(label="Affiliate Commission", value=f"{comm_pre:.1f}% → {comm_post:.1f}%", delta="Step-down in Feb 2024", status="warn"),
-                    KpiItem(label="Affiliate Cost↔Sales r", value="0.96", delta="Commission scales with orders", status="warn"),
-                    KpiItem(label="SEA Cost↔Clicks r", value="0.92", delta="Tight CPC auction pass-through"),
+                    KpiItem(label="Social Media regime (Aug 2024)", value=f"×{soc_mult:.1f} spend", delta=f"clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f}", status="warn"),
+                    KpiItem(label="Affiliate commission", value=f"{comm_pre:.1f}% → {comm_post:.1f}%", delta=f"of own sales; {comm_word} in Feb 2024", status="warn"),
+                    KpiItem(label="Affiliate r(cost, own sales)", value=f"{r_aff:.2f}", delta="Cost follows sales (commission)", status="warn"),
+                    KpiItem(label="SEA r(cost, clicks)", value=f"{r_sea:.2f}", delta="Billed per click"),
                 ]
             ),
             CalloutBlock(
                 tone="warn",
                 title="Two Structural Breaks Identified in 2024",
                 body=(
-                    f"1. **Social Media (2024-08-01):** Mean daily spend jumped **{soc_mult:.1f}×** ({fmt_eur(soc_cost_pre)} → {fmt_eur(soc_cost_post)}/day) "
-                    "due to upper-funnel campaign expansion or accounting reclassification, while last-touch Social sales remained flat. "
-                    "Without a `social_post_aug2024` regime control, linear models mis-estimate Social elasticity.\n"
-                    f"2. **Affiliate (2024-02-01):** Effective commission rate (`cost / sales`) stepped down from **{comm_pre:.2f}% to {comm_post:.2f}%**, "
-                    "and because Affiliate cost is paid as a percentage of realised sales (`r = 0.96`), its raw correlation with total sales is inflated by reverse causality."
+                    f"1. **Social Media ({SOCIAL_BREAK:%d %b %Y}):** daily spend ×{soc_mult:.1f} ({fmt_eur(soc_cost_pre)} → {fmt_eur(soc_cost_post)}), "
+                    f"clicks ×{soc_clicks_mult:.1f} and attributed sales ×{soc_sales_mult:.1f} (Aug–Dec vs Jan–Jul). This looks like a change of "
+                    "campaign type or tracking set-up, not a gradual gain: a single Social coefficient across the period is mis-specified, "
+                    "and the Q4 hold-out lies entirely in the new regime.\n"
+                    f"2. **Affiliate ({AFFILIATE_BREAK:%b %Y}):** commission {comm_pre:.1f}% → {comm_post:.1f}% of its own sales. Because the "
+                    f"cost is a commission on realised sales (r = {r_aff:.2f}), its high correlation with total sales is largely reverse causality."
                 ),
             ),
             ChartBlock(
@@ -210,13 +221,38 @@ def build_explore_efficiency_section(
             ChartBlock(
                 id="social_regime_change",
                 title="Social Media Regime Shift on 2024-08-01",
-                subtitle="Daily spend jumps ~4.7× from August 2024 onward while attributed sales stay near €14k/day.",
+                subtitle=f"Daily spend ×{soc_mult:.1f}, clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f} (Aug–Dec vs Jan–Jul {SOCIAL_BREAK.year}).",
                 figure=fig_social,
+            ),
+            *(
+                [
+                    TableBlock(
+                        id="social_regime_table",
+                        title=f"Social Media before and after {SOCIAL_BREAK:%d %b %Y}",
+                        columns=[
+                            TableColumn(key="metric", label="Daily mean"),
+                            TableColumn(key="before", label=f"Jan–Jul {SOCIAL_BREAK.year}", align="right"),
+                            TableColumn(key="after", label=f"Aug–Dec {SOCIAL_BREAK.year}", align="right"),
+                            TableColumn(key="ratio", label="Ratio", align="right"),
+                        ],
+                        rows=[
+                            {
+                                "metric": m,
+                                "before": f"{100 * regime.loc[m, 'before']:.2f}%" if m == "CTR" else (f"{regime.loc[m, 'before']:,.0f}" if m == "Clicks" else fmt_eur(float(regime.loc[m, 'before']))),
+                                "after": f"{100 * regime.loc[m, 'after']:.2f}%" if m == "CTR" else (f"{regime.loc[m, 'after']:,.0f}" if m == "Clicks" else fmt_eur(float(regime.loc[m, 'after']))),
+                                "ratio": f"×{regime.loc[m, 'ratio']:.1f}",
+                            }
+                            for m in regime.index
+                        ],
+                    )
+                ]
+                if regime is not None
+                else []
             ),
             ChartBlock(
                 id="affiliate_commission",
                 title="Affiliate Effective Commission Rate (`cost_affiliate / sales_affiliate`)",
-                subtitle="Mechanical commission relationship with a structural rate reduction in February 2024.",
+                subtitle=f"Commission {comm_pre:.1f}% of own sales before {AFFILIATE_BREAK:%b %Y}, {comm_post:.1f}% after.",
                 figure=fig_aff,
             ),
             TableBlock(
@@ -232,6 +268,7 @@ def build_explore_efficiency_section(
                     TableColumn(key="corr_cost_sales", label="r(Cost, Ch.Sales)", align="right"),
                 ],
                 rows=kpi_rows,
+                caption="Affiliate impressions are tiny (CTR > 100 %), so its CPM and CTR are not meaningful; PSM has no impressions.",
             ),
         ],
     )

@@ -32,10 +32,17 @@ def get_session_factory(sqlalchemy_url: str | None = None) -> sessionmaker[Sessi
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
-def init_db(sqlalchemy_url: str | None = None) -> None:
-    """Create all application ORM tables if they do not exist."""
+_INITIALISED: set[str] = set()
+
+
+def init_db(sqlalchemy_url: str | None = None, force: bool = False) -> None:
+    """Create all application ORM tables if they do not exist (once per database URL and process)."""
+    url = sqlalchemy_url or get_settings().sqlalchemy_url
+    if url in _INITIALISED and not force:
+        return
     engine = get_engine(sqlalchemy_url)
     Base.metadata.create_all(bind=engine)
+    _INITIALISED.add(url)
 
 
 def get_db() -> Generator[Session, None, None]:

@@ -45,6 +45,13 @@ def wide_full(profiled_case_study: tuple[pd.DataFrame, DataProfile]) -> pd.DataF
 
 
 @pytest.fixture(scope="session")
+def wide_model(profiled_case_study: tuple[pd.DataFrame, DataProfile]) -> pd.DataFrame:
+    """The modelling panel: the full calendar, as notebooks 02–05 use it (2025-01-01 included)."""
+    df, profile = profiled_case_study
+    return build_daily_wide_table(df, config=profile.role_config, drop_2025=profile.role_config.drop_trailing_isolated_days)
+
+
+@pytest.fixture(scope="session")
 def wide_2023_2024(profiled_case_study: tuple[pd.DataFrame, DataProfile]) -> pd.DataFrame:
     df, profile = profiled_case_study
     return build_daily_wide_table(df, config=profile.role_config, drop_2025=True)

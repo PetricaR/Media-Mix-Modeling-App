@@ -156,6 +156,10 @@ def sweep_stale_runs(
     with SessionLocal() as db:
         running_runs = db.query(Run).filter(Run.status == "running").all()
         for r in running_runs:
+            # A run between its analysis and Meridian jobs (e.g. queued behind another run's Meridian fit) has no
+            # running stage and no heartbeat; only a stage that is running without a heartbeat means a lost worker.
+            if not any(st.status == "running" for st in r.stages):
+                continue
             hb = r.heartbeat_at
             if hb is not None:
                 if hb.tzinfo is None:

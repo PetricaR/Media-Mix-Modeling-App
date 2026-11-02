@@ -24,6 +24,8 @@ export interface DataRoleConfig {
   channels: ChannelConfig[];
   structural_break_year: number;
   allow_single_year: boolean;
+  holdout_days?: number;
+  drop_trailing_isolated_days?: boolean;
 }
 
 export interface DataProfile {
@@ -34,6 +36,12 @@ export interface DataProfile {
   n_columns: number;
   date_min: string;
   date_max: string;
+  raw_row_count?: number;
+  start_date?: string;
+  end_date?: string;
+  calendar_days?: number;
+  modelling_days?: number;
+  trailing_isolated_dates?: string[];
   years_present: number[];
   missing_dates_count: number;
   duplicate_rows_count: number;
@@ -48,7 +56,7 @@ export interface StageStatus {
   key: string;
   label: string;
   queue: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "skipped";
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
   started_at?: string | null;
   finished_at?: string | null;
   error?: string | null;
@@ -179,19 +187,36 @@ export interface ForecastItem {
   error?: string | null;
   summary?: Record<string, unknown> | null;
   queue_position?: number | null;
-  result?: {
-    horizon_days: number;
-    base_total_sales: number;
-    scenario_total_sales: number;
-    delta_sales: number;
-    delta_sales_pct: number;
-    base_total_spend: number;
-    scenario_total_spend: number;
-    delta_spend: number;
-    marginal_roas?: number | null;
-    channel_summary: Record<string, unknown>[];
-    daily: Record<string, unknown>[];
-  } | null;
+  result?: ScenarioResult | null;
+}
+
+export interface ScenarioChannelRow {
+  channel: string;
+  slug: string;
+  multiplier: number;
+  base_spend: number;
+  scenario_spend: number;
+  delta_spend: number;
+}
+
+export interface ScenarioResult {
+  method?: string;
+  horizon_days: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  base_total_sales: number;
+  scenario_total_sales: number;
+  delta_sales: number;
+  delta_sales_pct: number;
+  base_total_spend: number;
+  scenario_total_spend: number;
+  delta_spend: number;
+  marginal_roas?: number | null;
+  prediction_lo_total?: number;
+  prediction_hi_total?: number;
+  channel_summary: ScenarioChannelRow[];
+  figure?: PlotlySpec;
+  daily: Record<string, unknown>[];
 }
 
 export interface ScenarioDetail {
@@ -204,7 +229,7 @@ export interface ScenarioDetail {
   summary?: Record<string, unknown> | null;
   error?: string | null;
   created_at?: string | null;
-  result?: ForecastItem["result"];
+  result?: ScenarioResult | null;
 }
 
 export interface OptimisationChannelRow {

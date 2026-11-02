@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/Layout/AppShell";
 import { ImportPage } from "./pages/Import";
@@ -14,8 +14,28 @@ import { ForecastPage } from "./pages/Forecast";
 import { ReportsPage } from "./pages/Reports";
 import { BriefPage } from "./pages/Brief";
 
+const RUN_STORAGE_KEY = "mmm_studio_selected_run";
+
+function readStoredRun(): string | null {
+  try {
+    return localStorage.getItem(RUN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export const App: React.FC = () => {
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  // The selected run survives a page reload; AppShell falls back to the default run if it no longer exists
+  const [selectedRunId, setSelected] = useState<string | null>(readStoredRun);
+  const setSelectedRunId = useCallback((id: string | null) => {
+    setSelected(id);
+    try {
+      if (id) localStorage.setItem(RUN_STORAGE_KEY, id);
+      else localStorage.removeItem(RUN_STORAGE_KEY);
+    } catch {
+      // storage unavailable (private mode): selection simply is not remembered
+    }
+  }, []);
 
   return (
     <AppShell selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId}>

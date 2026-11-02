@@ -7,6 +7,7 @@ import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure, heatmap_figure, line_figure
 from mmm_studio.charts.theme import COPPER, NAVY, SLATE, TEAL, channel_color
+from mmm_studio.core.eda.notebook_stats import correlation_robustness, vif_variants
 from mmm_studio.core.schema import DataRoleConfig
 from mmm_studio.report.sections import (
     CalloutBlock,
@@ -128,29 +129,23 @@ def build_explore_correlations_section(
     fig_mat_pearson = _build_matrix_fig("pearson")
     fig_mat_spearman = _build_matrix_fig("spearman")
 
-    # Digital raw cost VIF (matches notebook 02: 1.41 to 2.41)
-    w_mod = wide_df.loc["2023-01-01":"2024-12-31"]
-    dig_cost_df = pd.DataFrame({ch: w_mod[f"cost_{slug_map[ch]}"] for ch in digital_channels})
+    # Digital raw cost VIF on the full modelling panel (notebook 02 §5)
+    dig_cost_df = pd.DataFrame({ch: wide_df[f"cost_{slug_map[ch]}"] for ch in digital_channels})
     vif_digital = compute_vif_table(dig_cost_df)
+    vif_var = vif_variants(wide_df, config)
 
-    # 4. Correlation robustness across regimes (2023 vs 2024, Non-Q4 vs Q4)
-    w23 = wide_df[wide_df.index.year == 2023]
-    w24 = wide_df[wide_df.index.year == 2024]
-    wq4 = wide_df[wide_df.index.month.isin([10, 11, 12])]
-    wnonq4 = wide_df[~wide_df.index.month.isin([10, 11, 12])]
-
+    # 4. How robust are the correlations? Same day, weekly totals, trend & calendar removed (01b §9.2)
+    robust = correlation_robustness(wide_df, config)
     rob_ch = sorted(paid_channels, key=lambda c: corr_cost_pearson[c], reverse=True)
     fig_robust = bar_figure(
-        categories=rob_ch,
+        categories=robust.index.tolist(),
         series=[
-            {"name": "2023", "values": [round(float(w23[f"cost_{slug_map[c]}"].corr(w23["total_sales"])), 2) for c in rob_ch], "color": SLATE},
-            {"name": "2024", "values": [round(float(w24[f"cost_{slug_map[c]}"].corr(w24["total_sales"])), 2) for c in rob_ch], "color": NAVY},
-            {"name": "Non-Q4 (Jan–Sep)", "values": [round(float(wnonq4[f"cost_{slug_map[c]}"].corr(wnonq4["total_sales"])), 2) for c in rob_ch], "color": TEAL},
-            {"name": "Q4 Peak (Oct–Dec)", "values": [round(float(wq4[f"cost_{slug_map[c]}"].corr(wq4["total_sales"])), 2) for c in rob_ch], "color": COPPER},
+            {"name": "Daily, same day", "values": robust["daily"].round(2).tolist(), "color": NAVY},
+            {"name": "Weekly totals", "values": robust["weekly"].round(2).tolist(), "color": TEAL},
+            {"name": "Daily, trend & calendar removed", "values": robust["deseasonalised"].round(2).tolist(), "color": COPPER},
         ],
-        title="Correlation Robustness Across Years and Seasons: r(Channel Cost, Total Sales)",
-        xaxis_title="Paid Channel",
-        yaxis_title="Pearson r with Total Sales",
+        xaxis_title="Paid channel",
+        yaxis_title="Pearson r with total sales",
         barmode="group",
         height=370,
     )
@@ -204,31 +199,55 @@ def build_explore_correlations_section(
                 "pearson_lag3": f"{r_l3:+.2f}",
                 "pearson_lag7": f"{r_l7:+.2f}",
                 "peak_lag": f"+{best_k}d ({best_r:+.2f})",
-                "digital_vif": f"{vif_digital[ch]:.2f}" if ch in vif_digital else "1.02 (w/ Catalog)",
+                "digital_vif": f"{vif_digital[ch]:.2f}" if ch in vif_digital else "–",
             }
         )
 
+    top2 = sorted(corr_cost_pearson, key=corr_cost_pearson.get, reverse=True)[:2]
+    vif_sorted = sorted(vif_digital, key=vif_digital.get, reverse=True)
+    cat = config.print_event_channels[0] if config.print_event_channels else None
+    cat_r0 = corr_cost_pearson.get(cat, float("nan")) if cat else float("nan")
+    cat_lags = [float(wide_df[f"cost_{slug_map[cat]}"].corr(y.shift(-k))) for k in lags] if cat else []
+    cat_best = int(np.nanargmax(cat_lags)) if cat_lags else 0
+    cat_best_r = cat_lags[cat_best] if cat_lags else float("nan")
+    dig_pairs = cost_df[[c for c in digital_channels if c in cost_df]].corr().to_numpy()
+    off = dig_pairs[~np.eye(len(dig_pairs), dtype=bool)] if len(dig_pairs) > 1 else np.array([np.nan])
+    rob_rows = [
+        {
+            "channel": ch,
+            "daily": f"{r['daily']:.2f}",
+            "weekly": "–" if r["weekly"] != r["weekly"] else f"{r['weekly']:.2f}",
+            "deseasonalised": f"{r['deseasonalised']:.2f}",
+        }
+        for ch, r in robust.iterrows()
+    ]
+    vif_rows = [
+        {"channel": ch, "daily": f"{r['daily']:.1f}", "weekly": f"{r['weekly']:.1f}", "with_calendar": f"{r['with_calendar']:.1f}"}
+        for ch, r in vif_var.iterrows()
+    ]
+
     return Section(
         id="explore_correlations",
-        title="Correlations, Collinearity & Distributed Lags",
+        title="Correlations, lags and collinearity",
         subtitle="Same-day vs lagged cross-correlations, Pearson/Spearman toggles, and Variance Inflation Factors (VIF).",
         blocks=[
             KpisBlock(
                 items=[
-                    KpiItem(label="Top Same-Day Spend r", value=f"Affiliate ({corr_cost_pearson.get('Affiliate', 0.76):.2f})", delta=f"SEA ({corr_cost_pearson.get('SEA', 0.72):.2f})"),
-                    KpiItem(label="Catalog Lag-0 vs Lag+3", value=f"{corr_cost_pearson.get('Catalog', -0.01):+.2f} → +{catalog_lag3_r:.2f}", delta="Peaks 3 days after send-out", status="success"),
-                    KpiItem(label="Digital Raw Cost VIF", value=f"{min(vif_digital.values()):.2f} – {max(vif_digital.values()):.2f}", delta="All well below VIF = 5 threshold", status="success"),
-                    KpiItem(label="Highest Digital VIF", value=f"SEA ({vif_digital.get('SEA', 2.41):.2f})", delta="Display (1.85), Display Net (1.67)"),
+                    KpiItem(label="Top same-day r (cost, sales)", value=f"{top2[0]} {corr_cost_pearson[top2[0]]:.2f}", delta=f"{top2[1]} {corr_cost_pearson[top2[1]]:.2f} · both bill on demand" if len(top2) > 1 else ""),
+                    KpiItem(label=f"{cat or 'Catalog'}: same day → best lag", value=f"{cat_r0:+.2f} → {cat_best_r:+.2f}", delta=f"peaks +{cat_best} days after send-out", status="success"),
+                    KpiItem(label="Digital cost VIF", value=f"{min(vif_digital.values()):.2f} – {max(vif_digital.values()):.2f}", delta="Moderate collinearity (< 5)", status="success"),
+                    KpiItem(label="Digital spends move together", value=f"r {np.nanmin(off):.2f}–{np.nanmax(off):.2f}", delta=f"highest VIF: {', '.join(f'{c} {vif_digital[c]:.2f}' for c in vif_sorted[:2])}"),
                 ]
             ),
             CalloutBlock(
                 tone="info",
-                title="Why Catalog Same-Day Correlation is -0.01 While Lag +3 is +0.40",
+                title=f"Same-day correlation says the {cat or 'catalog'} does not matter — that is wrong",
                 body=(
-                    "Catalog costs are booked on Thursday send-out days (historically a below-average retail day), "
-                    "resulting in a **-0.01 same-day correlation** with total sales. Once shifted forward by +3 days "
-                    "(Sunday, after Friday/Saturday postal delivery and weekend browsing), correlation jumps to **+0.40** "
-                    "and stays positive across two full weeks."
+                    f"The {cat or 'catalog'} cost is booked on the send-out day while its effect comes days later: same-day "
+                    f"r = **{cat_r0:+.2f}**, but r = **{cat_best_r:+.2f}** at **+{cat_best} days** (a Thursday send-out hits the "
+                    "following Sunday). A standard lag-0 adstock is the wrong shape; shift the spend to its in-home date. "
+                    f"Meanwhile the two highest same-day correlations ({', '.join(top2)}) belong to the channels whose cost is "
+                    "mechanically tied to demand (commission and cost-per-click)."
                 ),
             ),
             ChartBlock(
@@ -237,14 +256,14 @@ def build_explore_correlations_section(
                 subtitle="Toggle between Pearson (linear) and Spearman (rank) correlation.",
                 figure=fig_cost_pearson,
                 alt_figures={"Pearson": fig_cost_pearson, "Spearman": fig_cost_spearman},
-                caption="Affiliate (0.76) and SEA (0.72) show the strongest same-day spend correlation; Catalog spend is -0.01 at lag 0.",
+                caption=f"Strongest same-day spend correlation: {', '.join(f'{c} ({corr_cost_pearson[c]:.2f})' for c in top2)}; {cat or 'catalog'} {cat_r0:+.2f}.",
             ),
             ChartBlock(
                 id="lag_correlation",
                 title="Distributed Lag Cross-Correlation Profile (Lags 0 to +21 Days)",
                 subtitle="Correlation between paid channel spend on day t and total sales on day t + k.",
                 figure=fig_lag,
-                caption="Digital channels peak at lag 0–1 day; Catalog peaks at lag +3 days (r = 0.40) with secondary weekend harmonics at +10 and +17 days.",
+                caption=f"Digital channels peak at lag 0 and decay slowly (spend itself is smooth); {cat or 'the catalog'} peaks at +{cat_best} days (r = {cat_best_r:.2f}).",
             ),
             ChartBlock(
                 id="corr_matrix_costs",
@@ -262,8 +281,8 @@ def build_explore_correlations_section(
             ),
             ChartBlock(
                 id="corr_robustness",
-                title="Correlation Stability Across Years (2023 vs 2024) and Seasons (Non-Q4 vs Q4)",
-                subtitle="Testing whether spend-to-sales relationships hold outside the Q4 holiday peak.",
+                title="How robust are the correlations?",
+                subtitle="Daily same-day vs weekly totals vs daily with trend, month and weekday removed: much of the raw link is shared seasonality.",
                 figure=fig_robust,
             ),
             TableBlock(
@@ -276,9 +295,32 @@ def build_explore_correlations_section(
                     TableColumn(key="pearson_lag3", label="Pearson (Lag +3d)", align="right"),
                     TableColumn(key="pearson_lag7", label="Pearson (Lag +7d)", align="right"),
                     TableColumn(key="peak_lag", label="Peak Forward Lag", align="right"),
-                    TableColumn(key="digital_vif", label="Raw Cost VIF", align="right"),
+                    TableColumn(key="digital_vif", label="Raw cost VIF", align="right"),
                 ],
                 rows=table_rows,
+            ),
+            TableBlock(
+                id="corr_robustness_table",
+                title="Correlation with total sales: three views",
+                columns=[
+                    TableColumn(key="channel", label="Channel"),
+                    TableColumn(key="daily", label="Daily, same day", align="right"),
+                    TableColumn(key="weekly", label="Weekly totals", align="right"),
+                    TableColumn(key="deseasonalised", label="Trend & calendar removed", align="right"),
+                ],
+                rows=rob_rows,
+            ),
+            TableBlock(
+                id="corr_vif_variants_table",
+                title="Multicollinearity of log(1 + spend)",
+                subtitle="VIFs stay moderate in every variant; the harder problem is that budgets follow the season and two costs follow demand.",
+                columns=[
+                    TableColumn(key="channel", label="Channel"),
+                    TableColumn(key="daily", label="Daily", align="right"),
+                    TableColumn(key="weekly", label="Weekly", align="right"),
+                    TableColumn(key="with_calendar", label="Daily + trend & calendar", align="right"),
+                ],
+                rows=vif_rows,
             ),
         ],
     )

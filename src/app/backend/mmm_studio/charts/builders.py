@@ -7,10 +7,13 @@ from typing import Any
 import numpy as np
 
 from mmm_studio.charts.theme import (
+    AXIS_COLOR,
     COPPER,
+    DIVERGING_SCALE,
     GRID_COLOR,
     INK_MUTED,
     NAVY,
+    SEQUENTIAL_SCALE,
     SLATE,
     STATUS_DANGER,
     STATUS_SUCCESS,
@@ -242,8 +245,9 @@ def bar_figure(
     hlines: list[dict[str, Any]] | None = None,
     vlines: list[dict[str, Any]] | None = None,
     showlegend: bool = True,
+    extra_traces: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build a vertical or horizontal bar chart."""
+    """Build a vertical or horizontal bar chart (optionally overlaid with `extra_traces`, e.g. reference lines)."""
     cats = _clean_list(categories)
     traces: list[dict[str, Any]] = []
     for idx, s in enumerate(series):
@@ -271,7 +275,14 @@ def bar_figure(
         if "text" in s:
             trace["text"] = _clean_list(s["text"])
             trace["textposition"] = s.get("textposition", "outside")
+            trace["cliponaxis"] = False  # outside labels of the tallest bar must not be cut off
         traces.append(trace)
+    for extra in extra_traces or []:
+        t = dict(extra)
+        for key in ("x", "y"):
+            if key in t:
+                t[key] = _clean_list(t[key])
+        traces.append(t)
 
     layout = base_layout(
         title=title,
@@ -346,6 +357,10 @@ def heatmap_figure(
     z_arr = np.asarray(z, dtype=float)
     z_list = [_clean_list(row) for row in z_arr]
 
+    if colorscale in ("RdBu_r", "RdBu"):
+        colorscale = DIVERGING_SCALE
+    elif colorscale in ("YlOrBr", "Blues", "YlGnBu", "Viridis"):
+        colorscale = SEQUENTIAL_SCALE
     trace: dict[str, Any] = {
         "type": "heatmap",
         "x": x_list,
@@ -397,10 +412,12 @@ def small_multiples_figure(
     """Build a grid of subplot panels (e.g. 12 channels or 7 paid response curves)."""
     n = max(len(panels), 1)
     nrows = int(np.ceil(n / ncols))
-    total_height = max(nrows * height_per_row + 60, 320)
+    total_height = max(nrows * height_per_row + 60 + (30 * (nrows - 1) if any(p.get("xaxis_title") for p in panels) else 0), 320)
 
     h_gap = 0.06 if ncols > 1 else 0.0
-    v_gap = max(0.08 / max(nrows - 1, 1), 0.04) if nrows > 1 else 0.0
+    # Leave room (in pixels) for the x-axis title of one row and the panel title of the next one
+    has_xtitle = any(p.get("xaxis_title") for p in panels)
+    v_gap = max(0.08 / max(nrows - 1, 1), (78 if has_xtitle else 48) / total_height) if nrows > 1 else 0.0
     col_w = (1.0 - h_gap * (ncols - 1)) / ncols
     row_h = (1.0 - v_gap * (nrows - 1)) / nrows
 
@@ -427,7 +444,7 @@ def small_multiples_figure(
             "domain": [x0, x1],
             "anchor": yref,
             "gridcolor": GRID_COLOR,
-            "linecolor": "#D0D7DE",
+            "linecolor": AXIS_COLOR,
             "tickfont": {"size": 10},
             "title": {"text": panel.get("xaxis_title", ""), "font": {"size": 10}},
         }
@@ -435,7 +452,7 @@ def small_multiples_figure(
             "domain": [y0, y1],
             "anchor": xref,
             "gridcolor": GRID_COLOR,
-            "linecolor": "#D0D7DE",
+            "linecolor": AXIS_COLOR,
             "tickfont": {"size": 10},
             "title": {"text": panel.get("yaxis_title", ""), "font": {"size": 10}},
         }

@@ -15,7 +15,7 @@ from mmm_studio import __version__
 from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db, require_access_code
 from mmm_studio.core.schema import DataRoleConfig
 from mmm_studio.core.workbook import WorkbookValidationError, profile_workbook
-from mmm_studio.db.models import Run, utcnow
+from mmm_studio.db.models import ForecastRun, Run, utcnow
 from mmm_studio.jobs.app import (
     cancel_procrastinate_job,
     count_active_queue_jobs,
@@ -229,6 +229,12 @@ def start_run(
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
 
+    if run.status in ("queued", "running"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run {run_id} is already {run.status}; cancel it before starting it again.",
+        )
+
     cfg = dict(run.config or {})
     skip_meridian = bool(cfg.get("skip_meridian", False))
 
@@ -258,13 +264,25 @@ def start_run(
                 ),
             )
 
+    rerun = run.status != "draft"
+    if rerun:
+        # A re-run starts from a clean slate: results of the previous run (sections, data, models, reports) and the
+        # example forecast built from them are removed; the uploaded workbook and its profile are kept.
+        for sub in ("sections", "data", "models", "reports"):
+            storage.delete_prefix(f"runs/{run_id}/{sub}")
+        for meta in ("summary.json", "meridian_metrics.json"):
+            storage.delete_prefix(f"runs/{run_id}/meta/{meta}")
+        default_fc = db.get(ForecastRun, f"default_{run_id}")
+        if default_fc is not None:
+            db.delete(default_fc)
     run.config = cfg
     run.status = "queued"
     run.error = None
+    run.summary = None
     run.heartbeat_at = utcnow()
     db.commit()
 
-    ensure_stage_rows(run_id, skip_meridian=skip_meridian)
+    ensure_stage_rows(run_id, skip_meridian=skip_meridian, reset=rerun)
 
     analysis_job_id = defer_task(
         run_analysis_job,
@@ -320,6 +338,11 @@ def cancel_run(run_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
 
+    if run.status not in ("queued", "running"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run {run_id} is {run.status}; only queued or running runs can be cancelled.",
+        )
     cancel_procrastinate_job(run.analysis_job_id, abort=True)
     cancel_procrastinate_job(run.meridian_job_id, abort=True)
 

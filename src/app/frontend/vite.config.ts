@@ -18,10 +18,12 @@ export default defineConfig({
     chunkSizeWarningLimit: 1600,
     rollupOptions: {
       output: {
-        manualChunks: {
-          plotly: ["plotly.js-cartesian-dist-min", "react-plotly.js"],
-          mui: ["@mui/material", "@mui/icons-material", "@emotion/react", "@emotion/styled"],
-          vendor: ["react", "react-dom", "react-router-dom", "@tanstack/react-query"],
+        // Plotly is large and only needed once a chart renders, so it gets its own lazily loaded chunk; the rest of
+        // node_modules shares one vendor chunk (splitting MUI from React created a circular chunk dependency).
+        manualChunks(id) {
+          if (id.includes("plotly")) return "plotly";
+          if (id.includes("node_modules")) return "vendor";
+          return undefined;
         },
       },
     },

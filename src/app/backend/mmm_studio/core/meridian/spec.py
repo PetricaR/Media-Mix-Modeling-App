@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from mmm_studio.core.features import calendar_controls, seasonality_controls
 from mmm_studio.core.schema import DataRoleConfig, slugify_channel
 
 HOLDOUT_Q4_2024: tuple[str, str] = ("2024-10-01", "2025-01-01")
@@ -89,13 +90,11 @@ class MeridianSpecConfig:
         if role_config.holdout_days <= 0:
             holdout = None
         elif index is not None and len(index) > role_config.holdout_days * 2:
+            # Meridian's DateRange is inclusive on both ends: the hold-out is the last `holdout_days` days.
             idx = pd.DatetimeIndex(index)
             end_dt = idx.max()
             start_dt = end_dt - pd.Timedelta(days=int(role_config.holdout_days) - 1)
-            holdout = (
-                start_dt.strftime("%Y-%m-%d"),
-                (end_dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-            )
+            holdout = (start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"))
 
         return cls(
             catalog_shift=catalog_shift,
@@ -104,40 +103,6 @@ class MeridianSpecConfig:
             holdout=holdout,
             paid_channels=paid_names,
         )
-
-
-def _black_friday(year: int) -> pd.Timestamp:
-    nov1 = pd.Timestamp(year=year, month=11, day=1)
-    first_thu = nov1 + pd.Timedelta(days=(3 - nov1.dayofweek) % 7)
-    return first_thu + pd.Timedelta(days=22)
-
-
-def _calendar_controls(index: pd.DatetimeIndex) -> pd.DataFrame:
-    import holidays
-
-    out = pd.DataFrame(index=index)
-    for d, name in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
-        if d:
-            out[f"dow_{name}"] = (index.dayofweek == d).astype(float)
-    de_holidays = holidays.Germany(years=sorted(set(index.year)))
-    out["holiday"] = index.map(lambda d: d in de_holidays).astype(float)
-    out["christmas"] = ((index.month == 12) & (index.day >= 20)).astype(float)
-    bw = np.zeros(len(index), dtype=bool)
-    for year in sorted(set(index.year)):
-        bf = _black_friday(year)
-        bw |= (index >= bf) & (index <= bf + pd.Timedelta(days=3))
-    out["black_week"] = bw.astype(float)
-    return out
-
-
-def _seasonality_controls(index: pd.DatetimeIndex, n_fourier: int = 2) -> pd.DataFrame:
-    out = pd.DataFrame(index=index)
-    t = index.dayofyear / 365.25
-    for k in range(1, n_fourier + 1):
-        out[f"sin_{k}"] = np.sin(2 * np.pi * k * t)
-        out[f"cos_{k}"] = np.cos(2 * np.pi * k * t)
-    out["trend"] = (index - index[0]).days / 365.25
-    return out
 
 
 def build_meridian_table(
@@ -157,7 +122,7 @@ def build_meridian_table(
         if slug == "catalog" and catalog_shift > 0:
             spend = spend.shift(catalog_shift, fill_value=0.0)
         table[f"{slug}_spend"] = spend.astype(float)
-    table = table.join(_calendar_controls(idx)).join(_seasonality_controls(idx, n_fourier))
+    table = table.join(calendar_controls(idx)).join(seasonality_controls(idx, n_fourier))
     return table.reset_index(drop=True)
 
 

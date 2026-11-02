@@ -87,7 +87,7 @@ fi
 # 3. Verifica dependentele backend & frontend
 if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
   echo "==> Sincronizare mediu Python in ${BACKEND_DIR}..."
-  (cd "${BACKEND_DIR}" && "${UV_BIN}" sync)
+  (cd "${BACKEND_DIR}" && "${UV_BIN}" sync --extra worker)
 fi
 
 if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
@@ -120,6 +120,7 @@ echo "  Database : ${MMM_DATABASE_URL}"
 echo "  Artifacts: ${MMM_LOCAL_DATA_DIR}"
 echo "------------------------------------------------------------------------------"
 echo "  Web UI   : http://localhost:5173  (sau http://localhost:8080)"
+echo "  Workers  : analysis, meridian, interactive (cate unul pe coada)"
 echo "  API Docs : http://localhost:8000/docs"
 echo "  Apasa Ctrl+C pentru a opri toate serviciile."
 echo "=============================================================================="
@@ -131,12 +132,15 @@ echo "==========================================================================
 ) &
 PIDS+=($!)
 
-# Porneste Procrastinate Worker (analysis, meridian, interactive)
-(
-  cd "${BACKEND_DIR}"
-  exec "${UV_BIN}" run python -m mmm_studio.cli worker --queue all
-) &
-PIDS+=($!)
+# Porneste cate un worker Procrastinate pe fiecare coada, ca scenariile si optimizarile interactive
+# sa nu astepte dupa un fit Meridian de cateva minute (fiecare worker proceseaza un job odata)
+for QUEUE in analysis meridian interactive; do
+  (
+    cd "${BACKEND_DIR}"
+    exec "${UV_BIN}" run python -m mmm_studio.cli worker --queue "${QUEUE}"
+  ) &
+  PIDS+=($!)
+done
 
 # Porneste Vite Dev Server pe portul 5173
 (

@@ -72,7 +72,7 @@ class ChannelConfig(BaseModel):
             if self.role == "print_event":
                 self.rationale = f"Episodic print drop ({self.cost_days} send-out days); in-home shift + slow adstock"
             elif self.role in ("commission", "control") or (self.role == "paid" and self.slug == "affiliate"):
-                self.rationale = "Commission-per-order (~6.5%); treated as non-media control in Meridian"
+                self.rationale = "Commission on its own sales (cost follows demand); Meridian control, no ROI"
             elif self.role in ("paid", "digital_paid"):
                 self.rationale = f"Continuous paid media ({self.cost_days} active spend days)"
             elif self.role == "unpaid":
@@ -96,8 +96,10 @@ class DataRoleConfig(BaseModel):
     sheet_name: str | None = None
     columns: ColumnMapping = Field(default_factory=ColumnMapping)
     channels: list[ChannelConfig] = Field(default_factory=list)
-    drop_trailing_isolated_days: bool = True
-    holdout_days: int = 92
+    # Notebooks 01–05 keep the isolated trailing day (2025-01-01) in every model; it is only left out of yearly
+    # and monthly comparisons. The default hold-out (93 days) is Q4 2024 through 2025-01-01, as in notebook 03.
+    drop_trailing_isolated_days: bool = False
+    holdout_days: int = 93
     structural_break_year: int = 2023
     target_column: str = "total_sales"
     date_column: str = "date"
@@ -159,7 +161,7 @@ class DataRoleConfig(BaseModel):
 
 
 def default_role_config() -> DataRoleConfig:
-    """Return a default `DataRoleConfig` with the canonical 11 Tchibo channels."""
+    """Return a default `DataRoleConfig` with the 12 channels of the case-study workbook."""
     return DataRoleConfig(
         channels=[
             ChannelConfig(name="SEA", role="paid"),
@@ -169,10 +171,11 @@ def default_role_config() -> DataRoleConfig:
             ChannelConfig(name="Display Network", role="paid"),
             ChannelConfig(name="Social Media", role="paid"),
             ChannelConfig(name="PSM", role="paid"),
-            ChannelConfig(name="Direct", role="unpaid"),
-            ChannelConfig(name="Email", role="unpaid"),
+            ChannelConfig(name="Direct Type-in", role="unpaid"),
+            ChannelConfig(name="SEO", role="unpaid"),
             ChannelConfig(name="TV", role="unpaid"),
-            ChannelConfig(name="Organic Search", role="unpaid"),
+            ChannelConfig(name="Direct Referred", role="unpaid"),
+            ChannelConfig(name="Owned", role="unpaid"),
         ]
     )
 

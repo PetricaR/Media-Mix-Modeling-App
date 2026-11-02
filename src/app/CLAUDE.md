@@ -5,9 +5,10 @@ re-implements notebooks 01–05 in its own code: EDA, feature preparation, an OL
 an optimiser, and forecasts with what-if scenarios. Results come back as interactive sections. It uses a FastAPI API,
 Procrastinate workers on Postgres, and a React SPA.
 
-- **Status (2026-11-02):** implemented in commit `6ad7afd add webapp` and audited/fixed so all known deploy, backend,
-  frontend/backend contract, and documentation issues are resolved. The fast tests, Meridian smoke test, ruff, and
-  `tsc` all pass.
+- **Status (2026-11-02, second audit):** every number the app shows is now computed and matches notebooks 01–05
+  (see "Parity with the notebooks" below). Fabricated fallbacks (Q3 hold-out, selection/sensitivity tables, overview
+  and brief facts, optimiser ROIs, scenario mROIs, a placeholder forecast) were removed. The UI follows the Tchibo
+  design tokens. Fast tests, ruff and `tsc` pass; a full-profile CLI run reproduces notebooks 03–05.
 - `PLAN.md` is the design spec (v3).
 - The main model is **Meridian**, a Bayesian MMM presented as a regression. OLS is only a benchmark.
 
@@ -26,6 +27,13 @@ Procrastinate workers on Postgres, and a React SPA.
   and the layout template live in `charts/theme.py`, and channel colours are keyed by display name.
 - Before using a library, fetch its docs with `chub` (global CLAUDE.md). Procrastinate (pinned 3.10.0) has no
   chub entry, so use its official docs for that version.
+- **No invented numbers.** Every figure in a KPI, callout, caption or table comes from the data or a model result
+  (`report/facts.py`, `core/eda/notebook_stats.py`, the Meridian outputs). If a result does not exist yet, the
+  section says it is pending; it never shows a default or a number copied from the notebooks.
+- **Brand.** Colours follow Tchibo's design tokens from tchibo.de (gold `#8C723B`, blue `#0A63BD`, navy `#004266`,
+  coral `#BE2D2F`, warm surfaces) in `frontend/src/theme.ts` and `charts/theme.py`; Figtree stands in for the
+  proprietary Tchibo Espresso font. Never embed the Tchibo logo: the header uses an original bean mark and the app is
+  labelled an independent case-study prototype.
 - Commit only when asked. The repo works on `main`.
 
 ## Environment (this Mac)
@@ -51,10 +59,11 @@ uv run pytest tests/ -m "not slow" -q        # fast test suite; needs Postgres (
 uv run pytest tests/test_meridian_smoke.py   # includes the @slow smoke MCMC fit (~1 min)
 uv run ruff check mmm_studio tests
 uv run python -m mmm_studio.cli run --input ../../../data/DataScienceMarketingUseCase.xlsx \
-    --out /tmp/mmm_cli --skip-meridian       # offline pipeline: no DB, writes runs/offline/... under --out
+    --out /tmp/mmm_cli --skip-meridian       # offline pipeline: no DB, writes runs/offline/... under --out (~5 s)
+#   Without --skip-meridian: --profile full ≈ 15–25 min (notebook-equal sampling + selection grid), quick ≈ 6 min, smoke ≈ 4 min.
 #   CLI flags: --input / --workbook, --profile {full,quick,smoke} / --fast / --smoke (default profile is "full").
 uv run uvicorn mmm_studio.main:app --reload --port 8000     # API (docs at /docs, routes under /api/v1)
-uv run python -m mmm_studio.cli worker --queue all          # also: analysis|meridian|interactive, --burst, --idle-exit N
+uv run python -m mmm_studio.cli worker --queue meridian     # one per queue: analysis|meridian|interactive (or all), --burst, --idle-exit N
 uv run python -m mmm_studio.cli migrate                     # create_all + Procrastinate schema (API/worker also do this at start)
 
 # Frontend (from src/app/frontend)
@@ -63,7 +72,7 @@ npm run dev                          # :5173, proxies /api -> http://localhost:8
 ./node_modules/.bin/tsc --noEmit -p .  # typecheck without writing files
 npm run build                        # tsc -b + vite; rewrites the TRACKED tsconfig.tsbuildinfo, so don't commit that churn
 
-# Everything natively: API :8000, worker on all queues, Vite on :5173 and :8080
+# Everything natively: API :8000, one worker per queue, Vite on :5173 and :8080
 ./src/app/start.sh                   # from the repo root; Romanian log messages; kills whatever is on 8000/5173/8080
 ```
 
@@ -80,9 +89,11 @@ backend/mmm_studio/            (flat package, NOT backend/src/mmm_studio as PLAN
   jobs/         app.py (Procrastinate app, defer_task, queue counts, stale sweep), tasks.py (5 tasks + LRU cache), worker.py, cloud_run.py (wake-up)
   pipeline/     context.py (RunContext: storage keys, save_section/dataframe/json, cancel + heartbeat), stages.py (s01–s15)
   core/         workbook.py (profile_workbook), schema.py (DataProfile, DataRoleConfig, ChannelConfig), tables.py, calendar.py,
-                metrics.py, preparation.py, ols.py, eda/*, meridian/{spec,fit,analysis,optimise,forecast}.py
+                features.py (notebook controls: weekday/holiday/Christmas/Black Week, Fourier, trend, catalog in-home adstock,
+                hold-out windows), metrics.py, preparation.py (nb 02), ols.py (nb 04), eda/* (+ notebook_stats.py: 01b tables),
+                meridian/{spec,fit,selection,analysis,optimise,forecast}.py
+  report/       sections.py (Section/Block models), narrative.py (formatters), facts.py (computed case facts for narratives)
   charts/       builders.py, theme.py
-  report/       sections.py (Section/Block models), narrative.py (formatters)
 backend/tests/  core/ unit + golden tests, test_pipeline_fast (CLI), test_api, test_jobs (Postgres), test_meridian_smoke
   fixtures/case_study.xlsx, golden/case_study.json   (reference numbers from the notebooks)
 frontend/src/   main.tsx, App.tsx (routes; selected run lives in React state, not the URL), theme.ts (PALETTE, light mode only)
@@ -107,7 +118,9 @@ deploy/         deploy.sh (GCP formare-dev / europe-west3), nginx.conf (template
 | Stages | Queue | Notes |
 | --- | --- | --- |
 | `s01_ingest` … `s11_benchmark` | analysis | `s01` is critical. `s11` also writes the draft `overview`, `brief` and `reports` |
-| `s12_meridian_fit` … `s15_finalize` | meridian | `s12` is critical. `s15` rewrites `benchmark`, `overview`, `brief` and `reports` with the Meridian numbers |
+| `s12_meridian_fit` | meridian | Critical. Final fit plus the forward (Q3) hold-out refit |
+| `s13` … `s15_finalize` | meridian | ROI/optimiser/HTML reports; back-test + example-plan forecast + scenarios; `s15` rewrites `benchmark`, `overview`, `brief`, `reports` |
+| `s16_model_selection` | meridian | Full profile only (else `skipped` via `StageSkipped`): 6 selection + 3 sensitivity fast fits; rewrites `meridian_model` |
 
 If a non-critical stage fails, the failure is recorded on its stage row and swallowed (`_run_stage`).
 
@@ -130,10 +143,11 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
 | Path | Contents |
 | --- | --- |
 | `input/workbook.xlsx` | The upload |
+| `data/wide_model.parquet` | The modelling panel (full calendar). Older runs used `wide_2023_2024`; read it via `model_panel_key()` |
 | `meta/` | `profile.json`, `config.json`, `summary.json`, `meridian_metrics.json` |
 | `data/` | `*.parquet` and `*.csv` |
 | `sections/` | `*.json` |
-| `models/` | `meridian_final.binpb`, `meridian_forecast.binpb` |
+| `models/` | `meridian_final.binpb`, `meridian_forecast.binpb` (the example-plan forecast model, reused by scenarios) |
 | `reports/` | `*.html` |
 | `forecasts/{fid}/`, `scenarios/{sid}/`, `optimisations/{oid}/` | Per-request results |
 
@@ -163,17 +177,28 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
   Every HTTP call goes in `api/client.ts`, every query hook in `api/hooks.ts`, and every API type in `api/types.ts`.
 - **No Tchibo logo or brand colours.** The app is labelled as a case-study tool.
 
+## Parity with the notebooks
+
+- **Modelling window.** Notebooks 02–05 keep the isolated 2025-01-01 in every model, so `DataRoleConfig` defaults to
+  `drop_trailing_isolated_days=False` and `holdout_days=93` (Q4 2024 through 1 Jan 2025). Yearly and monthly views use
+  `core/features.complete_years()`.
+- **Reference numbers** live in `tests/golden/case_study.json` and are asserted by the fast tests (EDA, naive baselines,
+  preparation ladder 0.74→0.90, OLS benchmark 34.8/10.7/9.6 % and walk-forward 9.5 %, example plan €8,008,549).
+- **Meridian (full profile, seed 0)** reproduces notebook 03 within MCMC noise: Q4 MAE/mean 8.54 % (nb 8.53 %), R² 0.888,
+  Q3 forward 10.96 % (nb 10.98 %), ROI SEA 8.40 / Catalog 0.97, optimiser +11.1 % on €121.8M, catalog what-if ratio 0.95,
+  and notebook 05's forecast €42.58M with the same scenarios (skip 30 Jan catalog, 20 % Display → SEA, +10 % digital).
+- Scenarios run on the fitted forecast model (`model_scenario_from_multipliers`); the marginal-ROI approximation is
+  only a fallback when that model is missing and uses the run's own posterior mROIs.
+
 ## Resolved issues (verified on 2026-11-02)
 
 1. `backend/Dockerfile` uses `python:3.12-slim` and installs `--extra worker` on the `worker` stage while keeping the `api` stage slim.
 2. `deploy.sh` builds separate `api` and `worker` images from `src/app/backend` via temporary Cloud Build configs with explicit `--target api` and `--target worker`.
 3. `cloud_run.wake_worker` accepts `"cloudrun"`, `"true"`, `"1"`, and `"yes"`, and `Settings` defaults to `mmm-studio-worker-{analysis,meridian,interactive}`.
-4. `docker-compose.yml` and `frontend/Dockerfile` both use `src/app` as build context, pass `API_ORIGIN: http://api:8080`, and publish the web container on host port `8080`.
-5. `.github/workflows/app-ci.yml` installs `--extra worker` before running `ruff` and `pytest`.
-6. `mmm_studio.main` lazy-imports heavy analytics/model packages so importing the API never loads `statsmodels`, `scipy`, `holidays`, `meridian`, `tensorflow`, or `jax`.
-7. Confirmed `DataRoleConfig` flows into `add_calendar_and_adstock_features`, `compute_preparation_ols_ladder`, `evaluate_ols_suite`, `MeridianSpecConfig.from_role_config`, `validate_plan`, `build_example_plan`, and dynamic scenario labels (`skip_catalog_label`).
-8. `overview`, `brief`, `benchmark`, and `optimiser` sections compute KPIs and narrative metrics dynamically from OLS/Meridian outputs rather than hardcoded case-study numbers.
-9. `s12_meridian_fit` and `s14_forecast` support isolated child-process fits (`fit_meridian_isolated`) when `ctx.spawn_meridian_child` is enabled (`execute_meridian_job`), raising `InterruptedError` on cancellation.
-10. `execute_meridian_job` waits up to 60 s for an active `analysis` job to write `data/wide_2023_2024.parquet` before falling back to running `run_analysis_stages(ctx)`.
-11. Stale runs are swept across `list_runs`, `get_run`, `list_sections`, and `list_optimisations`.
-12. Backend and frontend contracts match across `KpiItem` (`status` + `tone`), `CalloutBlock` (`tone` + `severity`), `ChartBlock` (`alt_figures` synced to `figure.variants`), `TableBlock` (`format` formatting in `SectionRenderer.tsx`), `/auth/check` (`protected` + `required`), `/runs/{id}/sections` (`status` + `run_status`), `/runs/{id}/forecasts`, and `/runs/{id}/optimisations`.
+4. `docker-compose.yml` runs one worker per queue (`worker`, `worker-meridian`, `worker-interactive`); `start.sh` and `Procfile.dev` do the same, so scenarios never wait behind a Meridian fit.
+5. `mmm_studio.main` lazy-imports heavy analytics/model packages so importing the API never loads `statsmodels`, `scipy`, `holidays`, `meridian`, `tensorflow`, or `jax`.
+6. The stale-run sweeper only fails runs that have a `running` stage and a stale heartbeat; a run waiting between its analysis and Meridian jobs is left alone.
+7. Starting a queued/running run returns 409; a re-run resets stage rows and clears the previous results; cancelling a finished run returns 409.
+8. Scenario results carry `delta_sales_pct` and `channel_summary` (the Forecast page used to crash); the optimiser and scenarios return 409 until Meridian results exist.
+9. `german_holiday_flags` uses `dateutil.easter` and the real Black Friday (day after the 4th Thursday; it was a week early in 2024); `delayed_binomial_adstock` now peaks at `peak_lag`.
+10. Frontend: Markdown is rendered (it was shown raw), sections poll while a run is active, a temporary drawer gives mobile navigation, the selected run persists, destructive actions are confirmed, tables are labelled scrollable regions with `scope`, and focus is visible.

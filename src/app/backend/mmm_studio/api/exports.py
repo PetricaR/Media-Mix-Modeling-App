@@ -52,10 +52,12 @@ def list_artifacts(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
 
     prefix = f"runs/{run_id}/"
-    keys = storage.list_keys(f"runs/{run_id}")
+    keys = storage.list_keys(prefix)
     items = []
     for k in keys:
         rel = k[len(prefix) :] if k.startswith(prefix) else k
+        if rel.endswith((".tmp", ".wide_input.parquet", ".fit_error.txt")):
+            continue
         items.append(
             {
                 "path": rel,

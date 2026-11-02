@@ -10,14 +10,16 @@ import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure, line_figure, small_multiples_figure
 from mmm_studio.charts.theme import (
+    BASELINE_FILL,
     COPPER,
+    HOLDOUT_SHADE,
     INK_MUTED,
     NAVY,
     SLATE,
     TEAL,
     channel_color,
 )
-from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig
+from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig, build_meridian_table
 from mmm_studio.core.metrics import regression_metrics
 from mmm_studio.report.narrative import fmt_eur
 from mmm_studio.report.sections import (
@@ -156,9 +158,12 @@ def compute_catalog_whatif(
     mmm: Any,
     wide_df: pd.DataFrame,
     cfg: MeridianSpecConfig,
-    skip_date: str = "2024-11-14",
+    skip_date: str | None = None,
 ) -> dict[str, Any]:
-    """Simulate skipping a single Catalog send-out in the Q4 planning window."""
+    """Simulate skipping one catalog send-out in the hold-out (planning) window, as in notebook 03 §9.
+
+    By default the middle send-out of the hold-out window is skipped (14 Nov 2024 in the case study).
+    """
     from meridian.analysis import analyzer
     from meridian.analysis.tensors import DataTensors
 
@@ -170,13 +175,16 @@ def compute_catalog_whatif(
         return {"skip_date": skip_date, "cost_saved": 0.0, "sales_lost": 0.0, "ratio": 0.0, "df": pd.DataFrame()}
 
     cat_idx = channels.index("catalog")
+    cat_days = wide_df.index[wide_df.get("cost_catalog", pd.Series(0.0, index=wide_df.index)) > 0]
+    if skip_date is None and len(cat_days) > 0:
+        in_window = cat_days
+        if cfg.holdout:
+            in_window = cat_days[(cat_days >= pd.Timestamp(cfg.holdout[0])) & (cat_days <= pd.Timestamp(cfg.holdout[1]))]
+        pool = in_window if len(in_window) else cat_days[-3:]
+        skip_date = pool[len(pool) // 2].strftime("%Y-%m-%d")
+    if skip_date is None:
+        return {"skip_date": None, "cost_saved": 0.0, "sales_lost": 0.0, "ratio": 0.0, "df": pd.DataFrame()}
     skip_ts = pd.Timestamp(skip_date)
-    if skip_ts not in wide_df.index or wide_df.loc[skip_ts, "cost_catalog"] <= 0:
-        # Fallback to last catalog send-out date in wide_df
-        cat_days = wide_df.index[wide_df.get("cost_catalog", pd.Series(0.0, index=wide_df.index)) > 0]
-        if len(cat_days) > 0:
-            skip_ts = cat_days[-2] if len(cat_days) >= 2 else cat_days[-1]
-            skip_date = skip_ts.strftime("%Y-%m-%d")
 
     in_home_ts = skip_ts + pd.Timedelta(days=cfg.catalog_shift)
     scenario = media.copy()
@@ -195,7 +203,7 @@ def compute_catalog_whatif(
     win_df = whatif_df.loc[win_start:win_end].copy()
 
     sales_lost = float((whatif_df["forecast"] - whatif_df["without_sendout"]).loc[skip_date:].sum())
-    cost_saved = float(wide_df.loc[skip_ts, "cost_catalog"]) if skip_ts in wide_df.index else 1501202.0
+    cost_saved = float(wide_df.loc[skip_ts, "cost_catalog"]) if skip_ts in wide_df.index else 0.0
     ratio = sales_lost / max(cost_saved, 1.0)
     return {
         "skip_date": skip_date,
@@ -242,34 +250,27 @@ def generate_meridian_html_reports(
     return paths
 
 
-DEFAULT_SELECTION_ROWS: list[dict[str, Any]] = [
-    {"catalog_shift": 1, "affiliate_role": "media", "test_mae_pct": 11.4, "train_mae_pct": 8.1, "test_r2": 0.81, "roi_sea": 4.2, "roi_catalog": 0.9, "roi_affiliate": 49.8},
-    {"catalog_shift": 1, "affiliate_role": "control", "test_mae_pct": 8.9, "train_mae_pct": 8.4, "test_r2": 0.88, "roi_sea": 8.1, "roi_catalog": 1.0, "roi_affiliate": "– (control)"},
-    {"catalog_shift": 2, "affiliate_role": "media", "test_mae_pct": 11.1, "train_mae_pct": 8.0, "test_r2": 0.82, "roi_sea": 4.1, "roi_catalog": 1.0, "roi_affiliate": 50.2},
-    {"catalog_shift": 2, "affiliate_role": "control (selected)", "test_mae_pct": 8.5, "train_mae_pct": 8.3, "test_r2": 0.89, "roi_sea": 8.0, "roi_catalog": 1.0, "roi_affiliate": "– (control)"},
-    {"catalog_shift": 3, "affiliate_role": "media", "test_mae_pct": 11.3, "train_mae_pct": 8.1, "test_r2": 0.81, "roi_sea": 4.2, "roi_catalog": 0.9, "roi_affiliate": 50.1},
-    {"catalog_shift": 3, "affiliate_role": "control", "test_mae_pct": 8.8, "train_mae_pct": 8.4, "test_r2": 0.88, "roi_sea": 8.0, "roi_catalog": 1.0, "roi_affiliate": "– (control)"},
-]
-
-DEFAULT_SENSITIVITY_ROWS: list[dict[str, Any]] = [
-    {"variant": "Default prior LogNormal(0.2, 0.9) — Final", "test_mae_pct": 8.5, "roi_sea": 8.04, "roi_catalog": 1.01, "roi_display": 0.42, "roi_social": 1.85, "media_share_pct": 61.2},
-    {"variant": "Attributed ROAS prior LogNormal(log ROAS, 0.5)", "test_mae_pct": 8.6, "roi_sea": 7.72, "roi_catalog": 1.08, "roi_display": 1.95, "roi_social": 1.62, "media_share_pct": 63.8},
-    {"variant": "Both Affiliate & SEA as controls", "test_mae_pct": 9.8, "roi_sea": "– (control)", "roi_catalog": 1.04, "roi_display": 1.12, "roi_social": 2.10, "media_share_pct": 12.4},
-]
-
-
 def build_meridian_model_section(
     mmm: Any,
     wide_df: pd.DataFrame,
     cfg: MeridianSpecConfig,
-    q3_metrics: dict[str, float] | None = None,
-    selection_rows: list[dict[str, Any]] | None = None,
-    sensitivity_rows: list[dict[str, Any]] | None = None,
+    forward_metrics: dict[str, float] | None = None,
+    forward_label: str | None = None,
+    selection: dict[str, Any] | None = None,
+    selection_note: str | None = None,
 ) -> tuple[Section, dict[str, Any]]:
-    """Build the `meridian_model` section and return `(section, metrics_summary_dict)`."""
+    """Build the `meridian_model` section and return `(section, metrics_summary_dict)`.
+
+    `forward_metrics` are the scores of the forward hold-out refit (notebook 03 §5) and `selection` the result of
+    `run_model_selection` (notebook 03 §1). Neither is invented when missing: the section says what is pending.
+    """
+    from mmm_studio.core.features import quarter_label
+    from mmm_studio.core.meridian.selection import selection_table_rows, sensitivity_table_rows
+    from mmm_studio.core.meridian.spec import meridian_roles
+
     fit_df = extract_fit_table(mmm, cfg)
     rhat_df = extract_rhat_summary(mmm)
-    max_rhat = float(rhat_df["max_r_hat"].max()) if len(rhat_df) > 0 else 1.003
+    max_rhat = float(rhat_df["max_r_hat"].max()) if len(rhat_df) > 0 else float("nan")
 
     train_df = fit_df[~fit_df["holdout"]]
     test_df = fit_df[fit_df["holdout"]]
@@ -279,31 +280,27 @@ def build_meridian_model_section(
         if len(test_df) > 0
         else m_train
     )
-    m_q3 = q3_metrics or {
-        "MAE": 81540.0,
-        "MAE_over_mean": 0.1098,
-        "RMSE": 102410.0,
-        "R2": 0.784,
-        "MAPE": 0.108,
-        "bias": -21400.0,
-    }
+    q4_label = quarter_label(test_df.index[0], test_df.index[-1]) if len(test_df) else "hold-out"
+    train_span = f"{train_df.index[0]:%Y-%m-%d} .. {train_df.index[-1]:%Y-%m-%d}" if len(train_df) else ""
+    test_span = f"{test_df.index[0]:%Y-%m-%d} .. {test_df.index[-1]:%Y-%m-%d}" if len(test_df) else ""
 
-    metrics_summary = {
+    metrics_summary: dict[str, Any] = {
         "train": m_train,
         "holdout_q4_2024": m_test,
-        "holdout_q3_2024": m_q3,
+        "holdout_label": q4_label,
+        "holdout_days": int(len(test_df)),
         "max_rhat": max_rhat,
         "q4_mae_over_mean": float(m_test["MAE_over_mean"]),
         "q4_r2": float(m_test["R2"]),
         "q4_rmse": float(m_test["RMSE"]),
         "q4_mape": float(m_test["MAPE"]),
-        "q3_mae_over_mean": float(m_q3["MAE_over_mean"]),
-        "q3_r2": float(m_q3["R2"]),
-        "q3_rmse": float(m_q3["RMSE"]),
-        "q3_mape": float(m_q3["MAPE"]),
     }
+    if forward_metrics:
+        metrics_summary["holdout_q3_2024"] = forward_metrics
+        metrics_summary["forward_label"] = forward_label
+        metrics_summary["q3_mae_over_mean"] = float(forward_metrics["MAE_over_mean"])
+        metrics_summary["q3_r2"] = float(forward_metrics["R2"])
 
-    # 1. Full period fit chart (`03_fit_full_period`)
     dates_str = [d.strftime("%Y-%m-%d") for d in fit_df.index]
     vrects = []
     if len(test_df) > 0:
@@ -311,254 +308,281 @@ def build_meridian_model_section(
             {
                 "x0": test_df.index[0].strftime("%Y-%m-%d"),
                 "x1": test_df.index[-1].strftime("%Y-%m-%d"),
-                "color": "rgba(181, 82, 50, 0.08)",
-                "label": "Hold-out Q4 2024 (Budget Forecast)",
+                "color": HOLDOUT_SHADE,
+                "label": "Hold-out: forecast from budget",
             }
         )
     fig_full_fit = line_figure(
         x=dates_str,
         series=[
-            {"name": "Actual Sales", "y": fit_df["actual"].round(0).tolist(), "color": SLATE, "width": 1.2},
+            {"name": "Actual", "y": fit_df["actual"].round(0).tolist(), "color": SLATE, "width": 1.0},
             {
-                "name": "Meridian Posterior Mean",
+                "name": "Model (90% interval)",
                 "y": fit_df["expected"].round(0).tolist(),
                 "band_lower": fit_df["expected_lo"].round(0).tolist(),
                 "band_upper": fit_df["expected_hi"].round(0).tolist(),
                 "color": NAVY,
-                "width": 2.0,
+                "width": 1.6,
             },
-            {"name": "Baseline + Controls", "y": fit_df["baseline"].round(0).tolist(), "color": INK_MUTED, "dash": "dot", "width": 1.3},
+            {"name": "Baseline & controls", "y": fit_df["baseline"].round(0).tolist(), "color": INK_MUTED, "dash": "dot", "width": 1.2},
         ],
-        title=f"Meridian Full-Period Fit (2023–2024) — Hold-Out MAE / Mean = {100.0 * m_test['MAE_over_mean']:.1f}% (Target ≤ 15%)",
-        subtitle="Daily actual total sales vs Bayesian posterior mean and 90% credible interval; shaded region is out-of-sample Q4 2024 forecast",
-        yaxis_title="Daily Total Sales (€)",
+        yaxis_title="Daily total sales (€)",
         vrects=vrects,
     )
 
-    # 2. Q4 2024 Hold-out zoom (`03_holdout_q4`)
     q4_df = test_df if len(test_df) > 0 else fit_df.iloc[-92:]
-    q4_dates = [d.strftime("%Y-%m-%d") for d in q4_df.index]
     cat_vlines = []
     if "catalog_sendout" in wide_df.columns:
         q4_cat = wide_df.loc[q4_df.index[0] : q4_df.index[-1]]
         for d in q4_cat.index[q4_cat["catalog_sendout"] == 1]:
-            cat_vlines.append({"x": d.strftime("%Y-%m-%d"), "color": COPPER, "dash": "dot"})
-
+            cat_vlines.append({"x": d.strftime("%Y-%m-%d"), "color": COPPER, "dash": "dot", "label": "Catalog"})
     fig_q4 = line_figure(
-        x=q4_dates,
+        x=[d.strftime("%Y-%m-%d") for d in q4_df.index],
         series=[
-            {"name": "Actual Q4 Sales", "y": q4_df["actual"].round(0).tolist(), "color": SLATE, "width": 1.8},
+            {"name": "Actual", "y": q4_df["actual"].round(0).tolist(), "color": SLATE, "width": 1.6, "mode": "lines+markers", "marker": {"size": 4}},
             {
-                "name": "Hold-Out Forecast (90% CI)",
+                "name": "Forecast (90% interval)",
                 "y": q4_df["expected"].round(0).tolist(),
                 "band_lower": q4_df["expected_lo"].round(0).tolist(),
                 "band_upper": q4_df["expected_hi"].round(0).tolist(),
                 "color": TEAL,
-                "width": 2.2,
+                "width": 2.0,
             },
         ],
-        title="Q4 2024 Hold-Out Forecast: Daily Forecast from Budget Plan vs Actual Sales",
-        subtitle="Sales in Q4 2024 are masked during MCMC training; predictions use only planned channel spend and calendar controls (copper lines = Catalog send-outs)",
-        yaxis_title="Daily Total Sales (€)",
+        yaxis_title="Daily total sales (€)",
         vlines=cat_vlines,
     )
 
-    # 3. Residual diagnostics (`03_residuals`: weekday + days-since-catalog)
     resid = fit_df["actual"] - fit_df["expected"]
     q4_resid = resid.loc[q4_df.index]
     dow_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     by_dow = [round(float(q4_resid[q4_resid.index.dayofweek == d].mean()), 0) for d in range(7)]
-
-    dss = wide_df["days_since_catalog"].reindex(fit_df.index).fillna(21).clip(upper=21)
+    dss = wide_df["days_since_catalog"].reindex(fit_df.index).clip(upper=21)
     dss_days = list(range(0, 22))
     by_dss = [round(float(resid[dss == k].mean()), 0) if (dss == k).any() else 0.0 for k in dss_days]
-
     fig_resid = small_multiples_figure(
         panels=[
             {
-                "title": "Q4 Hold-Out Mean Error by Weekday (€)",
+                "title": "Hold-out: mean error by weekday (€)",
                 "x": dow_names,
-                "traces": [{"name": "Mean Residual", "y": by_dow, "kind": "bar", "color": SLATE}],
+                "xaxis_title": "Weekday",
+                "traces": [{"name": "Mean residual", "y": by_dow, "kind": "bar", "color": SLATE}],
             },
             {
-                "title": "All-Days Mean Error by Days Since Catalog Send-Out (€)",
-                "x": [f"d+{k}" for k in dss_days],
-                "traces": [{"name": "Mean Residual", "y": by_dss, "kind": "bar", "color": COPPER}],
+                "title": "All days: mean error by days since catalog send-out (€)",
+                "x": dss_days,
+                "xaxis_title": "Days since send-out (21 = 21 or more)",
+                "traces": [{"name": "Mean residual", "y": by_dss, "kind": "bar", "color": COPPER}],
             },
         ],
         ncols=2,
-        title="Residual Diagnostics (Actual − Model Expected Sales)",
-        subtitle="Left: uniform negative offset across weekdays in Q4; Right: residual profile across the 21-day Catalog post-send window",
         height_per_row=300,
     )
+    neg_days = sum(1 for v in by_dow if v < 0)
 
-    acc_rows = [
-        {
-            "window": "Train (2023-01-01 .. 2024-09-30)",
-            "mae": fmt_eur(m_train["MAE"]),
-            "mae_pct": f"{100.0 * m_train['MAE_over_mean']:.2f}%",
-            "rmse": fmt_eur(m_train["RMSE"]),
-            "r2": round(m_train["R2"], 3),
-            "mape": f"{100.0 * m_train['MAPE']:.2f}%",
-            "passes_15pct": "Yes (≤ 15%)",
-        },
-        {
-            "window": "Hold-out Q4 2024 (2024-10-01 .. 2025-01-01)",
-            "mae": fmt_eur(m_test["MAE"]),
-            "mae_pct": f"{100.0 * m_test['MAE_over_mean']:.2f}%",
-            "rmse": fmt_eur(m_test["RMSE"]),
-            "r2": round(m_test["R2"], 3),
-            "mape": f"{100.0 * m_test['MAPE']:.2f}%",
-            "passes_15pct": "Yes (≤ 15%)" if m_test["MAE_over_mean"] <= 0.15 else "No",
-        },
-        {
-            "window": "Forward Hold-out Q3 2024 (Train to Jun 2024)",
-            "mae": fmt_eur(m_q3["MAE"]),
-            "mae_pct": f"{100.0 * m_q3['MAE_over_mean']:.2f}%",
-            "rmse": fmt_eur(m_q3["RMSE"]),
-            "r2": round(m_q3["R2"], 3),
-            "mape": f"{100.0 * m_q3['MAPE']:.2f}%",
-            "passes_15pct": "Yes (≤ 15%)" if m_q3["MAE_over_mean"] <= 0.15 else "No",
-        },
-    ]
+    def _acc_row(window: str, m: dict[str, float]) -> dict[str, Any]:
+        return {
+            "window": window,
+            "mae": fmt_eur(m["MAE"]),
+            "mae_pct": f"{100.0 * m['MAE_over_mean']:.1f}%",
+            "rmse": fmt_eur(m["RMSE"]),
+            "r2": f"{m['R2']:.3f}",
+            "mape": f"{100.0 * m['MAPE']:.1f}%",
+            "bias": fmt_eur(m["bias"]),
+            "passes_15pct": "Yes" if m["MAE_over_mean"] <= 0.15 else "No",
+        }
+
+    acc_rows = [_acc_row(f"Train ({train_span})", m_train), _acc_row(f"Hold-out {q4_label} ({test_span}, forecast)", m_test)]
+    if forward_metrics:
+        acc_rows.append(_acc_row(f"Forward hold-out {forward_label} (trained only on earlier data)", forward_metrics))
 
     rhat_rows = [
         {
             "param": str(r["param"]),
             "n_params": int(r["n_params"]),
-            "avg_r_hat": round(float(r["avg_r_hat"]), 4),
-            "max_r_hat": round(float(r["max_r_hat"]), 4),
+            "avg_r_hat": f"{float(r['avg_r_hat']):.3f}",
+            "max_r_hat": f"{float(r['max_r_hat']):.3f}",
             "pct_bad": f"{float(r['percent_bad_r_hat']):.1f}%",
         }
         for _, r in rhat_df.iterrows()
     ]
 
-    blocks = [
+    table = build_meridian_table(wide_df, catalog_shift=cfg.catalog_shift, n_fourier=cfg.n_fourier, paid_channels=cfg.paid_channels)
+    _, media, controls = meridian_roles(table, cfg)
+    media_names = [CHANNEL_DISPLAY_NAMES.get(c, c) for c in media]
+    control_names = [c.replace("_spend", " cost") for c in controls]
+    bias_pct = 100.0 * m_test["bias"] / max(float(test_df["actual"].mean()), 1.0) if len(test_df) else 0.0
+
+    blocks: list[Any] = [
         KpisBlock(
             items=[
                 KpiItem(
-                    label="Q4 2024 Hold-Out MAE / Mean",
-                    value=f"{100.0 * m_test['MAE_over_mean']:.2f}%",
-                    delta="Passes ≤ 15.0% brief target",
+                    label=f"{q4_label} hold-out MAE / mean",
+                    value=f"{100.0 * m_test['MAE_over_mean']:.1f}%",
+                    delta="Target ≤ 15 %" + (" · met" if m_test["MAE_over_mean"] <= 0.15 else " · missed"),
                     status="success" if m_test["MAE_over_mean"] <= 0.15 else "warn",
                 ),
                 KpiItem(
-                    label="Q4 2024 Hold-Out R²",
+                    label=f"{q4_label} hold-out R² / RMSE",
                     value=f"{m_test['R2']:.3f}",
-                    delta=f"RMSE {fmt_eur(m_test['RMSE'])}",
-                    status="success",
+                    delta=f"RMSE {fmt_eur(m_test['RMSE'])} · train R² {m_train['R2']:.3f}",
+                    status="success" if m_test["R2"] >= 0.7 else "warn",
                 ),
                 KpiItem(
-                    label="Q3 2024 Forward Hold-Out MAE / Mean",
-                    value=f"{100.0 * m_q3['MAE_over_mean']:.2f}%",
-                    delta="Out-of-time robustness check",
-                    status="success",
+                    label=f"Forward hold-out {forward_label or ''} MAE / mean".replace("  ", " "),
+                    value=f"{100.0 * forward_metrics['MAE_over_mean']:.1f}%" if forward_metrics else "pending",
+                    delta="Trained only on earlier data" if forward_metrics else "Refit not available for this run",
+                    status=("success" if forward_metrics and forward_metrics["MAE_over_mean"] <= 0.15 else "neutral"),
                 ),
                 KpiItem(
-                    label="Max Gelman-Rubin R-hat",
-                    value=f"{max_rhat:.4f}",
-                    delta="Threshold < 1.20 (0% bad params)",
-                    status="success" if max_rhat < 1.2 else "warn",
+                    label="Max R-hat",
+                    value=f"{max_rhat:.3f}",
+                    delta="Converged (threshold 1.2)" if max_rhat < 1.2 else "Not converged (threshold 1.2)",
+                    status="success" if max_rhat < 1.2 else "danger",
                 ),
             ]
         ),
         MarkdownBlock(
+            title="Approach: a Bayesian regression (Google Meridian)",
             body=(
-                "### Bayesian Marketing Mix Model Specification (`Google Meridian`)\n"
-                "We model daily national total sales as a Bayesian regression on adstocked and Hill-saturated paid media spend "
-                "plus calendar, holiday, seasonality, trend, and demand-following control variables:\n\n"
-                "$$\\text{sales}_t = \\mu + \\sum_k \\gamma_k \\cdot \\text{control}_{k,t} + \\sum_c \\beta_c \\cdot \\text{Hill}_c\\!\\left(\\text{Adstock}_c(\\text{spend}_{c,t})\\right) + \\varepsilon_t$$\n\n"
-                "- **Media channels (6 levers):** `SEA`, `Catalog` (shifted +2 days to its in-home date with binomial adstock), `Display`, `Display Network`, `Social Media`, and `PSM`.\n"
-                "- **Controls (15 terms):** weekday dummies, German federal holidays, Christmas window, Black Week, Fourier annual seasonality ($K=2$), linear trend, and `Affiliate` spend (entered as a control because its 10% commission structure is a consequence of sales rather than an exogenous budget lever)."
-            )
+                "```\n"
+                "sales_t = μ                                       intercept (national model)\n"
+                "        + Σ_k γ_k · control_k,t                   calendar, seasonality, trend, commission cost\n"
+                "        + Σ_c β_c · Hill_c( Adstock_c(spend_c) )   paid media channels\n"
+                "        + ε_t\n"
+                "```\n\n"
+                f"- **Media ({len(media_names)}):** {', '.join(media_names)}"
+                + (f" (catalog shifted {cfg.catalog_shift} days to its in-home date, binomial adstock)" if "catalog" in media else "")
+                + ".\n"
+                f"- **Controls ({len(controls)}):** {', '.join(control_names)}.\n"
+                "- **Adstock** carries spend over to later days (up to "
+                f"{cfg.max_lag} days), **Hill** models diminishing returns, and **ROI priors** regularise correlated channels.\n"
+                f"- **Validation:** the {q4_label} hold-out ({len(test_df)} days) is hidden from the likelihood, so its predictions "
+                "are genuine forecasts from the budget and the calendar."
+            ),
         ),
         ChartBlock(
             id="meridian_fit_full_period",
-            title="Meridian Fit Across Full Modelling Window (2023–2024)",
-            subtitle="Posterior mean and 90% credible interval vs actual daily total sales (€)",
+            title=f"Meridian fit: hold-out MAE / mean = {100.0 * m_test['MAE_over_mean']:.1f}% (target ≤ 15 %)",
+            subtitle="Daily actual sales vs posterior mean and 90 % credible interval; the shaded window is the hold-out.",
             figure=fig_full_fit,
-            caption="During the 93-day Q4 2024 hold-out window, sales are masked and predicted purely from the budget plan and calendar.",
         ),
         ChartBlock(
             id="meridian_holdout_q4",
-            title="Q4 2024 Hold-Out Zoom: Daily Budget Forecast vs Actual Sales",
-            subtitle="Out-of-sample daily predictions with 90% credible interval and Catalog send-out markers",
+            title=f"{q4_label} hold-out: daily forecast from the budget vs actual sales",
+            subtitle="Dotted lines mark catalog send-outs.",
             figure=fig_q4,
-            caption="The model captures both the Black Week peak and individual Catalog send-out waves with MAE/mean = 8.53%.",
+            caption=(
+                f"Average bias on the hold-out: {fmt_eur(m_test['bias'])} per day ({bias_pct:+.1f} % of actual). "
+                + ("Most of the error is a level offset; refitting regularly re-anchors the level." if abs(bias_pct) >= 3 else "")
+            ),
         ),
         TableBlock(
             id="meridian_accuracy_table",
-            title="Predictive Accuracy Summary (Train vs Q4 2024 & Q3 2024 Hold-Outs)",
-            subtitle="Evaluation against the ≤ 15% MAE/mean business acceptance threshold",
+            title="Accuracy: training period vs hold-outs",
+            subtitle="MAE / mean is the brief's KPI and equals Meridian's wMAPE; bias = mean(forecast − actual).",
             columns=[
-                TableColumn(key="window", label="Evaluation Window"),
-                TableColumn(key="mae", label="MAE (€/day)", align="right"),
-                TableColumn(key="mae_pct", label="MAE / Mean", align="right"),
-                TableColumn(key="rmse", label="RMSE (€/day)", align="right"),
+                TableColumn(key="window", label="Window"),
+                TableColumn(key="mae", label="MAE", align="right"),
+                TableColumn(key="mae_pct", label="MAE / mean", align="right"),
+                TableColumn(key="rmse", label="RMSE", align="right"),
                 TableColumn(key="r2", label="R²", align="right"),
                 TableColumn(key="mape", label="MAPE", align="right"),
-                TableColumn(key="passes_15pct", label="Passes ≤ 15% Target"),
+                TableColumn(key="bias", label="Bias", align="right"),
+                TableColumn(key="passes_15pct", label="≤ 15 %"),
             ],
             rows=acc_rows,
         ),
         ChartBlock(
             id="meridian_residuals",
-            title="Residual Checks: Weekday & Catalog Post-Send Error Profiles",
-            subtitle="Mean residual (Actual − Expected €) in Q4 by weekday and across all days by days since Catalog send-out",
+            title="Residual checks (actual − model)",
+            subtitle="Left: hold-out error by weekday. Right: error on all days by days since the last catalog send-out.",
             figure=fig_resid,
-            caption="Weekly refitting in production re-anchors the baseline level and eliminates the small Q4 trend extrapolation offset.",
-        ),
-        TableBlock(
-            id="meridian_selection_table",
-            title="Model Selection Grid: Catalog Shift k ∈ {1, 2, 3} × Affiliate Role",
-            subtitle="Fast MCMC comparison across structural specification choices on Q4 2024 hold-out",
-            columns=[
-                TableColumn(key="catalog_shift", label="Catalog Shift k (days)", align="right"),
-                TableColumn(key="affiliate_role", label="Affiliate Role"),
-                TableColumn(key="test_mae_pct", label="Test MAE/Mean (%)", align="right"),
-                TableColumn(key="train_mae_pct", label="Train MAE/Mean (%)", align="right"),
-                TableColumn(key="test_r2", label="Test R²", align="right"),
-                TableColumn(key="roi_sea", label="ROI SEA", align="right"),
-                TableColumn(key="roi_catalog", label="ROI Catalog", align="right"),
-                TableColumn(key="roi_affiliate", label="ROI Affiliate", align="right"),
-            ],
-            rows=selection_rows or DEFAULT_SELECTION_ROWS,
-            caption="Entering Affiliate as a control reduces hold-out error across every shift k and removes the reverse-causal ~50x ROI artifact.",
-        ),
-        TableBlock(
-            id="meridian_sensitivity_table",
-            title="Prior & Endogeneity Sensitivity Analysis",
-            subtitle="Robustness of channel ROIs and hold-out error to informative attribution priors and SEA control treatment",
-            columns=[
-                TableColumn(key="variant", label="Specification Variant"),
-                TableColumn(key="test_mae_pct", label="Test MAE/Mean (%)", align="right"),
-                TableColumn(key="roi_sea", label="ROI SEA", align="right"),
-                TableColumn(key="roi_catalog", label="ROI Catalog", align="right"),
-                TableColumn(key="roi_display", label="ROI Display", align="right"),
-                TableColumn(key="roi_social", label="ROI Social Media", align="right"),
-                TableColumn(key="media_share_pct", label="Media Share of Sales (%)", align="right"),
-            ],
-            rows=sensitivity_rows or DEFAULT_SENSITIVITY_ROWS,
-        ),
-        TableBlock(
-            id="meridian_rhat_table",
-            title="MCMC Convergence Diagnostics (Gelman-Rubin R-hat Summary)",
-            subtitle="Posterior chain mixing across all structural parameter groups (target R-hat < 1.20)",
-            columns=[
-                TableColumn(key="param", label="Parameter Group"),
-                TableColumn(key="n_params", label="# Parameters", align="right"),
-                TableColumn(key="avg_r_hat", label="Mean R-hat", align="right"),
-                TableColumn(key="max_r_hat", label="Max R-hat", align="right"),
-                TableColumn(key="pct_bad", label="% Bad (> 1.20)", align="right"),
-            ],
-            rows=rhat_rows,
+            caption=(
+                f"The hold-out error has the same sign on {max(neg_days, 7 - neg_days)} of 7 weekdays: a level offset, not a missed "
+                "weekday pattern. Around send-outs the 2-day in-home shift approximates the catalog ramp-up but not perfectly."
+            ),
         ),
     ]
 
+    if selection and selection.get("selection"):
+        sel_rows = selection_table_rows(selection, final_shift=cfg.catalog_shift)
+        best = min(selection["selection"], key=lambda r: r["test_mae_over_mean"])
+        blocks.append(
+            TableBlock(
+                id="meridian_selection_table",
+                title="Model selection: catalog shift k × Affiliate as media or control",
+                subtitle=(
+                    f"Fast fits ({selection['sampling']['n_chains']} chains × {selection['sampling']['n_keep']} draws), scored on the "
+                    f"{q4_label} hold-out. Lowest error: k = {best['catalog_shift']}, Affiliate as {best['affiliate']}."
+                ),
+                columns=[
+                    TableColumn(key="catalog_shift", label="Catalog shift k", align="right"),
+                    TableColumn(key="affiliate", label="Affiliate"),
+                    TableColumn(key="test_mae_pct", label="Test MAE / mean", align="right"),
+                    TableColumn(key="train_mae_pct", label="Train MAE / mean", align="right"),
+                    TableColumn(key="test_r2", label="Test R²", align="right"),
+                    TableColumn(key="roi_sea", label="ROI SEA", align="right"),
+                    TableColumn(key="roi_catalog", label="ROI Catalog", align="right"),
+                    TableColumn(key="roi_affiliate", label="ROI Affiliate", align="right"),
+                ],
+                rows=sel_rows,
+                caption="Affiliate as media gets an implausible ROI: its cost is a commission paid on sales (reverse causality).",
+            )
+        )
+        sens_rows, sens_channels = sensitivity_table_rows(selection)
+        if sens_rows:
+            blocks.append(
+                TableBlock(
+                    id="meridian_sensitivity_table",
+                    title="Sensitivity: ROI priors and the role of SEA",
+                    subtitle="Informative priors centred on attributed ROAS, LogNormal(log ROAS, 0.5), and SEA entered as a control.",
+                    columns=[
+                        TableColumn(key="variant", label="Variant"),
+                        TableColumn(key="test_mae_pct", label="Test MAE / mean", align="right"),
+                        *[TableColumn(key=f"roi_{c}", label=f"ROI {CHANNEL_DISPLAY_NAMES.get(c, c)}", align="right") for c in sens_channels],
+                        TableColumn(key="media_share", label="Media share of sales", align="right"),
+                    ],
+                    rows=sens_rows,
+                    caption=(
+                        "If priors leave the big budget lines unchanged, the data dominates them; channels that move toward their "
+                        "priors are only weakly identified. SEA's ROI stays an upper bound until an experiment checks it."
+                    ),
+                )
+            )
+    else:
+        blocks.append(
+            CalloutBlock(
+                tone="info",
+                title="Model selection grid and prior sensitivity",
+                body=selection_note
+                or (
+                    "The selection grid (catalog shift k ∈ {1, 2, 3} × Affiliate as media or control) and the prior / SEA "
+                    "sensitivity fits run after the main results on the **full** profile. They appear here when they finish."
+                ),
+            )
+        )
+
+    blocks.append(
+        TableBlock(
+            id="meridian_rhat_table",
+            title="Convergence (R-hat by parameter group)",
+            subtitle="R-hat below 1.2 means the MCMC chains agree.",
+            columns=[
+                TableColumn(key="param", label="Parameter"),
+                TableColumn(key="n_params", label="# Parameters", align="right"),
+                TableColumn(key="avg_r_hat", label="Mean R-hat", align="right"),
+                TableColumn(key="max_r_hat", label="Max R-hat", align="right"),
+                TableColumn(key="pct_bad", label="% bad (> 1.2)", align="right"),
+            ],
+            rows=rhat_rows,
+        )
+    )
+
     sec = Section(
         id="meridian_model",
-        title="Bayesian Meridian MMM — Specification, Fit & Hold-Out Validation",
-        subtitle="Model selection, MCMC convergence, Q4 & Q3 out-of-sample forecast validation, and residual diagnostics",
+        title="Meridian MMM: specification, fit and validation",
+        subtitle=f"Bayesian regression of daily total sales on media spend and controls, validated on the {q4_label} hold-out.",
         blocks=blocks,
     )
     return sec, metrics_summary
@@ -579,7 +603,7 @@ def build_drivers_roi_section(
 
     media_rt = roi_df.drop(index="All Channels", errors="ignore").sort_values("roi", ascending=True)
     all_ch_row = roi_df.loc["All Channels"] if "All Channels" in roi_df.index else None
-    media_share_pct = float(all_ch_row["pct_of_contribution"]) if all_ch_row is not None else 61.2
+    media_share_pct = float(all_ch_row["pct_of_contribution"]) if all_ch_row is not None else float("nan")
 
     # 1. Revenue ROI chart (`03_roi`)
     ch_labels = [CHANNEL_DISPLAY_NAMES.get(c, c) for c in media_rt.index]
@@ -613,7 +637,7 @@ def build_drivers_roi_section(
         {
             "name": "Baseline & Controls",
             "y": (weekly_contrib["baseline"] / 1e6).round(3).tolist(),
-            "color": "#CBD5E1",
+            "color": BASELINE_FILL,
             "stackgroup": "one",
         }
     ]
@@ -744,98 +768,114 @@ def build_drivers_roi_section(
             }
         )
 
-    sea_roi = float(media_rt.loc["sea", "roi"]) if "sea" in media_rt.index else 8.04
-    cat_roi = float(media_rt.loc["catalog", "roi"]) if "catalog" in media_rt.index else 1.01
+    sea_roi = float(media_rt.loc["sea", "roi"]) if "sea" in media_rt.index else float("nan")
+    cat_roi = float(media_rt.loc["catalog", "roi"]) if "catalog" in media_rt.index else float("nan")
+    cat_mroi = float(media_rt.loc["catalog", "mroi"]) if "catalog" in media_rt.index else float("nan")
+    sea_share = float(media_rt.loc["sea", "pct_of_contribution"]) if "sea" in media_rt.index else float("nan")
+    flattest = media_rt["mroi"].idxmin() if len(media_rt) else None
+    skip_label = (
+        pd.Timestamp(whatif_res["skip_date"]).strftime("%d %b %Y") if whatif_res.get("skip_date") else "one catalog"
+    )
 
     blocks = [
         KpisBlock(
             items=[
                 KpiItem(
-                    label="SEA Revenue ROI (Upper Bound)",
-                    value=f"{sea_roi:.2f}x",
-                    delta="Cost follows search demand",
+                    label="SEA revenue ROI (upper bound)",
+                    value=f"{sea_roi:.2f}×",
+                    delta=f"{sea_share:.1f}% of sales; cost follows search demand",
                     status="warn",
                 ),
                 KpiItem(
-                    label="Catalog Revenue ROI",
-                    value=f"{cat_roi:.2f}x",
-                    delta="Near-linear response (mROI ≈ 0.8x)",
+                    label="Catalog revenue ROI",
+                    value=f"{cat_roi:.2f}×",
+                    delta=f"Marginal ROI {cat_mroi:.2f}×",
                     status="neutral",
                 ),
                 KpiItem(
-                    label="Media Share of Total Sales",
+                    label="Media share of total sales",
                     value=f"{media_share_pct:.1f}%",
-                    delta="Remaining 38.8% is baseline & controls",
+                    delta=f"Remaining {100.0 - media_share_pct:.1f}% is baseline & controls",
                     status="success",
                 ),
                 KpiItem(
-                    label="Single Catalog Send-Out Impact",
-                    value=fmt_eur(whatif_res["sales_lost"]),
-                    delta=f"vs {fmt_eur(whatif_res['cost_saved'])} print cost",
+                    label="Skipping one catalog send-out",
+                    value=f"−{fmt_eur(whatif_res['sales_lost'])} sales",
+                    delta=f"saves {fmt_eur(whatif_res['cost_saved'])} cost (ratio {whatif_res['ratio']:.2f})",
                     status="neutral",
                 ),
             ]
         ),
         CalloutBlock(
             tone="warn",
-            title="Causal Interpretation Guardrail: SEA ROI is an Observational Upper Bound",
+            title="SEA's ROI is an upper bound, not a causal estimate",
             body=(
-                "SEA is billed per click, so its daily spend automatically rises whenever baseline consumer search demand rises. "
-                "Keep SEA as a media variable for forecasting accuracy, but validate its true causal lift via a geographic or temporal hold-out experiment before reallocating large budgets."
+                f"SEA takes {sea_share:.1f}% of all sales in the decomposition and its weekly shape mirrors total demand: it is billed "
+                "per click, so its cost rises whenever search demand rises. It stays a media channel because it forecasts well, but a geo "
+                "or hold-out experiment should validate its lift before budget moves into it."
+                + (
+                    f" {CHANNEL_DISPLAY_NAMES.get(flattest, flattest)} has the lowest marginal ROI "
+                    f"({float(media_rt.loc[flattest, 'mroi']):.2f}×), so it is cut first by the optimiser."
+                    if flattest is not None
+                    else ""
+                )
             ),
         ),
         ChartBlock(
             id="drivers_roi_chart",
-            title="Revenue ROI by Paid Channel (Posterior Mean & 90% Credible Interval)",
-            subtitle="Incremental revenue per €1 spent across the 6 active media levers",
+            title="Revenue ROI by channel (posterior mean, 90% credible interval)",
+            subtitle=f"Incremental sales per € spent across the {len(media_rt)} media channels; 1.0 is revenue break-even.",
             figure=fig_roi,
         ),
         TableBlock(
             id="drivers_roi_table",
-            title="Channel Attribution Summary: Spend, Incremental Sales, ROI & Marginal ROI",
-            subtitle="Posterior means and 90% credible intervals over 2023–2024",
+            title="What drives sales: spend, incremental sales, ROI and marginal ROI",
+            subtitle=f"Posterior means and 90% credible intervals over {wide_df.index[0]:%Y-%m-%d} .. {wide_df.index[-1]:%Y-%m-%d}",
             columns=[
                 TableColumn(key="channel", label="Channel"),
-                TableColumn(key="spend", label="2-Year Spend", align="right"),
-                TableColumn(key="pct_spend", label="Spend Share", align="right"),
-                TableColumn(key="inc_sales", label="Incremental Sales", align="right"),
-                TableColumn(key="pct_contrib", label="Sales Contribution", align="right"),
-                TableColumn(key="roi", label="Revenue ROI", align="right"),
-                TableColumn(key="roi_ci", label="90% Credible Interval", align="right"),
-                TableColumn(key="mroi", label="Marginal ROI (mROI)", align="right"),
+                TableColumn(key="spend", label="Spend", align="right"),
+                TableColumn(key="pct_spend", label="Share of spend", align="right"),
+                TableColumn(key="inc_sales", label="Incremental sales", align="right"),
+                TableColumn(key="pct_contrib", label="Share of sales", align="right"),
+                TableColumn(key="roi", label="ROI", align="right"),
+                TableColumn(key="roi_ci", label="ROI 90% interval", align="right"),
+                TableColumn(key="mroi", label="Marginal ROI", align="right"),
             ],
             rows=roi_rows,
         ),
         ChartBlock(
             id="drivers_weekly_decomp",
-            title="Weekly Sales Decomposition: Baseline & Controls vs Media Channels (€M)",
-            subtitle="Stacked posterior mean contributions across 2023–2024",
+            title="Weekly sales decomposed: baseline & controls vs media channels (€M)",
+            subtitle="Stacked posterior-mean contributions over full weeks; the line is actual weekly sales.",
             figure=fig_decomp,
         ),
         ChartBlock(
             id="drivers_adstock_curves",
-            title="Posterior Adstock Carry-Over Curves by Channel",
-            subtitle="Decay of media impact over 0..21 days post exposure",
+            title="Carry-over: share of the effect remaining n days after spend",
+            subtitle="Posterior mean by channel (catalog: days after the in-home date).",
             figure=fig_adstock,
         ),
         ChartBlock(
             id="drivers_response_curves",
-            title="Hill Saturation Response Curves (0–200% of Historical Spend)",
-            subtitle="Incremental revenue (€M) as a function of total channel spend (€M)",
+            title="Response curves: incremental sales vs total spend (0–200 % of actual)",
+            subtitle="Incremental sales (€M) as a function of the channel's total spend over the period (€M).",
             figure=fig_rc,
         ),
         ChartBlock(
             id="drivers_whatif_catalog",
-            title="Operational What-If: Skipping One Catalog Send-Out in Q4 2024",
-            subtitle="Simulated counterfactual sales trajectory removing the 14 Nov 2024 Catalog edition",
+            title=f"What-if: skipping the {skip_label} catalog send-out",
+            subtitle=(
+                f"Forecast sales lost over the following weeks: {fmt_eur(whatif_res['sales_lost'])} vs "
+                f"{fmt_eur(whatif_res['cost_saved'])} cost saved (ratio {whatif_res['ratio']:.2f})."
+            ),
             figure=fig_whatif,
         ),
     ]
 
     sec = Section(
         id="drivers_roi",
-        title="Sales Drivers, Channel ROI, Adstock & Saturation Curves",
-        subtitle="Posterior attribution, weekly baseline vs media decomposition, carry-over memory, and diminishing returns",
+        title="Drivers & ROI: contributions, carry-over and response curves",
+        subtitle="What each channel adds to sales, what it returns per euro, how long its effect lasts and where it saturates.",
         blocks=blocks,
     )
     return sec, roi_df, response_curves

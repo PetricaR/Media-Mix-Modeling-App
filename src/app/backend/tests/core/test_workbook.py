@@ -21,8 +21,12 @@ def test_profile_matches_golden(
     assert profile.calendar_days == golden_data["calendar_days"]
     assert profile.start_date == golden_data["start_date"]
     assert profile.end_date == golden_data["end_date"]
-    assert profile.modelling_end_date == "2024-12-31"
-    assert profile.modelling_days == 731
+    # The notebooks keep the isolated 2025-01-01 in every model; it only leaves yearly and monthly views
+    assert profile.trailing_isolated_dates == ["2025-01-01"]
+    assert profile.role_config.drop_trailing_isolated_days is False
+    assert profile.role_config.holdout_days == 93
+    assert profile.modelling_end_date == "2025-01-01"
+    assert profile.modelling_days == golden_data["calendar_days"]
 
     rc = profile.role_config
     assert len(rc.active_channels) == golden_data["channel_count"]

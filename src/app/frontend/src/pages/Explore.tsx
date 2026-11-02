@@ -1,21 +1,24 @@
-import React, { useState } from "react";
+import React from "react";
 import { Box, Paper, Tab, Tabs } from "@mui/material";
+import { useSearchParams } from "react-router-dom";
 import { useSection } from "../api/hooks";
 import { SectionRenderer } from "../components/Sections/SectionRenderer";
 
 const EXPLORE_TABS = [
-  { id: "explore_target", label: "Target & Seasonality" },
-  { id: "explore_channels", label: "Channel Activity & Break" },
-  { id: "explore_spend", label: "Spend & Mix" },
-  { id: "explore_efficiency", label: "Efficiency Proxies" },
-  { id: "explore_correlations", label: "Correlations & Lags" },
-  { id: "explore_catalog", label: "Catalog Deep-Dive" },
-  { id: "explore_readiness", label: "Model Readiness" },
+  { id: "explore_target", slug: "target", label: "Target" },
+  { id: "explore_channels", slug: "channels", label: "Channels" },
+  { id: "explore_spend", slug: "spend", label: "Spend" },
+  { id: "explore_efficiency", slug: "efficiency", label: "Efficiency & regimes" },
+  { id: "explore_correlations", slug: "correlations", label: "Correlations & lags" },
+  { id: "explore_catalog", slug: "catalog", label: "Catalog deep-dive" },
+  { id: "explore_readiness", slug: "readiness", label: "MMM readiness" },
 ];
 
 export const ExplorePage: React.FC<{ runId: string | null }> = ({ runId }) => {
-  const [tabIdx, setTabIdx] = useState(0);
-  const activeTab = EXPLORE_TABS[tabIdx] || EXPLORE_TABS[0];
+  // The tab lives in the URL (?tab=catalog) so it survives reloads and can be shared
+  const [params, setParams] = useSearchParams();
+  const tabIdx = Math.max(0, EXPLORE_TABS.findIndex((t) => t.slug === params.get("tab")));
+  const activeTab = EXPLORE_TABS[tabIdx];
   const { data: section, isLoading, error } = useSection(runId, activeTab.id);
 
   return (
@@ -23,17 +26,20 @@ export const ExplorePage: React.FC<{ runId: string | null }> = ({ runId }) => {
       <Paper sx={{ mb: 3, px: 1 }}>
         <Tabs
           value={tabIdx}
-          onChange={(_, next) => setTabIdx(next)}
+          onChange={(_, next) => setParams({ tab: EXPLORE_TABS[next].slug }, { replace: true })}
           variant="scrollable"
           scrollButtons="auto"
+          allowScrollButtonsMobile
+          aria-label="Exploratory analysis topics"
         >
           {EXPLORE_TABS.map((t) => (
-            <Tab key={t.id} label={t.label} sx={{ textTransform: "none", fontWeight: 600 }} />
+            <Tab key={t.id} label={t.label} id={`explore-tab-${t.slug}`} aria-controls="explore-panel" />
           ))}
         </Tabs>
       </Paper>
-
-      <SectionRenderer section={section} isLoading={isLoading} error={error as Error | null} />
+      <Box id="explore-panel" role="tabpanel" aria-labelledby={`explore-tab-${activeTab.slug}`}>
+        <SectionRenderer section={section} isLoading={isLoading} error={error as Error | null} />
+      </Box>
     </Box>
   );
 };

@@ -42,6 +42,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         on_stage_start=lambda s: print(f"[mmm-studio] Starting stage: {s}", flush=True),
         on_stage_complete=lambda s: print(f"[mmm-studio] Completed stage: {s}", flush=True),
         on_stage_error=lambda s, e: print(f"[mmm-studio] ERROR in stage {s}: {e}", file=sys.stderr, flush=True),
+        on_stage_skipped=lambda s, why: print(f"[mmm-studio] Skipped stage: {s} ({why})", flush=True),
     )
     raw = input_path.read_bytes()
     ctx.cache["workbook_bytes"] = raw

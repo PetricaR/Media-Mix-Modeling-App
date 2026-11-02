@@ -11,7 +11,7 @@ import psycopg
 import pytest
 
 from mmm_studio.core.workbook import profile_workbook
-from mmm_studio.db.models import Base, Run
+from mmm_studio.db.models import Base, Run, StageProgress
 from mmm_studio.db.session import get_engine, get_session_factory, init_db
 from mmm_studio.jobs.app import (
     defer_task,
@@ -109,20 +109,24 @@ def test_worker_executes_analysis_job_and_sweeps_stale_heartbeat(test_env: Path)
         analysis_stages = [s for s in finished.stages if s.queue == "analysis"]
         assert all(s.status == "succeeded" for s in analysis_stages)
 
-    # Test stale heartbeat sweeper on a simulated stuck run
-    stuck_id = "run_stuck01"
+    # Stale heartbeat sweeper: a run with a running stage and no heartbeat lost its worker; a run between its
+    # analysis and Meridian jobs (no running stage, e.g. queued behind another fit) must not be failed.
+    stuck_id, waiting_id = "run_stuck01", "run_waiting01"
+    old_hb = datetime.now(timezone.utc) - timedelta(seconds=900)
     with SessionLocal() as db:
-        stuck = Run(
-            id=stuck_id,
-            name="Stuck Run",
-            status="running",
-            heartbeat_at=datetime.now(timezone.utc) - timedelta(seconds=900),
-        )
-        db.add(stuck)
+        db.add(Run(id=stuck_id, name="Stuck Run", status="running", heartbeat_at=old_hb))
+        db.add(Run(id=waiting_id, name="Waiting Run", status="running", heartbeat_at=old_hb))
+        db.commit()
+    ensure_stage_rows(stuck_id)
+    ensure_stage_rows(waiting_id)
+    with SessionLocal() as db:
+        stage = db.query(StageProgress).filter(StageProgress.run_id == stuck_id, StageProgress.key == "s12_meridian_fit").one()
+        stage.status = "running"
         db.commit()
 
     swept = sweep_stale_runs(stale_seconds=60)
     assert stuck_id in swept
+    assert waiting_id not in swept
 
     with SessionLocal() as db:
         stuck_after = db.get(Run, stuck_id)

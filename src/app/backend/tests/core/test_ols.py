@@ -1,27 +1,43 @@
-"""Tests for core OLS benchmark suite."""
+"""Tests for the OLS benchmark (notebook 04): same hold-outs as Meridian and walk-forward CV."""
 
 from __future__ import annotations
 
-import pandas as pd
+from typing import Any
 
-from mmm_studio.core.calendar import add_calendar_and_adstock_features
-from mmm_studio.core.ols import build_benchmark_section, evaluate_ols_suite
+import pandas as pd
+import pytest
+
+from mmm_studio.core.ols import OLS2, build_benchmark_section, evaluate_ols_suite
 from mmm_studio.core.schema import DataProfile
 
 
-def test_ols_benchmark_suite_and_section(
+def test_ols_benchmark_matches_notebook_04(
     profiled_case_study: tuple[pd.DataFrame, DataProfile],
-    wide_2023_2024: pd.DataFrame,
+    wide_model: pd.DataFrame,
+    golden_data: dict[str, Any],
 ) -> None:
     _, profile = profiled_case_study
-    wide_feat = add_calendar_and_adstock_features(wide_2023_2024, config=profile.role_config)
+    res = evaluate_ols_suite(wide_model, config=profile.role_config)
+    assert res["windows"]["primary"] == {
+        "label": "Q4 2024",
+        "train_end": "2024-09-30",
+        "test_start": "2024-10-01",
+        "test_end": "2025-01-01",
+    }
+    assert res["windows"]["forward"]["label"] == "Q3 2024"
 
-    ols_results = evaluate_ols_suite(wide_feat)
-    spec_rows = ols_results["spec_rows"]
-    assert len(spec_rows) == 5
-    best_ols_mae = min(float(r["q4_mae_over_mean"]) for r in spec_rows)
-    assert best_ols_mae < 0.12
+    gold = golden_data["ols_benchmark_mae_over_mean"]
+    by = {(r["window"], r["model"]): r["MAE_over_mean"] for r in res["rows"]}
+    for model, ref in gold["q4_2024"].items():
+        assert by[("primary", model)] == pytest.approx(ref, abs=0.001)
+    for model, ref in gold["q3_2024"].items():
+        assert by[("forward", model)] == pytest.approx(ref, abs=0.001)
+    assert len(res["cv"]["folds"]) == 8
+    for model, ref in gold["walk_forward_mean"].items():
+        assert res["cv"]["mean"][model] == pytest.approx(ref, abs=0.001)
 
-    sec = build_benchmark_section(wide_2023_2024, meridian_summary=None)
+    sec = build_benchmark_section(wide_model, meridian_summary=None, config=profile.role_config, ols_res=res)
     assert sec.slug == "benchmark"
-    assert len(sec.blocks) >= 7
+    kpis = sec.blocks[0].items
+    assert kpis[0].value == "pending"  # no Meridian numbers are invented before the fit
+    assert any(r.get("model") == OLS2 for b in sec.blocks if b.type == "table" for r in b.rows)

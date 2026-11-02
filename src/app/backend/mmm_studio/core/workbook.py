@@ -119,8 +119,8 @@ def profile_workbook(
             sheet_name=selected_sheet,
             columns=col_mapping,
             channels=channels,
-            drop_trailing_isolated_days=True,
-            holdout_days=92,
+            drop_trailing_isolated_days=False,
+            holdout_days=93,
         )
     else:
         col_mapping = role_config.columns
@@ -203,9 +203,15 @@ def profile_workbook(
     if tv_low_sales > 0:
         warnings.append(f"TV channel has {tv_low_sales} present days with near-zero sales (< 1 €).")
     if trailing_isolated:
-        warnings.append(
-            f"Trailing isolated year dates {trailing_isolated} will be excluded from the modelling window."
-        )
+        if role_config.drop_trailing_isolated_days:
+            warnings.append(
+                f"Trailing isolated year dates {trailing_isolated} will be excluded from the modelling window."
+            )
+        else:
+            warnings.append(
+                f"Trailing isolated year dates {trailing_isolated} stay in the models (as in the notebooks) but are "
+                "left out of yearly and monthly comparisons."
+            )
 
     sample_df = df.head(8).copy()
     for c in sample_df.columns:

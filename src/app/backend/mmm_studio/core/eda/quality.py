@@ -52,7 +52,8 @@ def build_data_quality_section(
             elif col_name == "date":
                 sem = "Calendar date (shuffled in raw sheet; sorted to daily index)"
             else:
-                sem = "Marketing channel identifier (12 channels: 7 paid, 5 unpaid)"
+                rc0 = profile.role_config
+                sem = f"Marketing channel ({len(rc0.active_channels)} channels: {len(rc0.paid_channels)} with costs, {len(rc0.unpaid_channels)} without)"
             col_rows.append(
                 {
                     "column": col_name,
@@ -153,7 +154,7 @@ def build_data_quality_section(
                     "marker": {"color": STATUS_WARNING, "size": 8, "symbol": "circle"},
                 },
             ],
-            title="TV Channel Daily Sales & Outage Windows (38 Missing + 8 Near-Zero Days)",
+            title=None,
             xaxis_title="Date",
             yaxis_title="Sales (€)",
             height=340,
@@ -162,7 +163,7 @@ def build_data_quality_section(
             ChartBlock(
                 id="quality_tv_outages",
                 title="TV Tracking Outages & Near-Zero Anomaly Windows",
-                subtitle="38 missing channel-date rows plus 8 present days with sales < €1 (e.g. ~€0.55).",
+                subtitle=f"{len(miss_dates)} missing channel-days plus {len(low_dates)} present days with sales below €1, right next to the outage windows.",
                 figure=fig_tv,
                 caption="Both missing rows and <€1 days represent tracking outages rather than genuine zero demand; flagged via `tv_anomaly`.",
             )
@@ -185,44 +186,78 @@ def build_data_quality_section(
         {
             "issue": "TV near-zero sales days (< €1)",
             "affected": "TV",
-            "magnitude": f"{profile.tv_low_sales_days} present days with sales ~€0.55",
-            "treatment": "Combine with `missing_tv` into unified `tv_anomaly` control variable (46 days total).",
+            "magnitude": f"{profile.tv_low_sales_days} present days with sales < €1",
+            "treatment": f"Tracking outage, not zero demand: flagged with `missing_tv` in a `tv_anomaly` flag ({profile.missing_channel_days.get('TV', 0) + profile.tv_low_sales_days} days). TV is not a model input anyway.",
         },
         {
             "issue": "Catalog episodic cost booking",
             "affected": "Catalog",
             "magnitude": f"{profile.catalog_sendout_days} send-out days with cost > 0; NaN on remaining {profile.calendar_days - profile.catalog_sendout_days} days",
-            "treatment": "Fill Catalog cost NaN with €0 and transform via delayed in-home adstock (peak +3 days).",
+            "treatment": "No send-out means €0 spend (not missing); the spend is shifted to its in-home date (+2 days) with adstock.",
         },
         {
             "issue": "Trailing isolated partial year",
             "affected": ", ".join(profile.trailing_isolated_dates) or "None",
             "magnitude": f"{len(profile.trailing_isolated_dates)} day(s) in trailing year",
-            "treatment": f"Hold out from primary 2-year modelling window ({profile.start_date} to {profile.modelling_end_date}, {profile.modelling_days} days).",
+            "treatment": (
+                f"Excluded from the models ({profile.start_date} to {profile.modelling_end_date}, {profile.modelling_days} days)."
+                if profile.role_config.drop_trailing_isolated_days
+                else f"Kept in the models, as in the notebooks ({profile.modelling_days} days); left out of yearly and monthly comparisons."
+            ),
         },
     ]
 
+    sendout_days_txt = ""
+    if "catalog_sendout" in wide_df.columns:
+        sd = pd.DatetimeIndex(wide_df.index[wide_df["catalog_sendout"] == 1]).day_name().value_counts()
+        sendout_days_txt = ", ".join(f"{n} {day[:3]}" for day, n in sd.items())
+    miss_parts = []
+    for ch, n in sorted(profile.missing_channel_days.items(), key=lambda t: -t[1]):
+        mcol = f"missing_{profile.role_config.slug_map().get(ch, ch)}"
+        months = (
+            sorted({d.strftime("%b %Y") for d in wide_df.index[wide_df[mcol] == 1]}, key=lambda m: pd.Timestamp(m))
+            if mcol in wide_df.columns
+            else []
+        )
+        miss_parts.append(f"{ch} {n} ({', '.join(months)})" if months else f"{ch} {n}")
+    missing_caption = (
+        "Missing channel-days: " + "; ".join(miss_parts) + ". They count as 0 sales in the target and are flagged."
+        if miss_parts
+        else "No channel-days are missing."
+    )
+
     return Section(
         id="data_quality",
-        title="Data Quality & Schema Audit",
-        subtitle="Completeness grid, NaN semantics, metric availability, and anomaly inventory from Phase 1.",
+        title="Data quality audit",
+        subtitle="Structure, completeness, what each metric means per channel, and how every anomaly is treated.",
         blocks=[
             KpisBlock(
                 items=[
-                    KpiItem(label="Raw Rows", value=f"{profile.raw_row_count:,}", delta=f"Expected {total_expected:,}"),
-                    KpiItem(label="Calendar Span", value=f"{profile.calendar_days} days", delta=f"{profile.start_date} → {profile.end_date}"),
-                    KpiItem(label="Missing Channel-Days", value=str(total_missing), delta="TV: 38, Catalog: 4, Owned: 2", status="warn"),
-                    KpiItem(label="TV Outage / <1€ Days", value=str(profile.missing_channel_days.get("TV", 0) + profile.tv_low_sales_days), delta="38 missing + 8 <1€", status="warn"),
-                    KpiItem(label="Catalog Send-outs", value=str(profile.catalog_sendout_days), delta="26 Thu, 1 Wed, 1 Fri"),
+                    KpiItem(label="Raw rows", value=f"{profile.raw_row_count:,}", delta=f"Expected {total_expected:,}"),
+                    KpiItem(label="Calendar span", value=f"{profile.calendar_days} days", delta=f"{profile.start_date} → {profile.end_date}"),
+                    KpiItem(
+                        label="Missing channel-days",
+                        value=str(total_missing),
+                        delta=", ".join(f"{k}: {v}" for k, v in sorted(profile.missing_channel_days.items(), key=lambda t: -t[1])) or "none",
+                        status="warn" if total_missing else "success",
+                    ),
+                    KpiItem(
+                        label="TV outage / < €1 days",
+                        value=str(profile.missing_channel_days.get("TV", 0) + profile.tv_low_sales_days),
+                        delta=f"{profile.missing_channel_days.get('TV', 0)} missing + {profile.tv_low_sales_days} below €1",
+                        status="warn",
+                    ),
+                    KpiItem(label="Catalog send-outs", value=str(profile.catalog_sendout_days), delta=sendout_days_txt),
                 ]
             ),
             CalloutBlock(
                 tone="danger",
                 title="Target Leakage Guardrail: `sales_by_channel` vs `costs_by_channel`",
                 body=(
-                    "Daily total sales is the sum of `sales_by_channel` across all 12 channels. "
+                    f"Daily total sales is the sum of `sales_by_channel` across all {len(avail_channels)} channels. "
                     "Channel-level sales, same-day clicks, and same-day impressions are simultaneous outcomes of demand "
-                    "and **must never** be used as predictors at forecast time. Only paid media **costs** (7 levers), "
+                    "and **must never** be used as predictors at forecast time. Only planned **costs** of the "
+                    f"{len(profile.role_config.paid_channels)} paid channels, "
                     "deterministic calendar/holiday indicators, and structural regime flags are valid model inputs."
                 ),
             ),
@@ -241,10 +276,10 @@ def build_data_quality_section(
             ),
             ChartBlock(
                 id="fig01_completeness",
-                title="Monthly Missing Channel-Days Across All 12 Channels",
-                subtitle="Count of missing calendar dates per month and channel (total = 44 missing channel-days).",
+                title=f"Missing channel-days by month across all {len(avail_channels)} channels",
+                subtitle=f"Count of missing calendar dates per month and channel (total = {total_missing} missing channel-days).",
                 figure=fig_missing,
-                caption="TV accounts for 38 of the 44 missing rows (concentrated in May/Jul/Dec 2023 and Mar/Aug/Sep 2024), Catalog for 4, and Owned for 2.",
+                caption=missing_caption,
             ),
             *tv_fig_blocks,
             ChartBlock(
@@ -252,7 +287,11 @@ def build_data_quality_section(
                 title="Channel × Metric Availability Matrix",
                 subtitle="Percentage of present rows with strictly positive (> 0) values per metric.",
                 figure=fig_avail,
-                caption="7 paid channels report costs; 5 organic channels (Direct Type-in, SEO, TV, Direct Referred, Owned) have 0% cost coverage. PSM has no impressions; Catalog has 0 clicks.",
+                caption=(
+                    f"{len(profile.role_config.paid_channels)} channels report costs; {len(profile.role_config.unpaid_channels)} have none "
+                    f"({', '.join(profile.role_config.unpaid_channels)}), so they cannot be budget levers. "
+                    "For the catalog, impressions are the print run."
+                ),
             ),
             TableBlock(
                 id="quality_channel_coverage",

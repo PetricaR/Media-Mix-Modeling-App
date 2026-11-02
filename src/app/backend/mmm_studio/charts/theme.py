@@ -1,75 +1,104 @@
-"""Consistent color palette and Plotly layout template matching PLAN.md §8.1."""
+"""Chart colours and the Plotly layout template, aligned with the Tchibo design tokens used on tchibo.de.
+
+Tchibo's corporate gold (#8C723B / #776132), interaction blue (#0A63BD), navy (#004266), coral (#BE2D2F) and warm
+neutral surfaces. Channel colours are keyed by display name and slug so every chart shows a channel in one colour.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-NAVY = "#1B4F72"
-COPPER = "#C85A17"
-TEAL = "#2E86AB"
-PURPLE = "#7B2D8E"
-MINT = "#48A9A6"
-CORAL = "#E07A5F"
-OLIVE = "#5C8001"
-SLATE = "#586069"
-INK_MUTED = "#586069"
-TEXT_PRIMARY = "#1B1F23"
-TEXT_SECONDARY = "#586069"
-BG_CARD = "#FFFFFF"
-BG_CANVAS = "#F8F9FA"
-GRID_COLOR = "#EAEEF2"
+# Brand tokens (Tchibo design system, light theme)
+GOLD = "#8C723B"
+GOLD_DARK = "#776132"
+GOLD_LIGHT = "#C0A468"
+BLUE = "#0A63BD"
+NAVY_BRAND = "#004266"
+CORAL_BRAND = "#BE2D2F"
+GREEN_BRAND = "#00753F"
+ORANGE_BRAND = "#E39214"
 
-STATUS_SUCCESS = "#1E7E34"
-STATUS_WARNING = "#D97706"
-STATUS_DANGER = "#C0392B"
+# Semantic chart roles (names kept stable across the analytics modules)
+NAVY = NAVY_BRAND
+COPPER = GOLD
+TEAL = BLUE
+PURPLE = "#7A5195"
+MINT = GREEN_BRAND
+CORAL = CORAL_BRAND
+OLIVE = "#719C6F"
+SLATE = "#545C63"
+INK_MUTED = "#75808A"
+TEXT_PRIMARY = "#21292F"
+TEXT_SECONDARY = "#545C63"
+BG_CARD = "#FFFFFF"
+BG_CANVAS = "#F9F6F1"
+GRID_COLOR = "#ECE7DE"
+AXIS_COLOR = "#D3D7DA"
+HOLDOUT_SHADE = "rgba(140, 114, 59, 0.10)"
+BASELINE_FILL = "#E4DBC8"
+
+STATUS_SUCCESS = GREEN_BRAND
+STATUS_WARNING = "#B7791F"
+STATUS_DANGER = CORAL_BRAND
 
 PAID_PALETTE: dict[str, str] = {
-    "SEA": "#1B4F72",
-    "Catalog": "#C85A17",
-    "Display": "#2E86AB",
-    "Affiliate": "#7B2D8E",
-    "Display Network": "#48A9A6",
-    "Social Media": "#E07A5F",
-    "PSM": "#5C8001",
+    "SEA": BLUE,
+    "Catalog": GOLD,
+    "Display": NAVY_BRAND,
+    "Affiliate": CORAL_BRAND,
+    "Display Network": GREEN_BRAND,
+    "Social Media": ORANGE_BRAND,
+    "PSM": PURPLE,
 }
 
 UNPAID_PALETTE: dict[str, str] = {
-    "Direct Type-in": "#6C757D",
-    "SEO": "#8D99AE",
-    "TV": "#95A5A6",
-    "Direct Referred": "#ADB5BD",
-    "Owned": "#B8C4CE",
+    "Direct Type-in": "#6C767F",
+    "SEO": "#8B959D",
+    "TV": "#A6A9AC",
+    "Direct Referred": "#B2B8BD",
+    "Owned": "#C3C7CB",
 }
 
 CHANNEL_COLORS: dict[str, str] = {
     **PAID_PALETTE,
     **UNPAID_PALETTE,
     # Slug aliases
-    "sea": "#1B4F72",
-    "catalog": "#C85A17",
-    "display": "#2E86AB",
-    "affiliate": "#7B2D8E",
-    "display_network": "#48A9A6",
-    "social_media": "#E07A5F",
-    "psm": "#5C8001",
-    "direct_type_in": "#6C757D",
-    "seo": "#8D99AE",
-    "tv": "#95A5A6",
-    "direct_referred": "#ADB5BD",
-    "owned": "#B8C4CE",
+    "sea": PAID_PALETTE["SEA"],
+    "catalog": PAID_PALETTE["Catalog"],
+    "display": PAID_PALETTE["Display"],
+    "affiliate": PAID_PALETTE["Affiliate"],
+    "display_network": PAID_PALETTE["Display Network"],
+    "social_media": PAID_PALETTE["Social Media"],
+    "psm": PAID_PALETTE["PSM"],
+    "direct_type_in": UNPAID_PALETTE["Direct Type-in"],
+    "seo": UNPAID_PALETTE["SEO"],
+    "tv": UNPAID_PALETTE["TV"],
+    "direct_referred": UNPAID_PALETTE["Direct Referred"],
+    "owned": UNPAID_PALETTE["Owned"],
 }
 
 FALLBACK_PALETTE: list[str] = [
-    "#1B4F72",
-    "#C85A17",
-    "#2E86AB",
-    "#7B2D8E",
-    "#48A9A6",
-    "#E07A5F",
-    "#5C8001",
-    "#6C757D",
-    "#8D99AE",
-    "#95A5A6",
+    BLUE,
+    GOLD,
+    NAVY_BRAND,
+    CORAL_BRAND,
+    GREEN_BRAND,
+    ORANGE_BRAND,
+    PURPLE,
+    "#6C767F",
+    OLIVE,
+    GOLD_LIGHT,
+]
+
+# Sequential (gold) and diverging (coral ↔ warm grey ↔ blue) scales for heatmaps
+SEQUENTIAL_SCALE: list[list[Any]] = [[0.0, "#F9F6F1"], [0.35, "#E4DBC8"], [0.7, "#C0A468"], [1.0, "#776132"]]
+DIVERGING_SCALE: list[list[Any]] = [
+    [0.0, "#8C2123"],
+    [0.25, "#D0393B"],
+    [0.45, "#F1EBDF"],
+    [0.55, "#F1EBDF"],
+    [0.75, "#3896F5"],
+    [1.0, "#07427E"],
 ]
 
 
@@ -96,7 +125,7 @@ def base_layout(
     """Build a clean, publication-grade Plotly layout dictionary."""
     layout: dict[str, Any] = {
         "font": {
-            "family": "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+            "family": "Figtree, Inter, -apple-system, BlinkMacSystemFont, sans-serif",
             "size": 12,
             "color": TEXT_PRIMARY,
         },
@@ -112,18 +141,18 @@ def base_layout(
             "y": 1.02,
             "xanchor": "left",
             "x": 0,
-            "bgcolor": "rgba(255,255,255,0.85)",
+            "bgcolor": "rgba(255,255,255,0)",
             "font": {"size": 11},
         },
         "xaxis": {
             "gridcolor": GRID_COLOR,
-            "linecolor": "#D0D7DE",
+            "linecolor": AXIS_COLOR,
             "zerolinecolor": GRID_COLOR,
             "title": {"text": xaxis_title or "", "font": {"size": 12, "color": TEXT_SECONDARY}},
         },
         "yaxis": {
             "gridcolor": GRID_COLOR,
-            "linecolor": "#D0D7DE",
+            "linecolor": AXIS_COLOR,
             "zerolinecolor": GRID_COLOR,
             "title": {"text": yaxis_title or "", "font": {"size": 12, "color": TEXT_SECONDARY}},
         },
