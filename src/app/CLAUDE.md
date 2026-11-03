@@ -234,12 +234,17 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
   within 0.5 %, `outputs/meridian_holdout_forecast.csv` (93 days) within 0.6 %, `outputs/forecast_2025-01.csv` (42 days)
   within 0.4 %, every figure headline in `reports/figures`, and every number printed by notebooks 01–05: 1,614 of
   1,620 match; the other 6 are notebook 04's Meridian row (MCMC noise ≤ 0.1 %) and pandas' 7-digit display of three
-  raw cost values (verification scripts only; the app never reads these files).
+  raw cost values (verification scripts only; the app never reads these files). This check predates `half_day`.
+- **`half_day` control (2026-11-04).** The Christmas group also flags 24 and 31 Dec (Google's half-day holidays), as
+  `tchibo_mmm.features.calendar_controls` does; notebooks 02–05 were re-run with it and the golden numbers updated.
 - **Reference numbers** live in `tests/golden/case_study.json` and are asserted by the fast tests (EDA, naive baselines,
   preparation ladder 0.74→0.90, OLS benchmark 34.8/10.7/9.6 % and walk-forward 9.5 %, example plan €8,008,549).
-- **Meridian (full profile, seed 0)** reproduces notebook 03 within MCMC noise: Q4 MAE/mean 8.54 % (nb 8.53 %), R² 0.888,
-  Q3 forward 10.96 % (nb 10.98 %), ROI SEA 8.40 / Catalog 0.97, optimiser +11.1 % on €121.8M, catalog what-if ratio 0.95,
-  and notebook 05's forecast €42.58M with the same scenarios (skip 30 Jan catalog, 20 % Display → SEA, +10 % digital).
+- **Meridian (CLI full profile, seed 0, default settings, 2026-11-04)** vs the re-run notebooks: Q4 MAE/mean 8.54 %
+  (nb 8.49 %), R² 0.888 (nb 0.889), Q3 forward 11.05 % (nb 10.88 %), ROI SEA 8.53 (nb 8.32) / Catalog 0.96 (nb 0.97),
+  optimiser +11.0 % (nb +11.2 %) on €121.8M, catalog what-if ratio 0.95 (nb 0.95), and notebook 05's forecast €42.61M
+  (nb €42.59M) with the same scenarios within 1 % (skip 30 Jan catalog, 20 % Display → SEA, +10 % digital). The
+  Meridian input table equals `data/processed/meridian_input.csv` except the three `missing_*` controls that the default
+  `missing_row_controls` adds.
 - Scenarios run on the fitted forecast model (`model_scenario_from_multipliers`); the marginal-ROI approximation is
   only a fallback when that model is missing and uses the run's own posterior mROIs.
 
