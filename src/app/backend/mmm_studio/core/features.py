@@ -1,8 +1,8 @@
 """Notebook-faithful feature helpers shared by preparation, the OLS benchmark and the Meridian input table.
 
 These reproduce the controls and catalog transforms of notebooks 02–05 exactly (weekday dummies with Monday as
-reference, German holidays, 20–31 Dec Christmas window, Black Friday → Cyber Monday, yearly Fourier terms, a linear
-trend in years, and the catalog in-home shift).
+reference, German holidays, 20–31 Dec Christmas window with the 24 / 31 Dec half-day holidays, Black Friday → Cyber
+Monday, yearly Fourier terms, a linear trend in years, and the catalog in-home shift).
 """
 
 from __future__ import annotations
@@ -28,7 +28,11 @@ def calendar_controls(
     index: pd.DatetimeIndex,
     groups: Iterable[str] = ("weekdays", "holidays", "christmas", "black_week"),
 ) -> pd.DataFrame:
-    """Weekday dummies (Monday = reference), German holidays, Christmas window and Black Week; `groups` picks which."""
+    """Weekday dummies (Monday = reference), German holidays, Christmas window and Black Week; `groups` picks which.
+
+    The Christmas group also flags Christmas Eve and New Year's Eve (`half_day`), the half-day holidays of Google's
+    German holiday calendar and the deepest dips in the data.
+    """
     groups = set(groups)
     out = pd.DataFrame(index=index)
     if "weekdays" in groups:
@@ -42,6 +46,7 @@ def calendar_controls(
         out["holiday"] = index.map(lambda d: d in de_holidays).astype(float)
     if "christmas" in groups:
         out["christmas"] = ((index.month == 12) & (index.day >= 20)).astype(float)
+        out["half_day"] = ((index.month == 12) & index.day.isin([24, 31])).astype(float)
     if "black_week" in groups:
         bw = np.zeros(len(index), dtype=bool)
         for year in sorted(set(index.year)):

@@ -33,7 +33,8 @@ CALENDAR_GROUPS: tuple[str, ...] = ("weekdays", "holidays", "christmas", "black_
 
 
 class CalendarControls(BaseModel):
-    """Which calendar dummies enter the OLS benchmark and Meridian (weekdays, German holidays, 20–31 Dec, Black Week)."""
+    """Which calendar dummies enter the OLS benchmark and Meridian (weekdays, German holidays, 20–31 Dec with the
+    24 / 31 Dec half-days, Black Week)."""
 
     weekdays: bool = True
     holidays: bool = True

@@ -100,7 +100,7 @@ def test_changed_settings_reach_the_meridian_inputs(
 
     table = meridian_table(wide_model, cfg)
     assert not any(c.startswith("dow_") for c in table.columns)
-    assert {"holiday", "christmas", "black_week", "sin_1", "cos_1"} <= set(table.columns)
+    assert {"holiday", "christmas", "half_day", "black_week", "sin_1", "cos_1"} <= set(table.columns)
     assert "sin_2" not in table.columns and "trend" not in table.columns
     shifted = wide_model["cost_catalog"].shift(3, fill_value=0.0).to_numpy()
     np.testing.assert_allclose(table["catalog_spend"].to_numpy(), shifted)

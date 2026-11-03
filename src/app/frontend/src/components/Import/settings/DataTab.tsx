@@ -10,7 +10,7 @@ import { Group, NumberField, SwitchField } from "./fields";
 const CALENDAR: { key: keyof CalendarControls; label: string; detail: string }[] = [
   { key: "weekdays", label: "Weekdays", detail: "One dummy per weekday, Monday as reference" },
   { key: "holidays", label: "German public holidays", detail: "National holidays of every year in the data" },
-  { key: "christmas", label: "Christmas window", detail: "20–31 December" },
+  { key: "christmas", label: "Christmas window", detail: "20–31 December, plus the 24 and 31 December half-days" },
   { key: "black_week", label: "Black Week", detail: "Black Friday to Cyber Monday" },
 ];
 

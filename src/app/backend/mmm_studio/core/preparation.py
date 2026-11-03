@@ -474,7 +474,7 @@ def build_preparation_section(
         },
         {
             "feature": "Calendar controls",
-            "columns": "weekday dummies (Monday = reference), holiday (German public holidays), christmas (20–31 Dec), black_week (Black Friday → Cyber Monday)",
+            "columns": "weekday dummies (Monday = reference), holiday (German public holidays), christmas (20–31 Dec), half_day (24 and 31 Dec), black_week (Black Friday → Cyber Monday)",
             "why": "Sunday and Tuesday peaks, the Christmas dip and Black Friday",
         },
         {
@@ -488,7 +488,7 @@ def build_preparation_section(
         {"role": "time", "columns": "daily date, YYYY-MM-DD"},
         {"role": "KPI (kpi_type = revenue)", "columns": "total_sales"},
         {"role": "media = media spend", "columns": ", ".join(spend_cols) + (" (catalog shifted to the in-home date)" if catalog_col else "")},
-        {"role": "controls", "columns": "dow_tue … dow_sun, holiday, christmas, black_week, sin_1, cos_1, sin_2, cos_2, trend"},
+        {"role": "controls", "columns": "dow_tue … dow_sun, holiday, christmas, half_day, black_week, sin_1, cos_1, sin_2, cos_2, trend"},
     ]
 
     first, last = ladder[0], ladder[-1]

@@ -48,7 +48,8 @@ def black_friday(year: int) -> pd.Timestamp:
 
 
 def calendar_controls(index: pd.DatetimeIndex) -> pd.DataFrame:
-    """Weekday dummies (Monday = reference), German holidays, Christmas window, Black Week."""
+    """Weekday dummies (Monday = reference), German holidays, Christmas window, half-day holidays
+    (24 / 31 Dec), Black Week."""
     out = pd.DataFrame(index=index)
     for d, name in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
         if d:
@@ -56,6 +57,9 @@ def calendar_controls(index: pd.DatetimeIndex) -> pd.DataFrame:
     de_holidays = holidays.Germany(years=sorted(set(index.year)))
     out["holiday"] = index.map(lambda d: d in de_holidays).astype(float)
     out["christmas"] = ((index.month == 12) & (index.day >= 20)).astype(float)
+    # Christmas Eve and New Year's Eve: the half-day holidays of Google's holiday calendar and the
+    # deepest dips in the data (see holiday_features.py).
+    out["half_day"] = ((index.month == 12) & index.day.isin([24, 31])).astype(float)
     bw = np.zeros(len(index), dtype=bool)
     for year in sorted(set(index.year)):
         bf = black_friday(year)
