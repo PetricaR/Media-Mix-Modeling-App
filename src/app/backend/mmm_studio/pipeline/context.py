@@ -41,7 +41,7 @@ class RunContext:
     storage: ArtifactStorage
     profile: DataProfile | None = None
     config: DataRoleConfig | None = None
-    run_profile: Literal["quick", "full", "smoke"] = "quick"
+    run_profile: Literal["quick", "full", "smoke", "custom"] = "quick"
     seed: int = 0
     on_stage_start: Callable[[str], None] | None = None
     on_stage_complete: Callable[[str], None] | None = None

@@ -26,7 +26,7 @@ class Run(Base):
     name: Mapped[str] = mapped_column(String(255), default="Case Study Run")
     filename: Mapped[str] = mapped_column(String(255), default="case_study.xlsx")
     sha256: Mapped[str] = mapped_column(String(64), default="")
-    profile: Mapped[str] = mapped_column(String(32), default="quick")  # quick | full | smoke
+    profile: Mapped[str] = mapped_column(String(32), default="quick")  # quick | full | smoke | custom
     status: Mapped[str] = mapped_column(
         String(32), default="draft", index=True
     )  # draft | queued | running | succeeded | failed | cancelled

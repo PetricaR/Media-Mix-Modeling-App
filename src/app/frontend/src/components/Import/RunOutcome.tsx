@@ -16,6 +16,12 @@ const metric = (summary: Record<string, unknown> | null | undefined, block: stri
   return b && typeof b === "object" ? num((b as Record<string, unknown>)[key]) : null;
 };
 
+/** "Q4 2024 hold-out" from the window label the pipeline stored (the hold-out length is a run setting). */
+const windowLabel = (summary: Record<string, unknown> | null | undefined, key: string, fallback: string, suffix = "hold-out"): string => {
+  const label = summary?.[key];
+  return typeof label === "string" && label ? `${label} ${suffix}` : fallback;
+};
+
 const TONES = {
   good: { border: PALETTE.semanticGood, bg: alpha(PALETTE.semanticGood, 0.06), icon: <CheckCircleIcon sx={{ color: PALETTE.semanticGood }} /> },
   bad: { border: PALETTE.semanticBad, bg: alpha(PALETTE.semanticBad, 0.06), icon: <ErrorIcon sx={{ color: PALETTE.semanticBad }} /> },
@@ -59,8 +65,8 @@ export const RunOutcome: React.FC<{ run: RunDetail; onRerun: () => void }> = ({ 
   const checks =
     run.status === "succeeded"
       ? [
-          { label: "Q4 2024 hold-out", value: metric(run.summary, "holdout_q4_2024", "MAE_over_mean"), fmt: (v: number) => `${(v * 100).toFixed(1)} %`, note: "MAE / mean" },
-          { label: "Q3 2024 forward hold-out", value: metric(run.summary, "holdout_q3_2024", "MAE_over_mean"), fmt: (v: number) => `${(v * 100).toFixed(1)} %`, note: "MAE / mean" },
+          { label: windowLabel(run.summary, "holdout_label", "Hold-out"), value: metric(run.summary, "holdout_q4_2024", "MAE_over_mean"), fmt: (v: number) => `${(v * 100).toFixed(1)} %`, note: "MAE / mean" },
+          { label: windowLabel(run.summary, "forward_label", "Forward hold-out", "forward hold-out"), value: metric(run.summary, "holdout_q3_2024", "MAE_over_mean"), fmt: (v: number) => `${(v * 100).toFixed(1)} %`, note: "MAE / mean" },
           { label: "Max R-hat", value: num(run.summary?.max_rhat), fmt: (v: number) => v.toFixed(3), note: "convergence" },
         ].filter((c) => c.value !== null)
       : [];

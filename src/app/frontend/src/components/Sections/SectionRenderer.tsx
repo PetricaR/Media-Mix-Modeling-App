@@ -483,7 +483,7 @@ export const SectionRenderer: React.FC<{
       <EmptyState title={notReady ? "Not computed yet" : "No run selected"}>
         {notReady
           ? pendingMessage || "This page fills in automatically as soon as the pipeline stage that produces it has finished."
-          : emptyMessage || "Upload the workbook on the Import & runs page, or pick a run in the header."}
+          : emptyMessage || "Upload the workbook on the Runs page, or pick a run in the header."}
       </EmptyState>
     );
   }

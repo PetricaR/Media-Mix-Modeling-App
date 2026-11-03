@@ -17,6 +17,7 @@ from mmm_studio.core.features import (
     seasonality_controls,
 )
 from mmm_studio.core.metrics import regression_metrics
+from mmm_studio.core.model_settings import ModelSettings
 from mmm_studio.core.schema import DataRoleConfig, slugify_channel
 from mmm_studio.report.narrative import fmt_eur
 from mmm_studio.report.sections import (
@@ -52,7 +53,9 @@ def ols_design_sets(panel: pd.DataFrame, config: DataRoleConfig | None = None) -
         print_cols = ["cost_catalog"] if "cost_catalog" in panel.columns else []
     idx = pd.DatetimeIndex(panel.index)
     digital = [c for c in paid_cols if c not in print_cols]
-    controls = calendar_controls(idx).join(seasonality_controls(idx))
+    # The benchmark uses the run's own controls, so OLS and Meridian are compared on the same inputs
+    ms = config.model_settings if config is not None else ModelSettings()
+    controls = calendar_controls(idx, ms.calendar.groups()).join(seasonality_controls(idx, ms.n_fourier, ms.trend))
     ols2 = panel[digital].copy()
     if print_cols:
         ols2 = ols2.join(catalog_inhome_adstock(panel[print_cols[0]]))

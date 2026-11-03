@@ -11,6 +11,7 @@ import pandas as pd
 
 from mmm_studio.charts.builders import line_figure
 from mmm_studio.charts.theme import COPPER, HOLDOUT_SHADE, INK_MUTED, NAVY, SLATE
+from mmm_studio.core.model_settings import ModelSettings, sampling_for, settings_changes
 from mmm_studio.core.schema import DataProfile, DataRoleConfig
 from mmm_studio.pipeline.context import MODEL_PANEL_NAME, RunContext, StageSkipped
 from mmm_studio.report.facts import compute_case_facts
@@ -46,15 +47,56 @@ STAGE_DEFINITIONS: list[tuple[str, str, str]] = [
 ]
 
 
-def _sampling_for(profile: str, purpose: str = "main") -> dict[str, int]:
+def _sampling_for(profile: str, purpose: str = "main", settings: ModelSettings | None = None) -> dict[str, int]:
     """Sampling per run profile. Notebooks: FULL for the final model and forecasts, FAST for selection/forward fits."""
-    from mmm_studio.core.meridian.fit import FAST_SAMPLING, FULL_SAMPLING, SMOKE_SAMPLING
+    return sampling_for(profile, purpose, settings)
 
-    if profile == "smoke":
-        return SMOKE_SAMPLING
-    if purpose in ("selection", "forward"):
-        return FAST_SAMPLING
-    return FULL_SAMPLING if profile == "full" else FAST_SAMPLING
+
+def _settings(ctx: RunContext) -> ModelSettings:
+    return ctx.config.model_settings if ctx.config is not None else ModelSettings()
+
+
+def _with_run_settings(ctx: RunContext, sec: Section) -> Section:
+    """Append the run's settings that differ from the notebook defaults to the `meridian_model` section."""
+    if ctx.config is None:
+        return sec
+    changes = settings_changes(ctx.config, seed=ctx.seed, profile=ctx.run_profile)
+    if not changes:
+        sec.blocks.append(
+            CalloutBlock(
+                tone="info",
+                title="Settings used",
+                body="Every model setting of this run is the notebook default. Final fit sampled with "
+                f"{_sampling_label(_sampling_for(ctx.run_profile, 'main', _settings(ctx)))}.",
+            )
+        )
+        return sec
+    sec.blocks.append(
+        TableBlock(
+            id="meridian_run_settings",
+            title="Settings used: changes from the notebook defaults",
+            subtitle=f"{len(changes)} setting{'s' if len(changes) != 1 else ''} differ from notebooks 01–05; "
+            "results of this run are not comparable one-to-one with the notebooks.",
+            columns=[
+                TableColumn(key="setting", label="Setting"),
+                TableColumn(key="value", label="This run"),
+                TableColumn(key="default", label="Notebook default"),
+            ],
+            rows=changes,
+        )
+    )
+    return sec
+
+
+def _selection_note(ctx: RunContext) -> str:
+    ms = _settings(ctx)
+    shifts = ", ".join(map(str, ms.selection_shifts))
+    grid = f"The selection grid (catalog shift k ∈ {{{shifts}}} × Affiliate as media or control) and the prior / SEA sensitivity fits"
+    if ms.selection_enabled(ctx.run_profile):
+        return f"{grid} run after the main results. They appear here when they finish."
+    if ms.model_selection is False:
+        return f"{grid} are switched off in this run's settings."
+    return f"{grid} run on the **full** profile only, or when they are switched on in the run settings."
 
 
 def _sampling_label(sampling: dict[str, int]) -> str:
@@ -113,7 +155,7 @@ def _spec_cfg(ctx: RunContext, wide: pd.DataFrame) -> Any:
     from mmm_studio.core.meridian.spec import MeridianSpecConfig
 
     if "meridian_cfg" not in ctx.cache:
-        ctx.cache["meridian_cfg"] = MeridianSpecConfig.from_role_config(ctx.config, index=wide.index)
+        ctx.cache["meridian_cfg"] = MeridianSpecConfig.from_role_config(ctx.config, wide=wide)
     return ctx.cache["meridian_cfg"]
 
 
@@ -743,7 +785,7 @@ def build_brief_section(
 
 def s11_benchmark(ctx: RunContext) -> None:
     """OLS benchmark (notebook 04) plus draft overview, brief and reports before Meridian finishes."""
-    from mmm_studio.core.meridian.spec import build_meridian_table
+    from mmm_studio.core.meridian.spec import meridian_table
     from mmm_studio.core.ols import build_benchmark_section, evaluate_ols_suite
 
     _, wide, _ = _ensure_dataframes(ctx)
@@ -755,7 +797,7 @@ def s11_benchmark(ctx: RunContext) -> None:
     ctx.save_section(build_benchmark_section(wide, config=ctx.config, ols_res=ols_res))
 
     spec_cfg = _spec_cfg(ctx, wide)
-    mer_tbl = build_meridian_table(wide, catalog_shift=spec_cfg.catalog_shift, n_fourier=spec_cfg.n_fourier, paid_channels=spec_cfg.paid_channels)
+    mer_tbl = meridian_table(wide, spec_cfg)
     ctx.save_dataframe("meridian_input", mer_tbl.set_index("time"), also_csv=True)
 
     facts = _facts(ctx)
@@ -780,7 +822,7 @@ def s12_meridian_fit(ctx: RunContext) -> None:
         wide,
         spec_cfg,
         bin_path,
-        sampling=_sampling_for(ctx.run_profile, "main"),
+        sampling=_sampling_for(ctx.run_profile, "main", _settings(ctx)),
         seed=ctx.seed,
         spawn_child=ctx.spawn_meridian_child,
         should_cancel=ctx.is_cancelled,
@@ -798,20 +840,20 @@ def s12_meridian_fit(ctx: RunContext) -> None:
     ctx.save_dataframe("meridian_holdout_forecast", fit_df[fit_df["holdout"]][["actual", "expected", "expected_lo", "expected_hi"]], also_csv=True)
 
     # Interim section so results appear while the forward refit runs
-    sec, metrics = build_meridian_model_section(mmm, wide, spec_cfg, selection_note=None)
-    ctx.save_section(sec)
+    sec, metrics = build_meridian_model_section(mmm, wide, spec_cfg, selection_note=_selection_note(ctx))
+    ctx.save_section(_with_run_settings(ctx, sec))
     ctx.cache["meridian_metrics"] = metrics
     ctx.save_json("meta/meridian_metrics.json", metrics)
     ctx.heartbeat()
 
     windows = holdout_windows(pd.DatetimeIndex(wide.index), ctx.config.holdout_days if ctx.config else 93)
-    if "forward" in windows:
+    if "forward" in windows and _settings(ctx).forward_holdout:
         fwd_metrics, fwd_df = fit_forward_holdout(
             wide,
             spec_cfg,
             windows["forward"],
             work_dir / "meridian_forward.binpb",
-            sampling=_sampling_for(ctx.run_profile, "forward"),
+            sampling=_sampling_for(ctx.run_profile, "forward", _settings(ctx)),
             seed=ctx.seed,
             spawn_child=ctx.spawn_meridian_child,
             should_cancel=ctx.is_cancelled,
@@ -819,8 +861,10 @@ def s12_meridian_fit(ctx: RunContext) -> None:
         )
         label = quarter_label(windows["forward"][1], windows["forward"][2])
         ctx.save_dataframe("meridian_forward_holdout", fwd_df, also_csv=True)
-        sec, metrics = build_meridian_model_section(mmm, wide, spec_cfg, forward_metrics=fwd_metrics, forward_label=label)
-        ctx.save_section(sec)
+        sec, metrics = build_meridian_model_section(
+            mmm, wide, spec_cfg, forward_metrics=fwd_metrics, forward_label=label, selection_note=_selection_note(ctx)
+        )
+        ctx.save_section(_with_run_settings(ctx, sec))
         ctx.cache["meridian_metrics"] = metrics
         ctx.save_json("meta/meridian_metrics.json", metrics)
 
@@ -873,7 +917,7 @@ def s14_forecast(ctx: RunContext) -> None:
 
     _, wide, _ = _ensure_dataframes(ctx)
     spec_cfg = _spec_cfg(ctx, wide)
-    sampling = _sampling_for(ctx.run_profile, "main")
+    sampling = _sampling_for(ctx.run_profile, "main", _settings(ctx))
     plan_cols = [c for c in spec_cfg.paid_slugs if f"cost_{c}" in wide.columns]
 
     # 1. Back-test: history up to the day before the hold-out, the hold-out's actual spend as the plan
@@ -988,15 +1032,21 @@ def s16_model_selection(ctx: RunContext) -> None:
     from mmm_studio.core.meridian.analysis import build_meridian_model_section
     from mmm_studio.core.meridian.selection import run_model_selection
 
-    if ctx.run_profile != "full":
-        raise StageSkipped("Runs on the full profile only (9 extra fits).")
+    ms = _settings(ctx)
+    if not ms.selection_enabled(ctx.run_profile):
+        raise StageSkipped(
+            "Switched off in the run settings."
+            if ms.model_selection is False
+            else "Runs on the full profile only, or when switched on in the run settings."
+        )
     _, wide, _ = _ensure_dataframes(ctx)
     spec_cfg = _spec_cfg(ctx, wide)
     result = run_model_selection(
         wide,
         spec_cfg,
         ctx.local_work_dir("models") / "selection",
-        sampling=_sampling_for(ctx.run_profile, "selection"),
+        sampling=_sampling_for(ctx.run_profile, "selection", ms),
+        shifts=tuple(ms.selection_shifts),
         seed=ctx.seed,
         spawn_child=ctx.spawn_meridian_child,
         should_cancel=ctx.is_cancelled,
@@ -1013,7 +1063,7 @@ def s16_model_selection(ctx: RunContext) -> None:
         windows = holdout_windows(pd.DatetimeIndex(wide.index), ctx.config.holdout_days)
         fwd_label = metrics.get("forward_label") or (quarter_label(windows["forward"][1], windows["forward"][2]) if "forward" in windows else None)
     sec, _ = build_meridian_model_section(mmm, wide, spec_cfg, forward_metrics=fwd_metrics, forward_label=fwd_label, selection=result)
-    ctx.save_section(sec)
+    ctx.save_section(_with_run_settings(ctx, sec))
     _refresh_summary_sections(ctx)
 
 

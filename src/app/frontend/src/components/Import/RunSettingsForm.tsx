@@ -1,304 +1,188 @@
-import React, { useMemo, useState } from "react";
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  FormControl,
-  FormControlLabel,
-  FormLabel,
-  MenuItem,
-  Radio,
-  RadioGroup,
-  Select,
-  Switch,
-  TextField,
-  Typography,
-  alpha,
-} from "@mui/material";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Alert, Box, Button, CircularProgress, Skeleton, Tab, Tabs, TextField, Typography, alpha } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import ReplayIcon from "@mui/icons-material/Replay";
-import UndoIcon from "@mui/icons-material/Undo";
-import type { ChannelRole, DataRoleConfig, RunDetail } from "../../api/types";
-import { FONT_MONO, PALETTE } from "../../theme";
-import { PROFILES, PROFILE_ORDER, ROLE_OPTIONS, type Profile, roleOption } from "./format";
+import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import { useSearchParams } from "react-router-dom";
+import { useSettingsDefaults } from "../../api/hooks";
+import type { DataProfile, DataRoleConfig, Profile, RunDetail, SettingsDefaults } from "../../api/types";
+import { PALETTE } from "../../theme";
+import { PROFILES } from "./format";
+import { ChannelsTab } from "./settings/ChannelsTab";
+import { DataTab } from "./settings/DataTab";
+import { ModelTab } from "./settings/ModelTab";
+import { PriorsTab } from "./settings/PriorsTab";
+import { SamplingTab } from "./settings/SamplingTab";
+import { TABS, type TabKey, changesByTab, initialDraft, resetDraft } from "./settings/draft";
+import { GUTTER, SwitchField } from "./settings/fields";
 
 export interface RunSettingsValues {
   name: string;
   profile: Profile;
   skipMeridian: boolean;
-  roleConfig: DataRoleConfig | undefined;
+  seed: number;
+  roleConfig: DataRoleConfig;
 }
 
-const ROLE_COLS = "minmax(110px, 0.9fr) minmax(0, 2.3fr) minmax(120px, 1fr)";
-const GUTTER = { xs: 2.5, sm: 3 };
-
-const Dot: React.FC<{ colour: string; hollow?: boolean }> = ({ colour, hollow }) => (
-  <Box
-    component="span"
-    aria-hidden="true"
-    sx={{ flexShrink: 0, width: 9, height: 9, boxSizing: "border-box", borderRadius: "50%", border: `2px solid ${colour}`, backgroundColor: hollow ? "transparent" : colour }}
-  />
-);
-
-const Group: React.FC<{ title: string; description?: React.ReactNode; aside?: React.ReactNode; children: React.ReactNode }> = ({ title, description, aside, children }) => (
-  <Box sx={{ px: GUTTER, py: 2.5, borderTop: `1px solid ${PALETTE.borderSubtle}` }}>
-    <Box sx={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 1.5, mb: 1.75 }}>
-      <Box sx={{ maxWidth: "70ch" }}>
-        <Typography component="h3" sx={{ fontWeight: 700, fontSize: "0.95rem", color: PALETTE.inkPrimary }}>
-          {title}
-        </Typography>
-        {description && <Typography variant="body2">{description}</Typography>}
-      </Box>
-      {aside}
-    </Box>
-    {children}
-  </Box>
-);
-
-/**
- * The settings a run starts with: name (drafts only), whether Meridian is fitted, its sampling depth and each channel's
- * role. The parent keys this form by run id, so its draft state starts fresh for every run.
- */
-export const RunSettingsForm: React.FC<{
+interface FormProps {
   run: RunDetail;
+  dataProfile?: DataProfile | null;
   mode: "draft" | "rerun";
   locked: boolean;
   submitting: boolean;
   error: string | null;
   onClearError: () => void;
   onSubmit: (values: RunSettingsValues) => void;
-}> = ({ run, mode, locked, submitting, error, onClearError, onSubmit }) => {
-  const saved = run.config?.role_config ?? run.schema?.role_config ?? null;
-  const [roles, setRoles] = useState<DataRoleConfig | null>(saved);
-  const [profile, setProfile] = useState<Profile>(run.profile);
-  const [includeMeridian, setIncludeMeridian] = useState(!run.config?.skip_meridian);
-  const [name, setName] = useState(run.name);
+}
 
-  const savedRoles = useMemo(() => new Map((saved?.channels ?? []).map((c) => [c.name, c.role])), [saved]);
-  const channels = roles?.channels ?? [];
-  const changedCount = channels.filter((c) => savedRoles.has(c.name) && savedRoles.get(c.name) !== c.role).length;
-  const counts = ROLE_OPTIONS.map((o) => ({ ...o, n: channels.filter((c) => c.role === o.value).length })).filter((o) => o.n > 0);
+const supportsUntilFound = typeof HTMLElement !== "undefined" && "onbeforematch" in HTMLElement.prototype;
 
-  const setRole = (idx: number, role: ChannelRole) =>
-    setRoles((rc) => (rc ? { ...rc, channels: rc.channels.map((c, i) => (i === idx ? { ...c, role } : c)) } : rc));
+/**
+ * A tab panel that stays in the DOM. Inactive panels are `hidden="until-found"` where supported, so the browser's find
+ * in page still reaches a setting in another tab and `beforematch` switches to it; elsewhere they are plain `hidden`.
+ */
+const TabPanel: React.FC<{ tab: TabKey; active: boolean; onReveal: (tab: TabKey) => void; children: React.ReactNode }> = ({ tab, active, onReveal, children }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (active) el.removeAttribute("hidden");
+    else el.setAttribute("hidden", supportsUntilFound ? "until-found" : "");
+  }, [active]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const reveal = () => onReveal(tab);
+    el.addEventListener("beforematch", reveal);
+    return () => el.removeEventListener("beforematch", reveal);
+  }, [tab, onReveal]);
+  return (
+    <div ref={ref} role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`} data-tab={tab}>
+      {children}
+    </div>
+  );
+};
+
+const SettingsForm: React.FC<FormProps & { defaults: SettingsDefaults }> = ({ run, dataProfile, mode, locked, submitting, error, onClearError, onSubmit, defaults }) => {
+  const [draft, setDraft] = useState(() => initialDraft(run, defaults));
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("tab");
+  const tab: TabKey = TABS.some((t) => t.key === requested) ? (requested as TabKey) : "data";
+  const setTab = useCallback(
+    (next: TabKey) =>
+      setParams(
+        (p) => {
+          const out = new URLSearchParams(p);
+          out.set("tab", next);
+          return out;
+        },
+        { replace: true }
+      ),
+    [setParams]
+  );
+
+  const changes = useMemo(() => changesByTab(draft, defaults), [draft, defaults]);
+  const total = TABS.reduce((n, t) => n + changes[t.key].length, 0);
+
+  // An invalid field in a hidden tab cannot show the browser's message: open its tab, then report again
+  const formRef = useRef<HTMLFormElement>(null);
+  const reportAfterSwitch = useRef(false);
+  useEffect(() => {
+    if (!reportAfterSwitch.current) return;
+    reportAfterSwitch.current = false;
+    requestAnimationFrame(() => formRef.current?.reportValidity());
+  }, [tab]);
+  const onInvalid = (e: React.FormEvent<HTMLFormElement>) => {
+    const key = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab as TabKey | undefined;
+    if (key && key !== tab && !reportAfterSwitch.current) {
+      reportAfterSwitch.current = true;
+      setTab(key);
+    }
+  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ name: name.trim(), profile, skipMeridian: !includeMeridian, roleConfig: roles ?? undefined });
+    onSubmit({ name: draft.name.trim(), profile: draft.profile, skipMeridian: !draft.includeMeridian, seed: draft.seed, roleConfig: draft.roleConfig });
   };
 
-  const plan = includeMeridian ? `${PROFILES[profile].label} sampling · ${PROFILES[profile].duration}` : "EDA and OLS benchmark only";
-  const paid = channels.filter((c) => c.role === "paid").length;
+  const tabProps = { draft, setDraft, defaults, locked };
+  const plan = draft.includeMeridian ? `${PROFILES[draft.profile].label} sampling · ${PROFILES[draft.profile].duration}` : "EDA and OLS benchmark only";
 
   return (
-    <Box component="form" onSubmit={submit} aria-label={mode === "draft" ? "Run settings" : "Re-run settings"}>
-      {mode === "draft" && (
-        <Box sx={{ px: GUTTER, pb: 2.5 }}>
+    <Box component="form" ref={formRef} onSubmit={submit} onInvalidCapture={onInvalid} aria-label={mode === "draft" ? "Run settings" : "Re-run settings"}>
+      <Box sx={{ px: GUTTER, pb: 2.5, display: "flex", flexWrap: "wrap", alignItems: "flex-start", columnGap: 4, rowGap: 2 }}>
+        {mode === "draft" && (
           <TextField
             label="Run name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={draft.name}
+            onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
             required
-            fullWidth
             size="small"
             autoComplete="off"
             disabled={locked}
             helperText="Shown in the run switcher and the run list."
             inputProps={{ maxLength: 120 }}
-            sx={{ maxWidth: 480 }}
+            sx={{ width: 400, maxWidth: "100%" }}
+          />
+        )}
+        <Box sx={{ maxWidth: 460 }}>
+          <SwitchField
+            label="Fit the Google Meridian MMM"
+            checked={draft.includeMeridian}
+            disabled={locked}
+            onChange={(includeMeridian) => setDraft((d) => ({ ...d, includeMeridian }))}
+            help={
+              draft.includeMeridian
+                ? "The Bayesian model behind drivers & ROI, the budget optimiser and the forecast."
+                : "Off: the run covers the data audit, EDA, preparation and the OLS benchmark; the model, drivers, optimiser and forecast pages stay empty."
+            }
           />
         </Box>
-      )}
+      </Box>
 
-      <Group title="Model" description="Choose whether to fit the Google Meridian MMM and how thoroughly it samples.">
-        <FormControlLabel
-          control={<Switch checked={includeMeridian} onChange={(e) => setIncludeMeridian(e.target.checked)} disabled={locked} inputProps={{ "aria-describedby": "meridian-help" }} />}
-          label={<Typography sx={{ fontWeight: 650, fontSize: "0.9rem", color: PALETTE.inkPrimary }}>Fit the Google Meridian MMM</Typography>}
-          sx={{ ml: -1 }}
-        />
-        <Typography id="meridian-help" variant="caption" component="p" sx={{ color: PALETTE.inkSecondary, mb: 2, maxWidth: "70ch" }}>
-          {includeMeridian
-            ? "The Bayesian model behind drivers & ROI, the budget optimiser and the forecast."
-            : "Off: the run covers the data audit, EDA, preparation and the OLS benchmark; the model, drivers, optimiser and forecast pages stay empty."}
-        </Typography>
-
-        <FormControl component="fieldset" disabled={locked || !includeMeridian} sx={{ width: "100%", m: 0, p: 0, border: 0, minWidth: 0 }}>
-          <FormLabel component="legend" sx={{ fontWeight: 650, fontSize: "0.84rem", color: PALETTE.inkPrimary, mb: 1, "&.Mui-focused": { color: PALETTE.inkPrimary } }}>
-            Sampling profile{!includeMeridian && <Typography component="span" variant="caption" sx={{ ml: 1, color: PALETTE.inkMuted }}>not used without Meridian</Typography>}
-          </FormLabel>
-          <RadioGroup
-            name="profile"
-            value={profile}
-            onChange={(e) => setProfile(e.target.value as Profile)}
-            sx={{ display: "grid", gap: 1.25, gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))" }}
-          >
-            {PROFILE_ORDER.map((p) => {
-              const selected = profile === p;
-              const off = locked || !includeMeridian;
-              return (
-                <Box
-                  component="label"
-                  key={p}
-                  sx={{
-                    display: "grid",
-                    gridTemplateColumns: "auto minmax(0, 1fr)",
-                    columnGap: 1,
-                    alignItems: "start",
-                    p: 1.5,
-                    pl: 1,
-                    borderRadius: 2,
-                    cursor: off ? "default" : "pointer",
-                    opacity: off ? 0.6 : 1,
-                    border: `${selected ? 2 : 1}px solid ${selected ? PALETTE.brandPrimary : PALETTE.borderSubtle}`,
-                    m: selected ? 0 : "1px",
-                    backgroundColor: selected ? alpha(PALETTE.brandPrimary, 0.05) : "#FFFFFF",
-                    transition: "border-color 0.12s, background-color 0.12s",
-                    "&:hover": off || selected ? undefined : { borderColor: PALETTE.borderStrong },
-                    "&:has(input:focus-visible)": { outline: `3px solid ${PALETTE.brandPrimary}`, outlineOffset: 2 },
-                  }}
-                >
-                  <Radio value={p} size="small" sx={{ p: 0.5, mt: -0.25 }} inputProps={{ "aria-labelledby": `profile-${p}-label`, "aria-describedby": `profile-${p}-detail` }} />
-                  <Box component="span" sx={{ display: "block", minWidth: 0 }}>
-                    <Box component="span" sx={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", columnGap: 1 }}>
-                      <Typography id={`profile-${p}-label`} component="span" sx={{ fontWeight: 700, fontSize: "0.9rem", color: PALETTE.inkPrimary }}>
-                        {PROFILES[p].label}
-                      </Typography>
-                      <Typography component="span" variant="caption" sx={{ color: PALETTE.inkSecondary, fontWeight: 600 }}>
-                        {PROFILES[p].duration}
-                      </Typography>
-                    </Box>
-                    {PROFILES[p].badge && (
-                      <Box component="span" sx={{ display: "inline-block", mt: 0.5, px: 0.75, borderRadius: 1, fontSize: "0.7rem", fontWeight: 700, color: PALETTE.brandGoldDark, backgroundColor: PALETTE.bgGoldTint }}>
-                        {PROFILES[p].badge}
+      <Box sx={{ borderTop: `1px solid ${PALETTE.borderSubtle}`, borderBottom: `1px solid ${PALETTE.borderSubtle}`, px: { xs: 1, sm: 1.5 } }}>
+        <Tabs value={tab} onChange={(_, v: TabKey) => setTab(v)} aria-label="Setting groups" variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
+          {TABS.map((t) => {
+            const n = changes[t.key].length;
+            return (
+              <Tab
+                key={t.key}
+                value={t.key}
+                id={`settings-tab-${t.key}`}
+                aria-controls={`settings-panel-${t.key}`}
+                sx={{ textTransform: "none", fontWeight: 650, fontSize: "0.9rem", minHeight: 48 }}
+                label={
+                  <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+                    {t.label}
+                    {n > 0 && (
+                      <Box component="span" sx={{ minWidth: 20, px: 0.625, borderRadius: 999, fontSize: "0.72rem", fontWeight: 800, lineHeight: "20px", color: "#FFFFFF", backgroundColor: PALETTE.brandPrimary }}>
+                        {n}
+                        <span className="visually-hidden"> {n === 1 ? "change" : "changes"} from the notebook defaults</span>
                       </Box>
                     )}
-                    <Typography id={`profile-${p}-detail`} component="span" variant="caption" sx={{ display: "block", mt: 0.5, color: PALETTE.inkSecondary }}>
-                      {PROFILES[p].detail}
-                    </Typography>
                   </Box>
-                </Box>
-              );
-            })}
-          </RadioGroup>
-        </FormControl>
-      </Group>
+                }
+              />
+            );
+          })}
+        </Tabs>
+      </Box>
 
-      {roles && (
-        <Group
-          title="Channel roles"
-          description="Inferred from the data; the note under each role says why. Change a role only if you know the channel works differently."
-          aside={
-            changedCount > 0 && (
-              <Button size="small" startIcon={<UndoIcon />} onClick={() => setRoles(saved)} disabled={locked}>
-                Undo {changedCount} change{changedCount === 1 ? "" : "s"}
-              </Button>
-            )
-          }
-        >
-          <Box component="ul" aria-label="Channels per role" sx={{ listStyle: "none", p: 0, m: 0, mb: 1.5, display: "flex", flexWrap: "wrap", gap: 0.75 }}>
-            {counts.map((o) => (
-              <Box
-                component="li"
-                key={o.value}
-                sx={{ display: "inline-flex", alignItems: "center", gap: 0.75, px: 1.25, py: 0.375, borderRadius: 999, border: `1px solid ${PALETTE.borderSubtle}`, fontSize: "0.78rem", fontWeight: 600, color: PALETTE.inkPrimary }}
-              >
-                <Dot colour={o.colour} hollow={o.hollow} />
-                {o.n} {o.short.toLowerCase()}
-              </Box>
-            ))}
-          </Box>
-
-          <Box sx={{ border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 2, overflow: "hidden" }}>
-            <Box
-              aria-hidden="true"
-              sx={{
-                display: { xs: "none", sm: "grid" },
-                gridTemplateColumns: ROLE_COLS,
-                columnGap: 2,
-                px: 2,
-                py: 0.875,
-                backgroundColor: PALETTE.bgSubtle,
-                fontSize: "0.72rem",
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-                color: PALETTE.inkPrimary,
-              }}
-            >
-              <span>Channel</span>
-              <span>Role in the model</span>
-              <span>Spend column</span>
-            </Box>
-            {channels.map((ch, idx) => {
-              const changed = savedRoles.has(ch.name) && savedRoles.get(ch.name) !== ch.role;
-              const options = ROLE_OPTIONS.some((o) => o.value === ch.role) ? ROLE_OPTIONS : [...ROLE_OPTIONS, roleOption(ch.role)];
-              const noteId = `role-note-${idx}`;
-              return (
-                <Box
-                  key={ch.name}
-                  sx={{
-                    display: "grid",
-                    gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: ROLE_COLS },
-                    columnGap: 2,
-                    rowGap: 0.75,
-                    alignItems: "start",
-                    px: 2,
-                    py: 1.5,
-                    borderTop: { xs: idx ? `1px solid ${PALETTE.borderSubtle}` : "none", sm: `1px solid ${PALETTE.borderSubtle}` },
-                    backgroundColor: changed ? alpha(PALETTE.brandPrimary, 0.04) : "transparent",
-                  }}
-                >
-                  <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.75, pt: { sm: 0.875 } }}>
-                    <Typography sx={{ fontWeight: 700, fontSize: "0.88rem", color: PALETTE.inkPrimary }}>{ch.name}</Typography>
-                    {changed && <Chip size="small" variant="outlined" color="primary" label="Changed" sx={{ height: 20, fontSize: "0.7rem" }} />}
-                  </Box>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Select
-                      size="small"
-                      fullWidth
-                      value={ch.role}
-                      disabled={locked}
-                      onChange={(e) => setRole(idx, e.target.value as ChannelRole)}
-                      inputProps={{ "aria-label": `Role of ${ch.name}`, "aria-describedby": ch.rationale ? noteId : undefined }}
-                      renderValue={(v) => {
-                        const o = roleOption(v as ChannelRole);
-                        return (
-                          <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
-                            <Dot colour={o.colour} hollow={o.hollow} />
-                            {o.label}
-                          </Box>
-                        );
-                      }}
-                      sx={{ fontSize: "0.84rem", backgroundColor: "#FFFFFF", maxWidth: 320 }}
-                    >
-                      {options.map((o) => (
-                        <MenuItem key={o.value} value={o.value} sx={{ gap: 1.25, fontSize: "0.86rem" }}>
-                          <Dot colour={o.colour} hollow={o.hollow} />
-                          {o.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                    {ch.rationale && (
-                      <Typography id={noteId} variant="caption" component="p" sx={{ mt: 0.625, color: PALETTE.inkSecondary }}>
-                        {ch.rationale}
-                      </Typography>
-                    )}
-                  </Box>
-                  <Typography sx={{ fontFamily: FONT_MONO, fontSize: "0.76rem", color: PALETTE.inkSecondary, pt: { sm: 1 }, overflowWrap: "anywhere" }}>
-                    <span className="visually-hidden">Spend column: </span>
-                    <Box component="span" aria-hidden="true" sx={{ display: { sm: "none" }, fontFamily: "inherit", color: PALETTE.inkMuted }}>
-                      spend ·{" "}
-                    </Box>
-                    {ch.cost_column || "—"}
-                  </Typography>
-                </Box>
-              );
-            })}
-          </Box>
-        </Group>
-      )}
+      <TabPanel tab="data" active={tab === "data"} onReveal={setTab}>
+        <DataTab {...tabProps} dataProfile={dataProfile} />
+      </TabPanel>
+      <TabPanel tab="channels" active={tab === "channels"} onReveal={setTab}>
+        <ChannelsTab {...tabProps} />
+      </TabPanel>
+      <TabPanel tab="model" active={tab === "model"} onReveal={setTab}>
+        <ModelTab {...tabProps} />
+      </TabPanel>
+      <TabPanel tab="priors" active={tab === "priors"} onReveal={setTab}>
+        <PriorsTab {...tabProps} />
+      </TabPanel>
+      <TabPanel tab="sampling" active={tab === "sampling"} onReveal={setTab}>
+        <SamplingTab {...tabProps} />
+      </TabPanel>
 
       {error && (
         <Box sx={{ px: GUTTER, pb: 2 }}>
@@ -308,7 +192,7 @@ export const RunSettingsForm: React.FC<{
         </Box>
       )}
 
-      {/* Sticky so the start button stays in reach while the channel list is reviewed */}
+      {/* Sticky so the start button stays in reach in a long tab */}
       <Box
         sx={{
           position: "sticky",
@@ -328,19 +212,23 @@ export const RunSettingsForm: React.FC<{
           boxShadow: "0 -6px 16px rgba(33, 41, 47, 0.05)",
         }}
       >
-        <Box sx={{ flexGrow: 1, minWidth: 200 }}>
+        <Box sx={{ flexGrow: 1, minWidth: 220 }}>
           <Typography variant="body2" sx={{ fontWeight: 650, color: PALETTE.inkPrimary }}>
-            {plan}
-            {roles ? ` · ${paid} paid media channel${paid === 1 ? "" : "s"}` : ""}
+            {plan} · {total === 0 ? "notebook defaults" : `${total} change${total === 1 ? "" : "s"} from the notebook defaults`}
           </Typography>
           <Typography variant="caption" sx={{ color: PALETTE.inkMuted }}>
             {locked
               ? "Settings are locked while the run is active."
               : mode === "rerun"
               ? "A re-run replaces this run's results; the uploaded workbook is kept."
-              : "Progress shows on this page once the run starts."}
+              : "The run status page shows the progress once the run starts."}
           </Typography>
         </Box>
+        {total > 0 && !locked && (
+          <Button startIcon={<RestartAltIcon />} onClick={() => setDraft((d) => resetDraft(d, defaults))}>
+            Reset to notebook defaults
+          </Button>
+        )}
         <Button
           type="submit"
           variant="contained"
@@ -353,4 +241,29 @@ export const RunSettingsForm: React.FC<{
       </Box>
     </Box>
   );
+};
+
+/**
+ * Every setting a run starts with, in tabs: data and validation, channel roles and media transforms, the Meridian
+ * specification, priors, and sampling. Defaults and limits come from the API; the parent keys this form by run id.
+ */
+export const RunSettingsForm: React.FC<FormProps> = (props) => {
+  const { data: defaults, error } = useSettingsDefaults();
+  if (error) {
+    return (
+      <Box sx={{ px: GUTTER, pb: 2.5 }}>
+        <Alert severity="error">The settings could not be loaded: {error instanceof Error ? error.message : "unknown error"}.</Alert>
+      </Box>
+    );
+  }
+  if (!defaults) {
+    return (
+      <Box sx={{ px: GUTTER, pb: 2.5 }} aria-busy="true">
+        <Skeleton width="40%" height={36} />
+        <Skeleton width="70%" />
+        <Skeleton width="55%" />
+      </Box>
+    );
+  }
+  return <SettingsForm {...props} defaults={defaults} />;
 };

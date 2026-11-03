@@ -14,34 +14,13 @@ from mmm_studio.core.meridian.spec import (
     MeridianSpecConfig,
     build_input_data,
     build_meridian_model,
-    build_meridian_table,
     load_meridian_model,
+    meridian_table,
     save_meridian_model,
 )
+from mmm_studio.core.model_settings import FAST_SAMPLING, FULL_SAMPLING, SMOKE_SAMPLING
 
-FULL_SAMPLING: dict[str, int] = {
-    "n_chains": 4,
-    "n_adapt": 1000,
-    "n_burnin": 500,
-    "n_keep": 1000,
-    "n_prior": 500,
-}
-
-FAST_SAMPLING: dict[str, int] = {
-    "n_chains": 2,
-    "n_adapt": 300,
-    "n_burnin": 200,
-    "n_keep": 200,
-    "n_prior": 200,
-}
-
-SMOKE_SAMPLING: dict[str, int] = {
-    "n_chains": 2,
-    "n_adapt": 50,
-    "n_burnin": 50,
-    "n_keep": 50,
-    "n_prior": 50,
-}
+__all__ = ["FAST_SAMPLING", "FULL_SAMPLING", "SMOKE_SAMPLING", "fit_meridian", "fit_meridian_isolated"]
 
 
 def fit_meridian(
@@ -76,12 +55,7 @@ def _child_fit_worker(
     """Entry point executed inside a spawned child process for clean TF/JAX isolation."""
     try:
         wide_df = pd.read_parquet(wide_parquet_path)
-        table = build_meridian_table(
-            wide_df,
-            catalog_shift=cfg.catalog_shift,
-            n_fourier=cfg.n_fourier,
-            paid_channels=cfg.paid_channels,
-        )
+        table = meridian_table(wide_df, cfg)
         input_data = build_input_data(table, cfg)
         mmm = build_meridian_model(input_data, cfg)
         fit_meridian(mmm, seed=seed, **sampling)
@@ -113,12 +87,7 @@ def fit_meridian_isolated(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not spawn_child:
-        table = build_meridian_table(
-            wide_df,
-            catalog_shift=cfg.catalog_shift,
-            n_fourier=cfg.n_fourier,
-            paid_channels=cfg.paid_channels,
-        )
+        table = meridian_table(wide_df, cfg)
         input_data = build_input_data(table, cfg)
         mmm = build_meridian_model(input_data, cfg)
         fit_meridian(mmm, seed=seed, **samp)

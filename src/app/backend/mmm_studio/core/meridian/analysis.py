@@ -19,7 +19,7 @@ from mmm_studio.charts.theme import (
     TEAL,
     channel_color,
 )
-from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig, build_meridian_table
+from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig, meridian_table
 from mmm_studio.core.metrics import regression_metrics
 from mmm_studio.report.narrative import fmt_eur
 from mmm_studio.report.sections import (
@@ -429,10 +429,43 @@ def build_meridian_model_section(
         for _, r in rhat_df.iterrows()
     ]
 
-    table = build_meridian_table(wide_df, catalog_shift=cfg.catalog_shift, n_fourier=cfg.n_fourier, paid_channels=cfg.paid_channels)
+    table = meridian_table(wide_df, cfg)
     _, media, controls = meridian_roles(table, cfg)
     media_names = [CHANNEL_DISPLAY_NAMES.get(c, c) for c in media]
     control_names = [c.replace("_spend", " cost") for c in controls]
+    # The specification text follows the run's settings (defaults: notebook 03)
+    if cfg.enable_aks:
+        baseline_line = "sales_t = μ_t                                     baseline, knots chosen automatically"
+    elif cfg.knots and cfg.knots > 1:
+        baseline_line = f"sales_t = μ_t                                     time-varying baseline ({cfg.knots} knots)"
+    else:
+        baseline_line = "sales_t = μ                                       intercept (national model)"
+    kinds = [k for k, on in (("calendar", bool(cfg.calendar)), ("seasonality", cfg.n_fourier > 0), ("trend", cfg.trend)) if on]
+    if cfg.as_controls:
+        kinds.append("commission cost")
+    control_kinds = ", ".join(kinds) or "none"
+    media_term = "Adstock_c( Hill_c(spend_c) )" if cfg.hill_before_adstock else "Hill_c( Adstock_c(spend_c) )"
+    media_notes = []
+    for slug in media:
+        name = CHANNEL_DISPLAY_NAMES.get(slug, slug)
+        bits = []
+        if slug in cfg.print_slugs and cfg.catalog_shift > 0:
+            bits.append(f"shifted {cfg.catalog_shift} days to its in-home date")
+        if cfg.adstock_decay.get(slug, "geometric") != "geometric":
+            bits.append(f"{cfg.adstock_decay[slug]} adstock")
+        if cfg.saturation.get(slug) == "none":
+            bits.append("no saturation")
+        if bits:
+            media_notes.append(f"{name}: {', '.join(bits)}")
+    no_hill = [CHANNEL_DISPLAY_NAMES.get(c, c) for c in media if cfg.saturation.get(c) == "none"]
+    saturation_text = "**Hill** models diminishing returns" + (f" (not for {', '.join(no_hill)})" if no_hill else "")
+    prior_text = {
+        "roi": "**ROI priors** regularise correlated channels"
+        + (" (custom or centred on attributed ROAS)" if cfg.roi_prior else ""),
+        "mroi": "**marginal-ROI priors** regularise correlated channels",
+        "contribution": "**contribution priors** regularise correlated channels",
+        "coefficient": "**coefficient priors** regularise correlated channels",
+    }.get(cfg.media_prior_type, "priors regularise correlated channels")
     bias_pct = 100.0 * m_test["bias"] / max(float(test_df["actual"].mean()), 1.0) if len(test_df) else 0.0
 
     blocks: list[Any] = [
@@ -468,19 +501,20 @@ def build_meridian_model_section(
             title="Approach: a Bayesian regression (Google Meridian)",
             body=(
                 "```\n"
-                "sales_t = μ                                       intercept (national model)\n"
-                "        + Σ_k γ_k · control_k,t                   calendar, seasonality, trend, commission cost\n"
-                "        + Σ_c β_c · Hill_c( Adstock_c(spend_c) )   paid media channels\n"
+                f"{baseline_line}\n"
+                f"        + Σ_k γ_k · control_k,t                   {control_kinds}\n"
+                f"        + Σ_c β_c · {media_term}   paid media channels\n"
                 "        + ε_t\n"
                 "```\n\n"
                 f"- **Media ({len(media_names)}):** {', '.join(media_names)}"
-                + (f" (catalog shifted {cfg.catalog_shift} days to its in-home date, binomial adstock)" if "catalog" in media else "")
+                + "".join(f" ({note})" for note in media_notes)
                 + ".\n"
-                f"- **Controls ({len(controls)}):** {', '.join(control_names)}.\n"
+                f"- **Controls ({len(controls)}):** {', '.join(control_names) or 'none'}.\n"
                 "- **Adstock** carries spend over to later days (up to "
-                f"{cfg.max_lag} days), **Hill** models diminishing returns, and **ROI priors** regularise correlated channels.\n"
+                f"{cfg.max_lag} days), {saturation_text}, and {prior_text}.\n"
                 f"- **Validation:** the {q4_label} hold-out ({len(test_df)} days) is hidden from the likelihood, so its predictions "
                 "are genuine forecasts from the budget and the calendar."
+                + (" Automatic knot selection reads the whole sales series, hold-out included, to place the baseline's knots." if cfg.enable_aks else "")
             ),
         ),
         ChartBlock(
@@ -522,7 +556,8 @@ def build_meridian_model_section(
             figure=fig_resid,
             caption=(
                 f"The hold-out error has the same sign on {max(neg_days, 7 - neg_days)} of 7 weekdays: a level offset, not a missed "
-                "weekday pattern. Around send-outs the 2-day in-home shift approximates the catalog ramp-up but not perfectly."
+                f"weekday pattern. Around send-outs the {cfg.catalog_shift}-day in-home shift approximates the catalog ramp-up but not "
+                "perfectly."
             ),
         ),
     ]
@@ -579,7 +614,7 @@ def build_meridian_model_section(
                 title="Model selection grid and prior sensitivity",
                 body=selection_note
                 or (
-                    "The selection grid (catalog shift k ∈ {1, 2, 3} × Affiliate as media or control) and the prior / SEA "
+                    "The selection grid (catalog shift k × Affiliate as media or control) and the prior / SEA "
                     "sensitivity fits run after the main results on the **full** profile. They appear here when they finish."
                 ),
             )

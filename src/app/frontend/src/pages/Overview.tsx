@@ -38,7 +38,7 @@ export const OverviewPage: React.FC<{ runId: string | null }> = ({ runId }) => {
         section={section}
         isLoading={isLoading}
         error={error as Error | null}
-        emptyMessage="Upload the case-study workbook on the Import & runs page to start. The overview fills in as the pipeline runs."
+        emptyMessage="Upload the case-study workbook on the Runs page to start. The overview fills in as the pipeline runs."
       />
 
       <Box component="nav" aria-label="Explore further" sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))", mt: 1 }}>

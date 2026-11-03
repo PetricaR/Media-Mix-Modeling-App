@@ -88,7 +88,8 @@ backend/mmm_studio/            (flat package, NOT backend/src/mmm_studio as PLAN
   db/           SQLAlchemy 2.0 models: runs, stages, forecasts, scenarios, optimisations. create_all only, no Alembic
   jobs/         app.py (Procrastinate app, defer_task, queue counts, stale sweep), tasks.py (5 tasks + LRU cache), worker.py, cloud_run.py (wake-up)
   pipeline/     context.py (RunContext: storage keys, save_section/dataframe/json, cancel + heartbeat), stages.py (s01–s16)
-  core/         workbook.py (profile_workbook), schema.py (DataProfile, DataRoleConfig, ChannelConfig), tables.py, calendar.py,
+  core/         workbook.py (profile_workbook), schema.py (DataProfile, DataRoleConfig, ChannelConfig), model_settings.py (run
+                settings: ModelSettings, sampling tables, limits, settings_changes), tables.py, calendar.py,
                 features.py (notebook controls: weekday/holiday/Christmas/Black Week, Fourier, trend, catalog in-home adstock,
                 hold-out windows), metrics.py, preparation.py (nb 02), ols.py (nb 04), eda/* (+ notebook_stats.py: 01b tables),
                 meridian/{spec,fit,selection,analysis,optimise,forecast}.py
@@ -100,8 +101,9 @@ backend/tests/  core/ unit + golden tests, test_pipeline_fast (CLI), test_api, t
 frontend/src/   main.tsx, App.tsx (routes; selected run lives in React state, not the URL), theme.ts (PALETTE, light mode only)
   api/client.ts (all HTTP via native fetch + X-Access-Code from sessionStorage), hooks.ts (TanStack Query + polling), types.ts
   components/Sections/SectionRenderer.tsx (lazy Plotly), Layout/AppShell.tsx (nav, run switcher, cancel), Charts/PlotlyChart.tsx
-                Import/* (the Import page's parts: UploadDropzone, RunList, RunHeader, RunOutcome, PipelineProgress,
-                DataProfileCard, RunSettingsForm, format.ts with status/profile/role labels and duration formatting)
+                Import/* (the run pages' parts: UploadDropzone, RunTable, RunHeader, RunOutcome, PipelineProgress,
+                DataProfileSummary, ConfirmDialog, RunPage, RunSettingsForm + settings/{Data,Channels,Model,Priors,Sampling}Tab,
+                settings/draft.ts (draft, change counts, reset), format.ts with status/profile/role labels and duration formatting)
                 Forecast/* (the planner: LeverPanel, ChannelEffects, figures.ts builds its Plotly figures client-side,
                 format.ts)
   pages/        one per nav item; most pages are just useSection(runId, "<id>") + SectionRenderer
@@ -113,7 +115,8 @@ deploy/         deploy.sh (all | update | seed; GCP_PROJECT_ID=formare-dev, euro
 
 1. `POST /runs` takes the upload, runs `profile_workbook`, and creates a `draft` Run with its inferred
    `DataRoleConfig`.
-2. `PATCH /runs/{id}` confirms the roles, profile and seed.
+2. `PATCH /runs/{id}` confirms the roles, run settings (`role_config.model_settings`, validated: out of range is a 422),
+   profile (`full|quick|smoke|custom`) and seed.
 3. `POST /runs/{id}/start` defers **both** jobs at once:
    - `run_analysis_job` on the `analysis` queue, with lock `analysis:{id}`;
    - `run_meridian_job` on the `meridian` queue, with lock `meridian_singleton`. The start returns 429 when
@@ -202,6 +205,20 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
 - Scenarios run on the fitted forecast model (`model_scenario_from_multipliers`); the marginal-ROI approximation is
   only a fallback when that model is missing and uses the run's own posterior mROIs.
 
+## Run settings
+
+- Everything a user can change lives in the run's `DataRoleConfig`: `holdout_days`, `drop_trailing_isolated_days`, per
+  channel `role` / `adstock_shape` / `saturation` / `in_home_shift_days` (`inferred_role` keeps the inference), and
+  `model_settings` (`core/model_settings.py`: calendar controls, Fourier pairs, trend, max lag, baseline knots / automatic
+  knots, Hill before adstock, media prior type, ROI priors (Meridian default, attributed ROAS, custom per channel),
+  custom sampling, forward hold-out, selection grid and shifts). Every default is the notebooks' value, so a run on the
+  defaults reproduces notebooks 01–05; `settings_changes()` lists what differs (API `settings_changes`, the Runs table,
+  and the "Settings used" block of `meridian_model`).
+- `MeridianSpecConfig.from_role_config(rc, wide=…)` turns them into the spec; build every Meridian table with
+  `meridian_table(wide, cfg)`. Calendar/seasonality toggles apply to the OLS benchmark too, not to the preparation ladder.
+- Not exposed on purpose: `media_effects_dist` and the geo options (Meridian fixes them for a national model), reach &
+  frequency / organic media (no such data). `GET /runs/settings/defaults` serves defaults and limits to the form.
+
 ## Resolved issues (verified on 2026-11-02)
 
 1. `backend/Dockerfile` uses `python:3.12-slim` and installs `--extra worker` on the `worker` stage while keeping the `api` stage slim.
@@ -256,7 +273,7 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     polishes at write time; `GET /artifacts/reports/*.html` polishes older reports on the fly (a no-op once the
     `mmm-studio-report-polish` meta marker is present). New fits set `InputData.currency_code = "EUR"`, so Meridian
     writes € itself. The report iframe allows popups and downloads, so doc links and the chart export menu work.
-20. The Import page is a master-detail layout: the upload zone and run list on the left; on the right, the selected run's
+20. (Superseded by 22.) The Import page was a master-detail layout: the upload zone and run list on the left; on the right, the selected run's
     header (lifecycle stepper, actions menu), its outcome (results-ready with hold-out MAE / mean and max R-hat from
     `run.summary`, failed or cancelled with a re-run action), pipeline lanes per queue with live stage durations from
     `started_at`/`finished_at`, the workbook profile, and the settings form (Meridian switch, sampling profiles as radio
@@ -277,3 +294,12 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     `plan_daily` from their plan file on read. The interactive worker caches the plan's draws, so a warm scenario
     takes about 1.3 s. Saved scenarios are per viewer (`localStorage`); the chart's overlapping line colours passed the
     dataviz palette validator, which is why only two saved scenarios are drawn.
+22. (2026-11-03) The crowded Import page is split into three sidebar pages that follow the stepper: **Runs** (`/runs`:
+    upload + a full-width runs table with Open / Make default / Delete per row and a "Custom · n" settings tag),
+    **Run setup** (`/setup`: the settings form in tabs Data · Channels · Model · Priors · Sampling, each with a change
+    count, "Reset to notebook defaults", a sticky Start / Re-run bar; inactive tab panels are `hidden="until-found"` so
+    find in page reaches them, and an invalid field in a hidden tab switches to it before the browser reports it) and
+    **Run status** (`/status`: header with linked stepper, outcome, pipeline lanes open by default, cancel). `/import`
+    redirects to `/runs`. The sidebar shows "Review" next to Run setup for a draft and the stage count next to Run status
+    while a run is active. The outcome's hold-out labels come from the summary (`holdout_label`, `forward_label`; older
+    runs get them from `meta/meridian_metrics.json` on `GET /runs/{id}`).

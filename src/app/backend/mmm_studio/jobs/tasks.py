@@ -369,7 +369,9 @@ def execute_meridian_job(
             "n_sections": len(sections),
             "sections": [s["id"] for s in sections],
             "holdout_q4_2024": meridian_metrics.get("holdout_q4_2024"),
+            "holdout_label": meridian_metrics.get("holdout_label"),
             "holdout_q3_2024": meridian_metrics.get("holdout_q3_2024"),
+            "forward_label": meridian_metrics.get("forward_label"),
             "max_rhat": meridian_metrics.get("max_rhat"),
         }
         ctx.save_json("meta/summary.json", summary)
@@ -437,7 +439,7 @@ def _load_forecast_context(storage: Any, run_id: str, forecast_id: str) -> dict[
     cfg_key = f"runs/{run_id}/meta/config.json"
     config_obj = extract_role_config(storage.read_json(cfg_key)) if storage.exists(cfg_key) else default_role_config()
     history = _read_parquet(storage, panel_key) if panel_key else None
-    spec_cfg = MeridianSpecConfig.from_role_config(config_obj, index=history.index if history is not None else None)
+    spec_cfg = MeridianSpecConfig.from_role_config(config_obj, wide=history)
     out: dict[str, Any] = {
         "base_daily": _read_parquet(storage, daily_key),
         "base_plan": _read_parquet(storage, plan_key),
@@ -495,11 +497,11 @@ def execute_forecast_job(
         if panel_key is None:
             raise RuntimeError("The run's modelling panel is missing; re-run the analysis first.")
         history = _read_parquet(storage, panel_key)
-        spec_cfg = MeridianSpecConfig.from_role_config(config_obj, index=history.index)
+        spec_cfg = MeridianSpecConfig.from_role_config(config_obj, wide=history)
         plan_df = pd.read_csv(io.BytesIO(storage.read_bytes(plan_path)))
         plan_clean = validate_plan(plan_df, last_history_date=pd.Timestamp(history.index.max()), paid_channels=spec_cfg.paid_slugs)
 
-        sampling = _sampling_for(run_profile, "main")
+        sampling = _sampling_for(run_profile, "main", config_obj.model_settings)
         fc_daily, fc_mmm, _ = forecast_budget_plan(history, plan_clean, cfg=spec_cfg, sampling=sampling, seed=seed)
         if hb.cancelled:
             raise InterruptedError("Forecast cancelled.")

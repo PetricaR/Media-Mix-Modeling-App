@@ -7,6 +7,10 @@ export type ChannelRole =
   | "digital_paid"
   | "control";
 
+export type Profile = "full" | "quick" | "smoke" | "custom";
+export type AdstockShape = "geometric" | "binomial";
+export type MediaPriorType = "roi" | "mroi" | "contribution" | "coefficient";
+
 export interface ChannelConfig {
   name: string;
   slug?: string;
@@ -16,6 +20,54 @@ export interface ChannelConfig {
   exposure_column?: string | null;
   exposure_type?: string | null;
   rationale?: string;
+  total_cost?: number;
+  cost_days?: number;
+  in_home_shift_days?: number | null;
+  /** null: the role's default shape (binomial for print events, geometric otherwise) */
+  adstock_shape?: AdstockShape | null;
+  saturation?: "hill" | "none";
+  /** The role the app inferred from the workbook */
+  inferred_role?: ChannelRole | null;
+}
+
+export interface CalendarControls {
+  weekdays: boolean;
+  holidays: boolean;
+  christmas: boolean;
+  black_week: boolean;
+}
+
+export interface SamplingSettings {
+  n_chains: number;
+  n_adapt: number;
+  n_burnin: number;
+  n_keep: number;
+  n_prior: number;
+}
+
+export interface RoiPrior {
+  median: number;
+  sigma: number;
+}
+
+/** Run settings beyond the channel roles; every default is the notebooks' value (served by the API). */
+export interface ModelSettings {
+  calendar: CalendarControls;
+  n_fourier: number;
+  trend: boolean;
+  max_lag: number;
+  baseline: "constant" | "knots" | "auto";
+  n_knots: number;
+  hill_before_adstock: boolean;
+  media_prior_type: MediaPriorType;
+  roi_prior: "meridian" | "attributed_roas" | "custom";
+  roas_prior_sigma: number;
+  custom_roi_priors: Record<string, RoiPrior>;
+  sampling: SamplingSettings;
+  forward_holdout: boolean;
+  /** null: the profile decides (the full profile runs the grid) */
+  model_selection: boolean | null;
+  selection_shifts: number[];
 }
 
 export interface DataRoleConfig {
@@ -26,6 +78,32 @@ export interface DataRoleConfig {
   allow_single_year: boolean;
   holdout_days?: number;
   drop_trailing_isolated_days?: boolean;
+  model_settings?: ModelSettings;
+}
+
+export interface Bounds {
+  min?: number;
+  max?: number;
+  min_exclusive?: number;
+  max_exclusive?: number;
+}
+
+export interface SettingsDefaults {
+  model_settings: ModelSettings;
+  holdout_days: number;
+  drop_trailing_isolated_days: boolean;
+  seed: number;
+  in_home_shift_days: number;
+  profiles: Record<"full" | "quick" | "smoke", SamplingSettings>;
+  limits: Record<string, Bounds>;
+  meridian_roi_prior: RoiPrior;
+  selection_shift_choices: number[];
+}
+
+export interface SettingChange {
+  setting: string;
+  value: string;
+  default: string;
 }
 
 export interface DataProfile {
@@ -42,6 +120,7 @@ export interface DataProfile {
   end_date?: string;
   calendar_days?: number;
   modelling_days?: number;
+  modelling_end_date?: string;
   trailing_isolated_dates?: string[];
   years_present: number[];
   missing_dates_count: number;
@@ -68,7 +147,7 @@ export interface RunSummaryItem {
   name: string;
   filename: string;
   sha256: string;
-  profile: "quick" | "full" | "smoke";
+  profile: Profile;
   status: "draft" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
   is_active: boolean;
   created_at?: string | null;
@@ -76,15 +155,17 @@ export interface RunSummaryItem {
   heartbeat_at?: string | null;
   error?: string | null;
   summary?: Record<string, unknown> | null;
-}
-
-export interface RunDetail extends RunSummaryItem {
-  schema?: DataProfile | null;
   config?: {
     role_config?: DataRoleConfig;
     skip_meridian?: boolean;
     seed?: number;
   } | null;
+  /** Settings that differ from the notebook defaults */
+  settings_changes?: SettingChange[];
+}
+
+export interface RunDetail extends RunSummaryItem {
+  schema?: DataProfile | null;
   queue_position?:
     | number
     | null

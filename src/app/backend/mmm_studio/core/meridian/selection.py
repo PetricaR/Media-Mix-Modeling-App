@@ -7,11 +7,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from mmm_studio.core.meridian.fit import fit_meridian_isolated
-from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig
+from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig, attributed_roas_priors
 from mmm_studio.core.metrics import regression_metrics
 
 
@@ -117,16 +116,12 @@ def run_model_selection(
             )
 
     # Sensitivity: informative priors centred on attributed ROAS, and SEA as a control.
-    roas: dict[str, float] = {}
-    for slug in base_cfg.paid_slugs:
-        cost, sales = f"cost_{slug}", f"sales_{slug}"
-        if cost in wide_df and sales in wide_df and float(wide_df[cost].sum()) > 0:
-            roas[slug] = float(wide_df[sales].sum()) / float(wide_df[cost].sum())
-    variants: dict[str, MeridianSpecConfig] = {"default prior (final)": base_cfg}
-    if roas:
-        variants["attribution prior σ = 0.5"] = replace(
-            base_cfg, roi_prior={c: (float(np.log(r)), 0.5) for c, r in roas.items() if r > 0}
-        )
+    final_name = "run's own prior (final)" if base_cfg.roi_prior else "default prior (final)"
+    variants: dict[str, MeridianSpecConfig] = {final_name: base_cfg}
+    roas_priors = attributed_roas_priors(wide_df, base_cfg.paid_slugs, 0.5)
+    # An ROI prior only applies when the media priors are ROI priors
+    if roas_priors and base_cfg.media_prior_type == "roi":
+        variants["attribution prior σ = 0.5"] = replace(base_cfg, roi_prior=roas_priors)
     if "sea" in base_cfg.paid_slugs:
         variants["SEA as control"] = replace(base_cfg, as_controls=tuple(dict.fromkeys([*commission, "sea"])))
     sensitivity: list[dict[str, Any]] = []

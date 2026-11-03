@@ -8,6 +8,8 @@ from typing import Any, Literal
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
+from mmm_studio.core.model_settings import DEFAULT_HOLDOUT_DAYS, DEFAULT_IN_HOME_SHIFT, ModelSettings
+
 ChannelRole = Literal["paid", "print_event", "commission", "unpaid", "ignored", "digital_paid", "control"]
 
 
@@ -46,7 +48,12 @@ class ChannelConfig(BaseModel):
     exposure_type: str | None = None
     rationale: str | None = None
     adstock_decay: float | None = None
-    in_home_shift_days: int | None = None
+    in_home_shift_days: int | None = Field(None, ge=0, le=14)
+    # Meridian adstock shape; None means the role's default (binomial for print events, geometric otherwise)
+    adstock_shape: Literal["geometric", "binomial"] | None = None
+    saturation: Literal["hill", "none"] = "hill"
+    # The role the app inferred from the workbook, so a user's change can be told apart from the inference
+    inferred_role: ChannelRole | None = None
 
     @model_validator(mode="after")
     def _populate_channel_defaults(self) -> ChannelConfig:
@@ -56,8 +63,8 @@ class ChannelConfig(BaseModel):
         # does). Older configs stored it as "paid"; show the role the model actually uses instead of "gets an ROI".
         if self.slug == "affiliate" and self.role == "paid":
             self.role = "commission"
-        if self.role == "ignored":
-            self.enabled = False
+        # The role is the only switch the UI offers, so a channel moved out of "ignored" is modelled again
+        self.enabled = self.role != "ignored"
         if self.cost_column is None and (
             self.role in ("paid", "print_event", "commission", "digital_paid", "control") or self.total_cost > 0
         ):
@@ -90,7 +97,9 @@ class ChannelConfig(BaseModel):
                 else (0.50 if self.role in ("paid", "digital_paid", "commission", "control") else 0.0)
             )
         if self.in_home_shift_days is None:
-            self.in_home_shift_days = 2 if self.role == "print_event" else 0
+            self.in_home_shift_days = DEFAULT_IN_HOME_SHIFT if self.role == "print_event" else 0
+        if self.inferred_role is None:
+            self.inferred_role = self.role
         return self
 
 
@@ -103,11 +112,12 @@ class DataRoleConfig(BaseModel):
     # Notebooks 01–05 keep the isolated trailing day (2025-01-01) in every model; it is only left out of yearly
     # and monthly comparisons. The default hold-out (93 days) is Q4 2024 through 2025-01-01, as in notebook 03.
     drop_trailing_isolated_days: bool = False
-    holdout_days: int = 93
+    holdout_days: int = Field(DEFAULT_HOLDOUT_DAYS, ge=14, le=365)
     structural_break_year: int = 2023
     target_column: str = "total_sales"
     date_column: str = "date"
     allow_single_year: bool = False
+    model_settings: ModelSettings = Field(default_factory=ModelSettings)
 
     @property
     def paid_channels(self) -> list[str]:

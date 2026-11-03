@@ -116,9 +116,8 @@ export const PipelineProgress: React.FC<{ run: RunDetail; onCancel: () => void }
   const elapsed = pipelineElapsedMs(stages, now, active);
   const parallel = LANES.every((lane) => stages.some((s) => s.queue === lane.queue && s.status !== "skipped"));
 
-  // Details start open while there is something to watch or fix, and closed once a run has finished cleanly
-  const [open, setOpen] = useState(active || run.status === "failed");
-  useEffect(() => setOpen(isRunActive(run) || run.status === "failed"), [run.id, run.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The stage list is the Run status page's main content, so it starts open for every run
+  const [open, setOpen] = useState(true);
 
   const queuePos = typeof run.queue_position === "number" ? run.queue_position : run.queue_position?.meridian ?? run.queue_position?.analysis ?? null;
   const summary = [

@@ -28,7 +28,7 @@ export const runStatusColor = (status?: string): "default" | "success" | "warnin
   }
 };
 
-export const PROFILE_ORDER: Profile[] = ["full", "quick", "smoke"];
+export const PROFILE_ORDER: Profile[] = ["full", "quick", "smoke", "custom"];
 
 export const PROFILES: Record<Profile, { label: string; duration: string; detail: string; badge?: string }> = {
   full: {
@@ -47,6 +47,11 @@ export const PROFILES: Record<Profile, { label: string; duration: string; detail
     label: "Smoke test",
     duration: "about 4 min",
     detail: "2 chains × 50 draws to check the pipeline end to end. Results are not converged.",
+  },
+  custom: {
+    label: "Custom",
+    duration: "depends on the draws",
+    detail: "Your own chain and draw counts for the final, forecast and back-test fits; the extra fits never use more than Quick's.",
   },
 };
 

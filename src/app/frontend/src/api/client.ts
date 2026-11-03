@@ -3,12 +3,14 @@ import type {
   DataRoleConfig,
   ForecastItem,
   OptimisationDetail,
+  Profile,
   RunDetail,
   RunHistory,
   RunSummaryItem,
   ScenarioDetail,
   Section,
   SectionIndexItem,
+  SettingsDefaults,
 } from "./types";
 
 const ACCESS_CODE_STORAGE_KEY = "mmm_studio_access_code";
@@ -83,6 +85,8 @@ export const api = {
 
   getRun: (runId: string) => apiFetch<RunDetail>(`/api/v1/runs/${runId}`),
 
+  getSettingsDefaults: () => apiFetch<SettingsDefaults>("/api/v1/runs/settings/defaults"),
+
   uploadRun: (file: File, name?: string, profile: string = "quick") => {
     const form = new FormData();
     form.append("file", file);
@@ -95,9 +99,10 @@ export const api = {
     runId: string,
     payload: {
       name?: string;
-      profile?: "quick" | "full" | "smoke";
+      profile?: Profile;
       role_config?: DataRoleConfig;
       skip_meridian?: boolean;
+      seed?: number;
     }
   ) =>
     apiFetch<RunDetail>(`/api/v1/runs/${runId}`, {
@@ -107,7 +112,7 @@ export const api = {
 
   startRun: (
     runId: string,
-    payload: { profile?: "quick" | "full" | "smoke"; skip_meridian?: boolean; seed?: number }
+    payload: { profile?: Profile; skip_meridian?: boolean; seed?: number }
   ) =>
     apiFetch<{ id: string; status: string }>(`/api/v1/runs/${runId}/start`, {
       method: "POST",

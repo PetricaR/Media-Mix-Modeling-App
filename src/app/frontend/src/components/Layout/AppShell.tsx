@@ -33,6 +33,9 @@ import {
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
+import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
+import SettingsSuggestOutlinedIcon from "@mui/icons-material/SettingsSuggestOutlined";
+import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
@@ -65,7 +68,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     header: "Run",
     items: [
-      { label: "Import & runs", path: "/import", icon: <UploadFileIcon fontSize="small" /> },
+      { label: "Runs", path: "/runs", icon: <FolderOpenOutlinedIcon fontSize="small" /> },
+      { label: "Run setup", path: "/setup", icon: <SettingsSuggestOutlinedIcon fontSize="small" /> },
+      { label: "Run status", path: "/status", icon: <AccountTreeOutlinedIcon fontSize="small" /> },
       { label: "Executive overview", path: "/overview", icon: <DashboardOutlinedIcon fontSize="small" /> },
     ],
   },
@@ -220,6 +225,19 @@ export const AppShell: React.FC<{
     ? `Queued · #${queuePos}`
     : STATUS_LABEL[currentRun.status] ?? currentRun.status;
 
+  // Short status hints next to the run pages, so the sidebar shows where the selected run stands
+  const navHint = (path: string): { text: string; label: string; tone?: "bad" } | null => {
+    if (!currentRun) return null;
+    if (path === "/setup" && currentRun.status === "draft") return { text: "Review", label: ": the selected run is a draft to review" };
+    if (path === "/status" && active) {
+      return currentRun.status === "queued"
+        ? { text: "Queued", label: ": the selected run is queued" }
+        : { text: `${completedStages}/${counted.length}`, label: `: ${completedStages} of ${counted.length} stages finished` };
+    }
+    if (path === "/status" && currentRun.status === "failed") return { text: "Failed", label: ": the selected run failed", tone: "bad" };
+    return null;
+  };
+
   const nav = (
     <Box component="nav" aria-label="Main" sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <Box sx={{ px: 2.5, py: 2, borderBottom: `1px solid ${PALETTE.borderSubtle}`, minHeight: HEADER_HEIGHT, display: "flex", alignItems: "center" }}>
@@ -252,6 +270,7 @@ export const AppShell: React.FC<{
             >
               {group.items.map((item) => {
                 const isCurrent = location.pathname.startsWith(item.path);
+                const hint = navHint(item.path);
                 return (
                   <ListItem key={item.path} disablePadding>
                     <ListItemButton
@@ -274,6 +293,26 @@ export const AppShell: React.FC<{
                     >
                       <ListItemIcon sx={{ minWidth: 34, color: PALETTE.inkSecondary }}>{item.icon}</ListItemIcon>
                       <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: "0.88rem", fontWeight: isCurrent ? 700 : 550 }} />
+                      {hint && (
+                        <Box
+                          component="span"
+                          sx={{
+                            ml: 1,
+                            px: 0.875,
+                            borderRadius: 999,
+                            fontSize: "0.7rem",
+                            fontWeight: 800,
+                            lineHeight: "20px",
+                            fontVariantNumeric: "tabular-nums",
+                            whiteSpace: "nowrap",
+                            color: hint.tone === "bad" ? PALETTE.semanticBad : PALETTE.brandGoldDark,
+                            backgroundColor: hint.tone === "bad" ? "#FBEAEA" : PALETTE.bgGoldTint,
+                          }}
+                        >
+                          <span aria-hidden="true">{hint.text}</span>
+                          <span className="visually-hidden">{hint.label}</span>
+                        </Box>
+                      )}
                     </ListItemButton>
                   </ListItem>
                 );
@@ -392,7 +431,7 @@ export const AppShell: React.FC<{
             color="secondary"
             size="small"
             startIcon={<UploadFileIcon fontSize="small" />}
-            onClick={() => navigate("/import")}
+            onClick={() => navigate("/runs")}
             sx={{ display: { xs: "none", sm: "inline-flex" } }}
           >
             Upload workbook
@@ -455,7 +494,7 @@ export const AppShell: React.FC<{
         <DialogContent>
           <DialogContentText>
             The workers stop “{currentRun?.name}” after the current step. Results already computed stay available; the
-            run can be started again from the Import page.
+            run can be started again from the run setup page.
           </DialogContentText>
           {cancelError && (
             <Typography role="alert" color="error" variant="body2" sx={{ mt: 1.5 }}>

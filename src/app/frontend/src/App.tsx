@@ -1,7 +1,9 @@
 import React, { useCallback, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/Layout/AppShell";
-import { ImportPage } from "./pages/Import";
+import { RunsPage } from "./pages/Runs";
+import { RunSetupPage } from "./pages/RunSetup";
+import { RunStatusPage } from "./pages/RunStatus";
 import { OverviewPage } from "./pages/Overview";
 import { DataQualityPage } from "./pages/DataQuality";
 import { ExplorePage } from "./pages/Explore";
@@ -41,12 +43,11 @@ export const App: React.FC = () => {
     <AppShell selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId}>
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
-        <Route
-          path="/import"
-          element={
-            <ImportPage selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId} />
-          }
-        />
+        <Route path="/runs" element={<RunsPage selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId} />} />
+        <Route path="/setup" element={<RunSetupPage runId={selectedRunId} />} />
+        <Route path="/status" element={<RunStatusPage runId={selectedRunId} />} />
+        {/* The former combined page */}
+        <Route path="/import" element={<Navigate to="/runs" replace />} />
         <Route path="/overview" element={<OverviewPage runId={selectedRunId} />} />
         <Route path="/data-quality" element={<DataQualityPage runId={selectedRunId} />} />
         <Route path="/explore" element={<ExplorePage runId={selectedRunId} />} />

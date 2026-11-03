@@ -25,7 +25,7 @@ export const ModelPage: React.FC<{ runId: string | null }> = ({ runId }) => {
       )}
       {fit?.status === "skipped" && !section && (
         <Alert severity="warning" sx={{ mb: 3 }}>
-          This run skipped Meridian. Re-run it from the Import & runs page with Meridian enabled to fit the Bayesian model.
+          This run skipped Meridian. Re-run it from the Run setup page with Meridian enabled to fit the Bayesian model.
         </Alert>
       )}
       {fit?.status === "failed" && (

@@ -17,8 +17,8 @@ from mmm_studio.core.meridian.spec import (
     MeridianSpecConfig,
     build_input_data,
     build_meridian_model,
-    build_meridian_table,
     meridian_roles,
+    meridian_table,
 )
 from mmm_studio.core.metrics import regression_metrics
 from mmm_studio.core.schema import slugify_channel
@@ -210,12 +210,7 @@ def forecast_budget_plan(
     end = plan.index[-1].strftime("%Y-%m-%d")
     fc_cfg = replace(cfg or MeridianSpecConfig(), holdout=(start, end))
     ext = extend_history(history, plan)
-    table = build_meridian_table(
-        ext,
-        catalog_shift=fc_cfg.catalog_shift,
-        n_fourier=fc_cfg.n_fourier,
-        paid_channels=fc_cfg.paid_channels,
-    )
+    table = meridian_table(ext, fc_cfg)
     mmm = fit_meridian(
         build_meridian_model(build_input_data(table, fc_cfg), fc_cfg),
         seed=seed,
@@ -238,12 +233,7 @@ def evaluate_forecast_scenario(
     """Evaluate an alternative budget plan over the same forecast window without refitting."""
     from meridian.analysis.tensors import DataTensors
 
-    alt_table = build_meridian_table(
-        extend_history(history, alt_plan),
-        catalog_shift=cfg.catalog_shift,
-        n_fourier=cfg.n_fourier,
-        paid_channels=cfg.paid_channels,
-    )
+    alt_table = meridian_table(extend_history(history, alt_plan), cfg)
     spend_cols, _, _ = meridian_roles(alt_table, cfg)
     media = alt_table[spend_cols].to_numpy(dtype=float)[np.newaxis, :, :]
     expected, predictive = _prediction_draws(mmm, new_data=DataTensors(media=media), seed=seed)
@@ -268,12 +258,7 @@ def channel_effect_draws(
     from meridian.analysis import analyzer
     from meridian.analysis.tensors import DataTensors
 
-    table = build_meridian_table(
-        extend_history(history, plan),
-        catalog_shift=cfg.catalog_shift,
-        n_fourier=cfg.n_fourier,
-        paid_channels=cfg.paid_channels,
-    )
+    table = meridian_table(extend_history(history, plan), cfg)
     spend_cols, media_channels, _ = meridian_roles(table, cfg)
     media = table[spend_cols].to_numpy(dtype=float)[np.newaxis, :, :]
     inc = analyzer.Analyzer(mmm).incremental_outcome(

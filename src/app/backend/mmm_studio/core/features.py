@@ -7,6 +7,8 @@ trend in years, and the catalog in-home shift).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import numpy as np
 import pandas as pd
 
@@ -22,33 +24,42 @@ def black_friday(year: int) -> pd.Timestamp:
     return first_thu + pd.Timedelta(days=22)
 
 
-def calendar_controls(index: pd.DatetimeIndex) -> pd.DataFrame:
-    """Weekday dummies (Monday = reference), German holidays, Christmas window and Black Week."""
-    import holidays
-
+def calendar_controls(
+    index: pd.DatetimeIndex,
+    groups: Iterable[str] = ("weekdays", "holidays", "christmas", "black_week"),
+) -> pd.DataFrame:
+    """Weekday dummies (Monday = reference), German holidays, Christmas window and Black Week; `groups` picks which."""
+    groups = set(groups)
     out = pd.DataFrame(index=index)
-    for d, name in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
-        if d:
-            out[f"dow_{name}"] = (index.dayofweek == d).astype(float)
-    de_holidays = holidays.Germany(years=sorted(set(index.year)))
-    out["holiday"] = index.map(lambda d: d in de_holidays).astype(float)
-    out["christmas"] = ((index.month == 12) & (index.day >= 20)).astype(float)
-    bw = np.zeros(len(index), dtype=bool)
-    for year in sorted(set(index.year)):
-        bf = black_friday(year)
-        bw |= (index >= bf) & (index <= bf + pd.Timedelta(days=3))
-    out["black_week"] = bw.astype(float)
+    if "weekdays" in groups:
+        for d, name in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
+            if d:
+                out[f"dow_{name}"] = (index.dayofweek == d).astype(float)
+    if "holidays" in groups:
+        import holidays
+
+        de_holidays = holidays.Germany(years=sorted(set(index.year)))
+        out["holiday"] = index.map(lambda d: d in de_holidays).astype(float)
+    if "christmas" in groups:
+        out["christmas"] = ((index.month == 12) & (index.day >= 20)).astype(float)
+    if "black_week" in groups:
+        bw = np.zeros(len(index), dtype=bool)
+        for year in sorted(set(index.year)):
+            bf = black_friday(year)
+            bw |= (index >= bf) & (index <= bf + pd.Timedelta(days=3))
+        out["black_week"] = bw.astype(float)
     return out
 
 
-def seasonality_controls(index: pd.DatetimeIndex, n_fourier: int = 2) -> pd.DataFrame:
-    """Yearly Fourier terms plus a linear trend in years since the first day."""
+def seasonality_controls(index: pd.DatetimeIndex, n_fourier: int = 2, trend: bool = True) -> pd.DataFrame:
+    """Yearly Fourier terms plus (optionally) a linear trend in years since the first day."""
     out = pd.DataFrame(index=index)
     t = index.dayofyear / 365.25
     for k in range(1, n_fourier + 1):
         out[f"sin_{k}"] = np.sin(2 * np.pi * k * t)
         out[f"cos_{k}"] = np.cos(2 * np.pi * k * t)
-    out["trend"] = (index - index[0]).days / 365.25
+    if trend:
+        out["trend"] = (index - index[0]).days / 365.25
     return out
 
 

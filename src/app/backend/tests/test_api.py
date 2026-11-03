@@ -344,3 +344,43 @@ def test_access_code_guard_rate_limiter_and_meridian_queue_cap(api_env) -> None:
         assert r_chk.status_code == 200
     r_limited = client.post("/api/v1/auth/check", headers=headers)
     assert r_limited.status_code == 429
+
+
+def test_run_settings_are_validated_and_reported(api_env) -> None:
+    client, _ = api_env
+
+    r_defaults = client.get("/api/v1/runs/settings/defaults")
+    assert r_defaults.status_code == 200
+    defaults = r_defaults.json()
+    assert defaults["model_settings"]["max_lag"] == 21
+    assert defaults["limits"]["sampling.n_chains"] == {"min": 1, "max": 4}
+
+    with FIXTURE_XLSX.open("rb") as fh:
+        r_create = client.post(
+            "/api/v1/runs",
+            files={"file": ("case.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            data={"name": "Settings", "profile": "full"},
+        )
+    run = r_create.json()
+    assert run["settings_changes"] == []
+    role_config = run["config"]["role_config"]
+    assert {c["inferred_role"] for c in role_config["channels"]} >= {"paid", "print_event", "commission", "unpaid"}
+
+    # Out-of-range values are rejected before anything is stored
+    too_many = {**role_config, "model_settings": {**role_config["model_settings"], "sampling": {"n_chains": 9}}}
+    assert client.patch(f"/api/v1/runs/{run['id']}", json={"role_config": too_many, "profile": "custom"}).status_code == 422
+    assert client.patch(f"/api/v1/runs/{run['id']}", json={"seed": -1}).status_code == 422
+    assert client.get(f"/api/v1/runs/{run['id']}").json()["profile"] == "full"
+
+    changed = {
+        **role_config,
+        "holdout_days": 60,
+        "model_settings": {**role_config["model_settings"], "max_lag": 14, "sampling": {"n_chains": 2, "n_keep": 300}},
+    }
+    r_patch = client.patch(f"/api/v1/runs/{run['id']}", json={"role_config": changed, "profile": "custom", "seed": 3})
+    assert r_patch.status_code == 200, r_patch.text
+    body = r_patch.json()
+    assert body["profile"] == "custom"
+    assert body["config"]["role_config"]["model_settings"]["max_lag"] == 14
+    settings = {r["setting"] for r in body["settings_changes"]}
+    assert {"Hold-out length", "Max lag", "Random seed", "Sampling draws"} <= settings

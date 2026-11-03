@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from mmm_studio import __version__
 from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db, require_access_code
+from mmm_studio.core.model_settings import MAX_SEED, RUN_PROFILES, settings_changes, settings_defaults
 from mmm_studio.core.schema import DataRoleConfig, extract_role_config
 from mmm_studio.core.workbook import WorkbookValidationError, profile_workbook
 from mmm_studio.db.models import ForecastRun, Run, utcnow
@@ -33,16 +34,17 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 class RunPatchRequest(BaseModel):
     name: str | None = None
     profile: str | None = None
-    role_config: dict[str, Any] | None = None
+    # Validated as a DataRoleConfig (roles + model settings); an invalid value is a 422
+    role_config: DataRoleConfig | None = None
     skip_meridian: bool | None = None
-    seed: int | None = None
+    seed: int | None = Field(default=None, ge=0, le=MAX_SEED)
 
 
 class RunStartRequest(BaseModel):
     profile: str | None = None
     skip_meridian: bool = False
-    role_config: dict[str, Any] | None = None
-    seed: int = Field(default=0)
+    role_config: DataRoleConfig | None = None
+    seed: int = Field(default=0, ge=0, le=MAX_SEED)
 
 
 def _capture_versions(settings: Settings) -> dict[str, str]:
@@ -64,6 +66,23 @@ def _normalised_config(config: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(config.get("role_config"), dict):
         config["role_config"] = extract_role_config(config).model_dump(mode="json")
     return config
+
+
+def _settings_changes(run: Run) -> list[dict[str, str]]:
+    """The run's settings that differ from the notebook defaults (empty for a run on the defaults)."""
+    config = run.config or {}
+    if not isinstance(config.get("role_config"), dict):
+        return []
+    return settings_changes(extract_role_config(config), seed=int(config.get("seed", 0)), profile=run.profile)
+
+
+def _store_role_config(run: Run, storage: StorageBackend, role_config: DataRoleConfig, cfg: dict[str, Any]) -> None:
+    rc_dump = role_config.model_dump(mode="json")
+    cfg["role_config"] = rc_dump
+    schema_dict = dict(run.schema_json or {})
+    schema_dict["role_config"] = rc_dump
+    run.schema_json = schema_dict
+    storage.write_json(f"runs/{run.id}/meta/profile.json", schema_dict)
 
 
 def serialize_run(run: Run) -> dict[str, Any]:
@@ -91,6 +110,7 @@ def serialize_run(run: Run) -> dict[str, Any]:
         "status": run.status,
         "is_active": run.is_active,
         "config": _normalised_config(run.config),
+        "settings_changes": _settings_changes(run),
         "schema": run.schema_json or {},
         "summary": run.summary,
         "versions": run.versions or {},
@@ -148,7 +168,7 @@ async def create_run(
             detail=f"Failed to parse Excel workbook: {exc}",
         ) from exc
 
-    if profile not in ("quick", "full", "smoke"):
+    if profile not in RUN_PROFILES:
         profile = "quick"
 
     run_id = f"run_{uuid.uuid4().hex[:10]}"
@@ -197,22 +217,16 @@ def patch_run(
     if payload.name is not None:
         run.name = payload.name.strip() or run.name
     if payload.profile is not None:
-        if payload.profile not in ("quick", "full", "smoke"):
+        if payload.profile not in RUN_PROFILES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="profile must be 'quick', 'full', or 'smoke'.",
+                detail=f"profile must be one of {', '.join(RUN_PROFILES)}.",
             )
         run.profile = payload.profile
 
     cfg = dict(run.config or {})
     if payload.role_config is not None:
-        validated_rc = DataRoleConfig.model_validate(payload.role_config)
-        rc_dump = validated_rc.model_dump(mode="json")
-        cfg["role_config"] = rc_dump
-        schema_dict = dict(run.schema_json or {})
-        schema_dict["role_config"] = rc_dump
-        run.schema_json = schema_dict
-        storage.write_json(f"runs/{run_id}/meta/profile.json", schema_dict)
+        _store_role_config(run, storage, payload.role_config, cfg)
     if payload.skip_meridian is not None:
         cfg["skip_meridian"] = bool(payload.skip_meridian)
     if payload.seed is not None:
@@ -247,19 +261,13 @@ def start_run(
     skip_meridian = bool(cfg.get("skip_meridian", False))
 
     if payload is not None:
-        if payload.profile in ("quick", "full", "smoke"):
+        if payload.profile in RUN_PROFILES:
             run.profile = payload.profile
         skip_meridian = bool(payload.skip_meridian)
         cfg["skip_meridian"] = skip_meridian
         cfg["seed"] = int(payload.seed)
         if payload.role_config is not None:
-            validated_rc = DataRoleConfig.model_validate(payload.role_config)
-            rc_dump = validated_rc.model_dump(mode="json")
-            cfg["role_config"] = rc_dump
-            schema_dict = dict(run.schema_json or {})
-            schema_dict["role_config"] = rc_dump
-            run.schema_json = schema_dict
-            storage.write_json(f"runs/{run_id}/meta/profile.json", schema_dict)
+            _store_role_config(run, storage, payload.role_config, cfg)
 
     if not skip_meridian:
         active_meridian = count_active_queue_jobs("meridian")
@@ -317,6 +325,12 @@ def start_run(
     return serialize_run(run)
 
 
+@router.get("/settings/defaults")
+def get_settings_defaults() -> dict[str, Any]:
+    """Defaults (the notebooks' values), limits and fixed reference values for the run settings form."""
+    return settings_defaults()
+
+
 @router.get("")
 def list_runs(db: Session = Depends(get_db)) -> dict[str, Any]:
     """List all runs ordered newest-first, sweeping any stale heartbeats."""
@@ -330,13 +344,25 @@ def list_runs(db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @router.get("/{run_id}")
-def get_run(run_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def get_run(
+    run_id: str,
+    db: Session = Depends(get_db),
+    storage: StorageBackend = Depends(get_app_storage),
+) -> dict[str, Any]:
     """Fetch a single run's metadata, per-stage progress, and Meridian queue position."""
     sweep_stale_runs()
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
-    return serialize_run(run)
+    out = serialize_run(run)
+    summary = out.get("summary")
+    # Runs finished before the summary stored the hold-out window labels get them from their Meridian metrics
+    if isinstance(summary, dict) and "holdout_q4_2024" in summary and "holdout_label" not in summary:
+        key = f"runs/{run_id}/meta/meridian_metrics.json"
+        if storage.exists(key):
+            metrics = storage.read_json(key)
+            out["summary"] = {**summary, "holdout_label": metrics.get("holdout_label"), "forward_label": metrics.get("forward_label")}
+    return out
 
 
 @router.post("/{run_id}/cancel", dependencies=[Depends(require_access_code)])

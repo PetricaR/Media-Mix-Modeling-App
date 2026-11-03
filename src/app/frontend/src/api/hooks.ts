@@ -28,6 +28,15 @@ export function useRun(runId: string | null) {
   });
 }
 
+/** The run settings' defaults and limits; they only change with a new API version. */
+export function useSettingsDefaults() {
+  return useQuery({
+    queryKey: ["settings-defaults"],
+    queryFn: () => api.getSettingsDefaults(),
+    staleTime: Infinity,
+  });
+}
+
 export function useSections(runId: string | null) {
   const { data: run } = useRun(runId);
   return useQuery({
