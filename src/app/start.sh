@@ -74,20 +74,22 @@ unset VIRTUAL_ENV
 
 mkdir -p "${MMM_LOCAL_DATA_DIR}"
 
-# Gaseste binarul `uv`
-if command -v uv >/dev/null 2>&1; then
-  UV_BIN="uv"
-elif [[ -x "${HOME}/.local/bin/uv" ]]; then
+# Gaseste binarul `uv`: ~/.local/bin/uv inainte de cel din PATH, pentru ca uv-ul vechi din Homebrew rescrie uv.lock
+if [[ -x "${HOME}/.local/bin/uv" ]]; then
   UV_BIN="${HOME}/.local/bin/uv"
+elif command -v uv >/dev/null 2>&1; then
+  UV_BIN="uv"
 else
   echo "EROARE: 'uv' nu este instalat. Instaleaza-l cu: curl -LsSf https://astral.sh/uv/install.sh | sh"
   exit 1
 fi
 
 # 3. Verifica dependentele backend & frontend
-if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
-  echo "==> Sincronizare mediu Python in ${BACKEND_DIR}..."
-  (cd "${BACKEND_DIR}" && "${UV_BIN}" sync --extra worker)
+# Backend-ul ruleaza in mediul principal al proiectului (${REPO_ROOT}/.venv), unde `mmm-studio` este instalat
+# editabil cu extra `worker` (grupul `app` din pyproject.toml-ul radacina)
+if ! "${REPO_ROOT}/.venv/bin/python" -c "import mmm_studio, meridian" >/dev/null 2>&1; then
+  echo "==> Sincronizare mediu Python principal in ${REPO_ROOT}/.venv..."
+  (cd "${REPO_ROOT}" && "${UV_BIN}" sync)
 fi
 
 if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
@@ -128,7 +130,7 @@ echo "==========================================================================
 # Porneste FastAPI pe portul 8000
 (
   cd "${BACKEND_DIR}"
-  exec "${UV_BIN}" run uvicorn mmm_studio.main:app --host 0.0.0.0 --port 8000 --reload
+  exec "${UV_BIN}" run --project "${REPO_ROOT}" uvicorn mmm_studio.main:app --host 0.0.0.0 --port 8000 --reload
 ) &
 PIDS+=($!)
 
@@ -137,7 +139,7 @@ PIDS+=($!)
 for QUEUE in analysis meridian interactive; do
   (
     cd "${BACKEND_DIR}"
-    exec "${UV_BIN}" run python -m mmm_studio.cli worker --queue "${QUEUE}"
+    exec "${UV_BIN}" run --project "${REPO_ROOT}" python -m mmm_studio.cli worker --queue "${QUEUE}"
   ) &
   PIDS+=($!)
 done

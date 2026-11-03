@@ -6,8 +6,8 @@ Starting Situation &amp; Challenge Objective: The marketing department requires 
 Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned via `.python-version`.
 
 ```bash
-uv sync                  # core analysis + Jupyter/dev tools
-uv sync --all-groups     # also installs Google Meridian (TensorFlow + JAX) for the Bayesian MMM
+uv sync                  # one .venv: core analysis, Jupyter/dev tools, Google Meridian (TensorFlow + JAX),
+                         # weather data and the MMM Studio backend (src/app/backend, editable)
 uv run jupyter lab
 ```
 

@@ -55,24 +55,31 @@ export UV_CACHE_DIR=/tmp/uv-cache     # what start.sh uses
 - Postgres comes from Homebrew, socket `/tmp`, **port 5433**. It already has the databases `mmm_studio` (dev) and
   `mmm_studio_test` (tests). The default URL is `postgresql:///mmm_studio?host=/tmp&port=5433`.
 - The Docker daemon is usually not running, so use native mode.
-- The backend `.venv` has the `worker` extra installed. The API (`mmm_studio.main`) is slim and imports without
-  `statsmodels`, `scipy`, `holidays`, or `meridian`, while the worker and test suite require `uv sync --extra worker`.
+- **One Python environment: the repo-root `.venv`.** The root `pyproject.toml` installs the backend there editable,
+  with its `worker` extra and `httpx` (group `app`), next to the notebook packages. There is no `backend/.venv`: from
+  `src/app/backend` always pass `--project ../../..` to `uv run` (or call `../../../.venv/bin/<tool>`); a plain
+  `uv run`/`uv sync` there creates a second 2 GB `backend/.venv` from the backend's own lock.
+- The backend keeps its own `pyproject.toml` + `uv.lock` for the Docker images and CI. After changing backend
+  dependencies, update both locks: `uv lock` in `src/app/backend` (writes only the lock, no venv) and
+  `~/.local/bin/uv lock && ~/.local/bin/uv sync` in the repo root.
+- The API (`mmm_studio.main`) is slim and imports without `statsmodels`, `scipy`, `holidays`, or `meridian`; the worker
+  and test suite need the `worker` extra, which the root `.venv` has.
 
 ## Commands
 
 ```bash
-# Backend (from src/app/backend)
-uv sync --extra worker
-uv run pytest tests/ -m "not slow" -q        # fast test suite; needs Postgres (TEST_DATABASE_URL, default mmm_studio_test on :5433)
-uv run pytest tests/test_meridian_smoke.py   # includes the @slow smoke MCMC fit (~1 min)
-uv run ruff check mmm_studio tests
-uv run python -m mmm_studio.cli run --input ../../../data/DataScienceMarketingUseCase.xlsx \
+# Backend (from src/app/backend; --project ../../.. = the repo-root .venv)
+(cd ../../.. && ~/.local/bin/uv sync)        # root sync: every group is a default, incl. the backend (`app`)
+uv run --project ../../.. pytest tests/ -m "not slow" -q        # fast test suite; needs Postgres (TEST_DATABASE_URL, default mmm_studio_test on :5433)
+uv run --project ../../.. pytest tests/test_meridian_smoke.py   # includes the @slow smoke MCMC fit (~1 min)
+uv run --project ../../.. ruff check mmm_studio tests
+uv run --project ../../.. python -m mmm_studio.cli run --input ../../../data/DataScienceMarketingUseCase.xlsx \
     --out /tmp/mmm_cli --skip-meridian       # offline pipeline: no DB, writes runs/offline/... under --out (~5 s)
 #   Without --skip-meridian: --profile full ≈ 15–25 min (notebook-equal sampling + selection grid), quick ≈ 6 min, smoke ≈ 4 min.
 #   CLI flags: --input / --workbook, --profile {full,quick,smoke} / --fast / --smoke (default profile is "full").
-uv run uvicorn mmm_studio.main:app --reload --port 8000     # API (docs at /docs, routes under /api/v1)
-uv run python -m mmm_studio.cli worker --queue meridian     # one per queue: analysis|meridian|interactive (or all), --burst, --idle-exit N
-uv run python -m mmm_studio.cli migrate                     # Alembic upgrade + Procrastinate schema + register example forecasts
+uv run --project ../../.. uvicorn mmm_studio.main:app --reload --port 8000     # API (docs at /docs, routes under /api/v1)
+uv run --project ../../.. python -m mmm_studio.cli worker --queue meridian     # one per queue: analysis|meridian|interactive (or all), --burst, --idle-exit N
+uv run --project ../../.. python -m mmm_studio.cli migrate                     # Alembic upgrade + Procrastinate schema + register example forecasts
 
 # Frontend (from src/app/frontend)
 npm install
@@ -271,7 +278,7 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
    `--target worker`, build SA `mmm-studio-build`). Containers run the venv's programs directly (`PATH=/app/.venv/bin`);
    `uv run` at start-up would sync the `dev` group into the image on every cold start. The old two-service layout
    proxied to the API's run.app URL with the web host's `Host` header, which Cloud Run cannot route, so the API is now a
-   sidecar of one service, and `src/app/.gcloudignore` keeps the 2 GB `backend/.venv` out of the upload.
+   sidecar of one service, and `src/app/.gcloudignore` keeps any stray `backend/.venv` out of the upload.
 3. `cloud_run.wake_worker` accepts `"cloudrun"`, `"true"`, `"1"`, and `"yes"`, and `Settings` defaults to `mmm-studio-worker-{analysis,meridian,interactive}`.
 4. `docker-compose.yml` runs one worker per queue (`worker`, `worker-meridian`, `worker-interactive`); `start.sh` and `Procfile.dev` do the same, so scenarios never wait behind a Meridian fit.
 5. `mmm_studio.main` lazy-imports heavy analytics/model packages so importing the API never loads `statsmodels`, `scipy`, `holidays`, `meridian`, `tensorflow`, or `jax`.

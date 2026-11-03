@@ -6,7 +6,7 @@
 
 `src/app/` is completely self-contained:
 - **Zero dependency on `tchibo_mmm`, `notebooks/`, `outputs/`, `data/processed/`, or `reports/`**: Every interactive Plotly chart, table, Meridian HTML report and management narrative is generated from scratch by `mmm_studio.core` and `mmm_studio.pipeline` starting solely from an uploaded `.xlsx` workbook.
-- **Independent Python environment**: Managed via `src/app/backend/pyproject.toml` and `src/app/backend/uv.lock`.
+- **Own dependency spec, shared local environment**: `src/app/backend/pyproject.toml` and `src/app/backend/uv.lock` define the Docker images and CI. Locally the backend is installed editable (with its `worker` extra) into the repository's single `.venv` through the root `pyproject.toml` (group `app`); there is no `backend/.venv`.
 - **Independent Frontend SPA**: React 18 + TypeScript 5.5 + Vite 5 + MUI 5 + TanStack Query 5 + Plotly (`plotly.js-cartesian-dist-min`) in `src/app/frontend/`.
 
 ---
@@ -16,11 +16,11 @@
 You can execute the full 16-stage pipeline directly from the command line against `data/DataScienceMarketingUseCase.xlsx` and write all JSON sections, Parquet datasets, and HTML reports to a local directory:
 
 ```bash
+uv sync                  # from the repository root: one .venv with the notebooks' packages and the backend
 cd src/app/backend
-uv sync --extra worker
 
 # Fast EDA + data preparation + OLS benchmark (~5 seconds)
-uv run python -m mmm_studio.cli run \
+uv run --project ../../.. python -m mmm_studio.cli run \
   --input ../../../data/DataScienceMarketingUseCase.xlsx \
   --out ../../.app_data/runs/cli_demo \
   --profile quick \
@@ -28,7 +28,7 @@ uv run python -m mmm_studio.cli run \
 
 # Full pipeline with Google Meridian, matching notebooks 03–05 (~15–25 min on a laptop CPU):
 # final fit + forward hold-out, ROI/optimiser/HTML reports, back-test, 42-day forecast, selection grid
-uv run python -m mmm_studio.cli run \
+uv run --project ../../.. python -m mmm_studio.cli run \
   --input ../../../data/DataScienceMarketingUseCase.xlsx \
   --out ../../.app_data/runs/cli_full \
   --profile full
@@ -60,13 +60,13 @@ docker compose -f src/app/docker-compose.yml up --build
 ```bash
 # Terminal 1 — FastAPI Server
 cd src/app/backend
-uv run uvicorn mmm_studio.main:app --reload --port 8000
+uv run --project ../../.. uvicorn mmm_studio.main:app --reload --port 8000
 
 # Terminals 2–4 — one Procrastinate worker per queue (so scenarios never wait behind a Meridian fit)
 cd src/app/backend
-uv run python -m mmm_studio.cli worker --queue analysis
-uv run python -m mmm_studio.cli worker --queue meridian
-uv run python -m mmm_studio.cli worker --queue interactive
+uv run --project ../../.. python -m mmm_studio.cli worker --queue analysis
+uv run --project ../../.. python -m mmm_studio.cli worker --queue meridian
+uv run --project ../../.. python -m mmm_studio.cli worker --queue interactive
 
 # Terminal 3 — React + Vite Frontend
 cd src/app/frontend
@@ -84,10 +84,10 @@ Open `http://localhost:5173`.
 cd src/app/backend
 
 # Fast test suite (~14s): workbook profiling, golden metrics, EDA, preparation, OLS, API & worker jobs
-uv run pytest tests/ -m "not slow" -v
+uv run --project ../../.. pytest tests/ -m "not slow" -v
 
 # Slow Meridian MCMC end-to-end smoke test (~55s)
-uv run pytest tests/test_meridian_smoke.py -v
+uv run --project ../../.. pytest tests/test_meridian_smoke.py -v
 ```
 
 ---
