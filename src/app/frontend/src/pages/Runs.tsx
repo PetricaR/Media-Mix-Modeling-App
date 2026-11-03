@@ -8,6 +8,7 @@ import type { RunSummaryItem } from "../api/types";
 import { ConfirmDialog, type ConfirmRequest } from "../components/Import/ConfirmDialog";
 import { RunTable } from "../components/Import/RunTable";
 import { UploadDropzone } from "../components/Import/UploadDropzone";
+import { PageHeader } from "../components/Layout/PageHeader";
 import { PALETTE } from "../theme";
 
 const DEFAULT_RUN_NAME = "Tchibo case study";
@@ -101,15 +102,7 @@ export const RunsPage: React.FC<{
 
   return (
     <Box>
-      <Box sx={{ mb: 3, maxWidth: "75ch" }}>
-        <Typography variant="h1" sx={{ mb: 0.5 }}>
-          Runs
-        </Typography>
-        <Typography variant="body1" sx={{ color: PALETTE.inkSecondary }}>
-          Each run keeps its own workbook, settings and results. Upload the case-study workbook to create a draft, set it up,
-          then follow the pipeline on the run status page.
-        </Typography>
-      </Box>
+      <PageHeader description="Each run keeps its own workbook, settings and results. Upload the case-study workbook to create a draft, set it up, then follow the pipeline on the run status page." />
 
       {actionError && (
         <Alert severity="error" onClose={() => setActionError(null)} sx={{ mb: 2 }}>

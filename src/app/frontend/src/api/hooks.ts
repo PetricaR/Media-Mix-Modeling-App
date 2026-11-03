@@ -28,6 +28,11 @@ export function useRun(runId: string | null) {
   });
 }
 
+/** Server configuration (version, whether writes need an access code); it only changes with a deploy. */
+export function useHealth() {
+  return useQuery({ queryKey: ["health"], queryFn: () => api.health(), staleTime: Infinity, retry: false });
+}
+
 /** The run settings' defaults and limits; they only change with a new API version. */
 export function useSettingsDefaults() {
   return useQuery({

@@ -20,18 +20,18 @@ export const BeanIcon: React.FC<{ size?: number }> = ({ size = 32 }) => (
 );
 
 export const BrandMark: React.FC<{ compact?: boolean }> = ({ compact = false }) => (
-  <Stack direction="row" alignItems="center" spacing={1.25}>
-    <BeanIcon size={compact ? 28 : 34} />
+  <Stack direction="row" alignItems="center" spacing={1.25} sx={{ minWidth: 0 }}>
+    <BeanIcon size={compact ? 28 : 32} />
     <Box sx={{ minWidth: 0 }}>
       <Typography
         component="span"
-        sx={{ display: "block", fontWeight: 800, fontSize: compact ? "1rem" : "1.12rem", color: PALETTE.brandNavy, lineHeight: 1.1 }}
+        sx={{ display: "block", fontWeight: 800, fontSize: compact ? "1rem" : "1.06rem", color: PALETTE.brandNavy, lineHeight: 1.15, letterSpacing: "-0.01em" }}
       >
         MMM Studio
       </Typography>
       {!compact && (
-        <Typography component="span" variant="caption" sx={{ display: "block", color: PALETTE.brandGoldDark, fontWeight: 650 }}>
-          Tchibo marketing-mix case study
+        <Typography component="span" noWrap sx={{ display: "block", fontSize: "0.72rem", lineHeight: 1.35, color: PALETTE.brandGoldDark, fontWeight: 650 }}>
+          Tchibo MMM case study
         </Typography>
       )}
     </Box>

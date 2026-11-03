@@ -9,11 +9,10 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Divider,
   Drawer,
   FormControl,
   IconButton,
-  InputLabel,
+  InputAdornment,
   LinearProgress,
   List,
   ListItem,
@@ -33,103 +32,19 @@ import {
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
-import SettingsSuggestOutlinedIcon from "@mui/icons-material/SettingsSuggestOutlined";
-import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
-import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
-import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
-import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
-import BuildCircleOutlinedIcon from "@mui/icons-material/BuildCircleOutlined";
-import HubOutlinedIcon from "@mui/icons-material/HubOutlined";
-import TrendingUpOutlinedIcon from "@mui/icons-material/TrendingUpOutlined";
-import CompareArrowsOutlinedIcon from "@mui/icons-material/CompareArrowsOutlined";
-import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
-import TimelineOutlinedIcon from "@mui/icons-material/TimelineOutlined";
-import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import ArticleOutlinedIcon from "@mui/icons-material/ArticleOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
-import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, getAccessCode, onAuthRequired, setAccessCode } from "../../api/client";
-import { isRunActive, useRun, useRuns } from "../../api/hooks";
-import { PALETTE } from "../../theme";
+import { isRunActive, useHealth, useRun, useRuns } from "../../api/hooks";
+import { LAYOUT, PALETTE } from "../../theme";
+import { PROFILES, RUN_STATUS_LABEL as STATUS_LABEL, runStatusColor as statusColor } from "../Import/format";
 import { BrandMark } from "./BrandMark";
+import { NAV_GROUPS, findNavItem } from "./nav";
 
-const DRAWER_WIDTH = 256;
-const HEADER_HEIGHT = 60;
-
-interface NavGroup {
-  header: string;
-  items: { label: string; path: string; icon: React.ReactNode }[];
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    header: "Run",
-    items: [
-      { label: "Runs", path: "/runs", icon: <FolderOpenOutlinedIcon fontSize="small" /> },
-      { label: "Run setup", path: "/setup", icon: <SettingsSuggestOutlinedIcon fontSize="small" /> },
-      { label: "Run status", path: "/status", icon: <AccountTreeOutlinedIcon fontSize="small" /> },
-      { label: "Executive overview", path: "/overview", icon: <DashboardOutlinedIcon fontSize="small" /> },
-    ],
-  },
-  {
-    header: "Data & EDA",
-    items: [
-      { label: "Data quality", path: "/data-quality", icon: <FactCheckOutlinedIcon fontSize="small" /> },
-      { label: "Exploratory analysis", path: "/explore", icon: <InsightsOutlinedIcon fontSize="small" /> },
-      { label: "Data preparation", path: "/preparation", icon: <BuildCircleOutlinedIcon fontSize="small" /> },
-    ],
-  },
-  {
-    header: "Modelling",
-    items: [
-      { label: "Meridian model", path: "/model", icon: <HubOutlinedIcon fontSize="small" /> },
-      { label: "Drivers & ROI", path: "/drivers", icon: <TrendingUpOutlinedIcon fontSize="small" /> },
-      { label: "Benchmark vs OLS", path: "/benchmark", icon: <CompareArrowsOutlinedIcon fontSize="small" /> },
-    ],
-  },
-  {
-    header: "Decisions",
-    items: [
-      { label: "Budget optimiser", path: "/optimizer", icon: <TuneOutlinedIcon fontSize="small" /> },
-      { label: "Forecast & scenarios", path: "/forecast", icon: <TimelineOutlinedIcon fontSize="small" /> },
-    ],
-  },
-  {
-    header: "Deliverables",
-    items: [
-      { label: "Reports & downloads", path: "/reports", icon: <DescriptionOutlinedIcon fontSize="small" /> },
-      { label: "Answers to the brief", path: "/brief", icon: <ArticleOutlinedIcon fontSize="small" /> },
-    ],
-  },
-];
-
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft",
-  queued: "Queued",
-  running: "Running",
-  succeeded: "Finished",
-  failed: "Failed",
-  cancelled: "Cancelled",
-};
-
-const statusColor = (status?: string): "default" | "success" | "warning" | "error" | "info" => {
-  switch (status) {
-    case "succeeded":
-      return "success";
-    case "running":
-    case "queued":
-      return "info";
-    case "failed":
-      return "error";
-    case "cancelled":
-      return "warning";
-    default:
-      return "default";
-  }
-};
+const DRAWER_WIDTH = LAYOUT.drawerWidth;
+const HEADER_HEIGHT = LAYOUT.headerHeight;
 
 export const AppShell: React.FC<{
   selectedRunId: string | null;
@@ -176,17 +91,43 @@ export const AppShell: React.FC<{
   const [codeInput, setCodeInput] = useState(getAccessCode());
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  // The access-code button only appears on servers that ask for one (or once a request was refused)
+  const { data: health } = useHealth();
+  const [authPrompted, setAuthPrompted] = useState(false);
+  const showAccessCode = Boolean(health?.auth_required || authPrompted || getAccessCode());
 
   useEffect(
     () =>
       onAuthRequired(() => {
         setCodeInput(getAccessCode());
+        setAuthPrompted(true);
         setAuthDialogOpen(true);
       }),
     []
   );
 
   useEffect(() => setMobileOpen(false), [location.pathname]);
+
+  // Every route gets its own document title (browser tabs, history, screen readers)
+  const navEntry = findNavItem(location.pathname);
+  useEffect(() => {
+    document.title = navEntry ? `${navEntry.item.label} · MMM Studio` : "MMM Studio · Tchibo case study";
+  }, [navEntry?.item.label]);
+
+  // A link to another page behaves like a page load: it starts at the top and focus moves to the new content.
+  // Redirects (replace) and back/forward (pop) keep the browser's own behaviour; run pages that focus their own
+  // heading pass state.focusHeading.
+  const navigationType = useNavigationType();
+  const lastPath = useRef(location.pathname);
+  useEffect(() => {
+    if (lastPath.current === location.pathname) return;
+    lastPath.current = location.pathname;
+    if (navigationType !== "PUSH") return;
+    window.scrollTo({ top: 0, behavior: "instant" });
+    if (!(location.state as { focusHeading?: boolean } | null)?.focusHeading) {
+      document.getElementById("main-content")?.focus({ preventScroll: true });
+    }
+  }, [location.pathname, location.state, navigationType]);
 
   const handleSaveCode = (e: React.FormEvent) => {
     e.preventDefault();
@@ -240,32 +181,50 @@ export const AppShell: React.FC<{
 
   const nav = (
     <Box component="nav" aria-label="Main" sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <Box sx={{ px: 2.5, py: 2, borderBottom: `1px solid ${PALETTE.borderSubtle}`, minHeight: HEADER_HEIGHT, display: "flex", alignItems: "center" }}>
+      <Box
+        component={RouterLink}
+        to="/overview"
+        sx={{
+          px: 2,
+          // Same height as the app bar, so the two bottom borders form one line
+          height: HEADER_HEIGHT + 1,
+          flexShrink: 0,
+          borderBottom: `1px solid ${PALETTE.borderSubtle}`,
+          display: "flex",
+          alignItems: "center",
+          textDecoration: "none",
+        }}
+      >
         <BrandMark />
       </Box>
-      <Box sx={{ overflowY: "auto", flexGrow: 1, py: 1 }}>
+      <Box sx={{ overflowY: "auto", flexGrow: 1, py: 1.25, scrollbarWidth: "thin" }}>
         {NAV_GROUPS.map((group, gIdx) => (
-          <React.Fragment key={group.header}>
-            {gIdx > 0 && <Divider sx={{ my: 1, mx: 2 }} />}
+          <React.Fragment key={group.header ?? "home"}>
             <List
               dense
-              aria-labelledby={`nav-${gIdx}`}
+              disablePadding
+              aria-labelledby={group.header ? `nav-${gIdx}` : undefined}
+              sx={{ mb: 1.25 }}
               subheader={
-                <ListSubheader
-                  id={`nav-${gIdx}`}
-                  disableSticky
-                  sx={{
-                    lineHeight: "28px",
-                    fontSize: "0.7rem",
-                    fontWeight: 800,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: PALETTE.brandGoldDark,
-                    backgroundColor: "transparent",
-                  }}
-                >
-                  {group.header}
-                </ListSubheader>
+                group.header ? (
+                  <ListSubheader
+                    id={`nav-${gIdx}`}
+                    disableSticky
+                    sx={{
+                      px: 2.25,
+                      pt: 0.75,
+                      lineHeight: "24px",
+                      fontSize: "0.68rem",
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: PALETTE.brandGoldDark,
+                      backgroundColor: "transparent",
+                    }}
+                  >
+                    {group.header}
+                  </ListSubheader>
+                ) : undefined
               }
             >
               {group.items.map((item) => {
@@ -280,9 +239,11 @@ export const AppShell: React.FC<{
                       aria-current={isCurrent ? "page" : undefined}
                       sx={{
                         mx: 1,
+                        px: 1.25,
                         borderRadius: 999,
-                        mb: 0.25,
-                        minHeight: 40,
+                        mb: "2px",
+                        minHeight: 34,
+                        py: 0.25,
                         "&.Mui-selected": {
                           backgroundColor: PALETTE.bgGoldTint,
                           color: PALETTE.brandNavy,
@@ -291,8 +252,8 @@ export const AppShell: React.FC<{
                         "&.Mui-selected:hover": { backgroundColor: PALETTE.bgSubtle },
                       }}
                     >
-                      <ListItemIcon sx={{ minWidth: 34, color: PALETTE.inkSecondary }}>{item.icon}</ListItemIcon>
-                      <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: "0.88rem", fontWeight: isCurrent ? 700 : 550 }} />
+                      <ListItemIcon sx={{ minWidth: 32, color: PALETTE.inkSecondary, "& svg": { fontSize: 19 } }}>{item.icon}</ListItemIcon>
+                      <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: "0.86rem", fontWeight: isCurrent ? 700 : 550, noWrap: true }} />
                       {hint && (
                         <Box
                           component="span"
@@ -321,8 +282,8 @@ export const AppShell: React.FC<{
           </React.Fragment>
         ))}
       </Box>
-      <Box sx={{ px: 2.5, py: 1.75, borderTop: `1px solid ${PALETTE.borderSubtle}` }}>
-        <Typography variant="caption" sx={{ color: PALETTE.inkMuted, display: "block", lineHeight: 1.4 }}>
+      <Box sx={{ px: 2.25, py: 1.5, borderTop: `1px solid ${PALETTE.borderSubtle}` }}>
+        <Typography variant="caption" sx={{ color: PALETTE.inkMuted, display: "block", lineHeight: 1.4, fontSize: "0.72rem" }}>
           Independent case-study prototype, not an official Tchibo product.
         </Typography>
       </Box>
@@ -350,6 +311,9 @@ export const AppShell: React.FC<{
           backgroundColor: "rgba(255, 255, 255, 0.94)",
           backdropFilter: "blur(8px)",
           borderBottom: `1px solid ${PALETTE.borderSubtle}`,
+          transition: "box-shadow 0.2s",
+          // Progressive enhancement (scroll-state queries): a soft shadow while the page is scrolled; elsewhere the border alone
+          "@container page scroll-state(scrollable: top)": { boxShadow: "0 4px 16px rgba(33, 41, 47, 0.07)" },
         }}
       >
         <Toolbar sx={{ minHeight: `${HEADER_HEIGHT}px !important`, gap: 1.5, px: { xs: 1.5, sm: 2.5 } }}>
@@ -364,18 +328,34 @@ export const AppShell: React.FC<{
             </Box>
           )}
           <Stack direction="row" alignItems="center" spacing={1.25} sx={{ flexGrow: 1, minWidth: 0 }}>
-            <FormControl size="small" sx={{ minWidth: { xs: 140, sm: 220 }, maxWidth: 360, flexShrink: 1 }}>
-              <InputLabel id="run-select-label" shrink>
-                Run
-              </InputLabel>
+            {/* A context switcher rather than a form field: the label sits inside, like a project picker */}
+            <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 250 }, maxWidth: 380, flexShrink: 1 }}>
               <Select
                 labelId="run-select-label"
-                label="Run"
-                notched
                 value={runs.some((r) => r.id === selectedRunId) ? selectedRunId ?? "" : ""}
                 displayEmpty
                 onChange={(e) => onSelectRunId((e.target.value as string) || null)}
-                sx={{ fontSize: "0.86rem", backgroundColor: "#FFFFFF" }}
+                startAdornment={
+                  <InputAdornment position="start" sx={{ mr: 0.75 }}>
+                    <Box
+                      component="span"
+                      id="run-select-label"
+                      sx={{ fontSize: "0.66rem", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: PALETTE.brandGoldDark }}
+                    >
+                      Run
+                    </Box>
+                  </InputAdornment>
+                }
+                sx={{
+                  fontSize: "0.86rem",
+                  fontWeight: 650,
+                  borderRadius: 999,
+                  backgroundColor: PALETTE.bgCanvas,
+                  "& .MuiSelect-select": { py: "7px" },
+                  "& .MuiOutlinedInput-notchedOutline": { borderColor: PALETTE.borderSubtle },
+                  "&:hover .MuiOutlinedInput-notchedOutline": { borderColor: PALETTE.borderStrong },
+                }}
+                MenuProps={{ slotProps: { paper: { sx: { mt: 0.75, minWidth: 320 } } } }}
                 renderValue={(val) => {
                   const r = runs.find((x) => x.id === val);
                   return r ? r.name : "No run yet";
@@ -388,12 +368,12 @@ export const AppShell: React.FC<{
                 )}
                 {runs.map((r) => (
                   <MenuItem key={r.id} value={r.id}>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%" }}>
-                      <Box sx={{ flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {r.name}
-                        <Typography component="span" variant="caption" sx={{ ml: 1, color: PALETTE.inkMuted }}>
-                          {r.profile}
-                          {r.is_active ? " · default" : ""}
+                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: "100%" }}>
+                      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                        <Typography sx={{ fontSize: "0.88rem", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</Typography>
+                        <Typography component="span" variant="caption" sx={{ display: "block", color: PALETTE.inkMuted }}>
+                          {PROFILES[r.profile]?.label ?? r.profile} sampling
+                          {r.is_active ? " · default run" : ""}
                         </Typography>
                       </Box>
                       <Chip size="small" color={statusColor(r.status)} label={STATUS_LABEL[r.status] ?? r.status} />
@@ -421,21 +401,26 @@ export const AppShell: React.FC<{
             )}
           </Stack>
 
-          <Tooltip title="Access code for uploads and computations">
-            <IconButton size="small" aria-label="Set access code" onClick={() => setAuthDialogOpen(true)}>
-              <LockOutlinedIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Button
-            variant="contained"
-            color="secondary"
-            size="small"
-            startIcon={<UploadFileIcon fontSize="small" />}
-            onClick={() => navigate("/runs")}
-            sx={{ display: { xs: "none", sm: "inline-flex" } }}
-          >
-            Upload workbook
-          </Button>
+          {showAccessCode && (
+            <Tooltip title="Access code for uploads and computations">
+              <IconButton size="small" aria-label="Set access code" onClick={() => setAuthDialogOpen(true)}>
+                <LockOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {/* The runs page has its own upload area, so the shortcut is hidden there */}
+          {!location.pathname.startsWith("/runs") && (
+            <Button
+              variant="outlined"
+              color="secondary"
+              size="small"
+              startIcon={<UploadFileIcon fontSize="small" />}
+              onClick={() => navigate("/runs")}
+              sx={{ display: { xs: "none", sm: "inline-flex" }, backgroundColor: "#FFFFFF" }}
+            >
+              Upload workbook
+            </Button>
+          )}
         </Toolbar>
         {currentRun && active && (
           <LinearProgress

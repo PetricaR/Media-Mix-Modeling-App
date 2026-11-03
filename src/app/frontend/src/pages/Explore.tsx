@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Paper, Tab, Tabs } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
 import { useSection } from "../api/hooks";
+import { PageHeader } from "../components/Layout/PageHeader";
 import { SectionRenderer } from "../components/Sections/SectionRenderer";
 
 const EXPLORE_TABS = [
@@ -23,7 +24,8 @@ export const ExplorePage: React.FC<{ runId: string | null }> = ({ runId }) => {
 
   return (
     <Box>
-      <Paper sx={{ mb: 3, px: 1 }}>
+      <PageHeader description="The workbook before any model: the target, the channels, spend and efficiency, correlations and lags, the catalog's delayed effect, and what all of it means for the MMM." />
+      <Paper sx={{ mb: 3.5, px: 1 }}>
         <Tabs
           value={tabIdx}
           onChange={(_, next) => setParams({ tab: EXPLORE_TABS[next].slug }, { replace: true })}
@@ -38,7 +40,7 @@ export const ExplorePage: React.FC<{ runId: string | null }> = ({ runId }) => {
         </Tabs>
       </Paper>
       <Box id="explore-panel" role="tabpanel" aria-labelledby={`explore-tab-${activeTab.slug}`}>
-        <SectionRenderer section={section} isLoading={isLoading} error={error as Error | null} />
+        <SectionRenderer section={section} isLoading={isLoading} error={error as Error | null} headingLevel={2} />
       </Box>
     </Box>
   );

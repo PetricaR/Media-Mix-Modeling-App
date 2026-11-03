@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Button, Paper, Typography } from "@mui/material";
+import { Box, Paper, Typography } from "@mui/material";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import { Link as RouterLink } from "react-router-dom";
 import { useSection } from "../api/hooks";
@@ -43,17 +43,43 @@ export const OverviewPage: React.FC<{ runId: string | null }> = ({ runId }) => {
 
       <Box component="nav" aria-label="Explore further" sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))", mt: 1 }}>
         {QUICK_LINKS.map((item) => (
-          <Paper key={item.path} sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1, borderTop: `3px solid ${PALETTE.brandGoldLight}` }}>
+          <Paper
+            key={item.path}
+            sx={{
+              // The whole card is clickable through its title link (one link per card, so screen readers hear it once)
+              position: "relative",
+              p: 2.5,
+              display: "flex",
+              flexDirection: "column",
+              gap: 1,
+              borderTop: `3px solid ${PALETTE.brandGoldLight}`,
+              transition: "border-color 0.15s, box-shadow 0.15s",
+              "&:hover, &:focus-within": { borderColor: PALETTE.borderStrong, boxShadow: "0 6px 18px rgba(33, 41, 47, 0.08)" },
+              "&:hover .quick-link-arrow, &:focus-within .quick-link-arrow": { transform: "translateX(3px)" },
+              "@media (prefers-reduced-motion: reduce)": { transition: "none", "& .quick-link-arrow": { transition: "none" } },
+            }}
+          >
             <Typography variant="h3" component="h2">
-              {item.title}
+              <Box
+                component={RouterLink}
+                to={item.path}
+                sx={{
+                  color: "inherit",
+                  textDecoration: "none",
+                  "&::after": { content: '""', position: "absolute", inset: 0, borderRadius: "inherit" },
+                  "&:focus-visible": { outline: "none" },
+                  "&:focus-visible::after": { outline: `3px solid ${PALETTE.brandPrimary}`, outlineOffset: 2 },
+                }}
+              >
+                {item.title}
+              </Box>
             </Typography>
             <Typography variant="body2" sx={{ flexGrow: 1 }}>
               {item.desc}
             </Typography>
-            <Box>
-              <Button size="small" component={RouterLink} to={item.path} endIcon={<ArrowForwardIcon fontSize="small" />} aria-label={`Open ${item.title}`}>
-                Open
-              </Button>
+            <Box aria-hidden="true" sx={{ display: "flex", alignItems: "center", gap: 0.5, color: PALETTE.brandPrimary, fontWeight: 650, fontSize: "0.86rem" }}>
+              Open
+              <ArrowForwardIcon className="quick-link-arrow" fontSize="small" sx={{ transition: "transform 0.15s" }} />
             </Box>
           </Paper>
         ))}

@@ -2,6 +2,7 @@ import type {
   ArtifactItem,
   DataRoleConfig,
   ForecastItem,
+  HealthInfo,
   OptimisationDetail,
   Profile,
   RunDetail,
@@ -79,6 +80,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => apiFetch<HealthInfo>("/api/v1/health"),
+
   checkAuth: () => apiFetch<{ ok: boolean; protected: boolean }>("/api/v1/auth/check", { method: "POST" }),
 
   listRuns: () => apiFetch<{ runs: RunSummaryItem[]; active_run_id: string | null }>("/api/v1/runs"),

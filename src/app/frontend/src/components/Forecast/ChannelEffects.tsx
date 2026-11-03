@@ -1,13 +1,13 @@
 import React, { Suspense } from "react";
 import { Box, Skeleton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
 import type { ScenarioResult } from "../../api/types";
-import { FONT_MONO, PALETTE } from "../../theme";
+import { NUMERIC, PALETTE } from "../../theme";
 import { effectsFigure } from "./figures";
 import { eur, eurCompact, multiplierLabel, shortDate, signedEur } from "./format";
 
 const LazyPlotlyChart = React.lazy(() => import("../Charts/PlotlyChart"));
 
-const num = { fontFamily: FONT_MONO, whiteSpace: "nowrap" } as const;
+const num = { ...NUMERIC, whiteSpace: "nowrap" } as const;
 
 /** What each changed channel adds to (or takes from) the forecast, as a bar chart and as a table. */
 export const ChannelEffects: React.FC<{ result: ScenarioResult; stale: boolean; compact?: boolean }> = ({ result, stale, compact = false }) => {

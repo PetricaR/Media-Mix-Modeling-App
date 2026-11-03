@@ -30,7 +30,13 @@ export const PALETTE = {
 };
 
 export const FONT_SANS = '"Figtree", "Helvetica Neue", Arial, system-ui, sans-serif';
+/** Code, file paths and column names only; numbers use NUMERIC. */
 export const FONT_MONO = '"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace';
+/** Figures in KPIs and tables: the brand sans with tabular (equal-width) digits, so columns of numbers line up. */
+export const NUMERIC = { fontFamily: FONT_SANS, fontVariantNumeric: "tabular-nums lining-nums" } as const;
+
+/** Shell dimensions shared by the app bar, the sidebar and anything sticky below the app bar. */
+export const LAYOUT = { headerHeight: 60, drawerWidth: 248, stickyTop: 84 } as const;
 
 export const theme = createTheme({
   palette: {
@@ -59,8 +65,17 @@ export const theme = createTheme({
   components: {
     MuiCssBaseline: {
       styleOverrides: {
-        html: { textSizeAdjust: "100%" },
+        html: {
+          textSizeAdjust: "100%",
+          // In-page jumps ("On this page") glide unless the reader prefers reduced motion; route changes scroll instantly
+          "@media (prefers-reduced-motion: no-preference)": { scrollBehavior: "smooth" },
+          // The root scroller exposes its scroll state, so the app bar can lift once content slides under it
+          containerType: "scroll-state",
+          containerName: "page",
+        },
         body: { backgroundColor: PALETTE.bgCanvas, fontVariantNumeric: "lining-nums" },
+        // Jump targets land below the fixed app bar instead of under it
+        "[data-anchor]": { scrollMarginTop: LAYOUT.headerHeight + 16 },
         // Visible keyboard focus with ≥ 3:1 contrast on every surface (outline, not box-shadow, for forced colours)
         ":where(a, button, [role='button'], [role='tab'], input, select, textarea, [tabindex]):focus-visible": {
           outline: `3px solid ${PALETTE.brandPrimary}`,

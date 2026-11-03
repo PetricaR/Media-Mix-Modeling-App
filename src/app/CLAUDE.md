@@ -100,7 +100,9 @@ backend/tests/  core/ unit + golden tests, test_pipeline_fast (CLI), test_api, t
   fixtures/case_study.xlsx, golden/case_study.json   (reference numbers from the notebooks)
 frontend/src/   main.tsx, App.tsx (routes; selected run lives in React state, not the URL), theme.ts (PALETTE, light mode only)
   api/client.ts (all HTTP via native fetch + X-Access-Code from sessionStorage), hooks.ts (TanStack Query + polling), types.ts
-  components/Sections/SectionRenderer.tsx (lazy Plotly), Layout/AppShell.tsx (nav, run switcher, cancel), Charts/PlotlyChart.tsx
+  components/Sections/SectionRenderer.tsx (lazy Plotly; header, empty states, "On this page"), Sections/OnThisPage.tsx,
+                Layout/AppShell.tsx (sidebar, run switcher, cancel, route titles/scroll/focus), Layout/nav.tsx (sidebar config,
+                findNavItem), Layout/PageHeader.tsx, Charts/PlotlyChart.tsx
                 Import/* (the run pages' parts: UploadDropzone, RunTable, RunHeader, RunOutcome, PipelineProgress,
                 DataProfileSummary, ConfirmDialog, RunPage, RunSettingsForm + settings/{Data,Channels,Model,Priors,Sampling}Tab,
                 settings/draft.ts (draft, change counts, reset), format.ts with status/profile/role labels and duration formatting)
@@ -184,6 +186,11 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
   `/optimizer` and the file is `Optimizer.tsx`. Match whatever the file you are editing already uses.
 - **TypeScript.** `strict`, `React.FC` components, MUI `sx` styling, colours from `PALETTE` in `theme.ts`.
   Every HTTP call goes in `api/client.ts`, every query hook in `api/hooks.ts`, and every API type in `api/types.ts`.
+- **Page anatomy.** Every page starts with `PageHeader` (eyebrow = its sidebar group from `nav.tsx`, h1, description,
+  actions on the right); section pages get it from `SectionRenderer` (`headerActions`, `afterHeader` for page controls
+  or notices, `headingLevel={2}` when the page has its own header, as on Explore and Forecast). Figures use `NUMERIC`
+  (Figtree with tabular digits); `FONT_MONO` is only for code, paths and column names. New routes go in `nav.tsx`,
+  which also drives the document title.
 - **Brand tokens, no logo.** Use the Tchibo colours from `PALETTE` / `charts/theme.py`, never the Tchibo logo; the
   app is labelled an independent case-study prototype.
 
@@ -303,3 +310,15 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     redirects to `/runs`. The sidebar shows "Review" next to Run setup for a draft and the stage count next to Run status
     while a run is active. The outcome's hold-out labels come from the summary (`holdout_label`, `forward_label`; older
     runs get them from `meta/meridian_metrics.json` on `GET /runs/{id}`).
+23. (2026-11-03) Design pass toward common analytics-dashboard patterns: one `PageHeader` on every page (the optimiser's
+    "Try your own constraints" and the forecast planner had their card above or instead of the page title; Explore's
+    tabs sat above its h1); the overview is the sidebar's home item and the whole sidebar fits a 900 px viewport (it
+    scrolled before) with its brand row level with the app bar; the run picker is a context switcher with the label
+    inside; the access-code button shows only when `GET /health` says `auth_required` (or a request was refused);
+    "Upload workbook" is an outlined shortcut hidden on `/runs`. A link to another page scrolls to the top and focuses
+    `#main-content` (before, the new page opened at the old scroll position), and each route sets `document.title`.
+    Sections with ≥ 4 titled blocks get "On this page": a sticky rail at xl (≥ 1536 px, where the content column is
+    still wide enough for every table) with native `scroll-target-group` / `:target-current` and an
+    IntersectionObserver fallback, and a floating menu below xl. KPI values and table figures use Figtree's tabular
+    digits instead of JetBrains Mono (text KPIs such as "Met" or "Display → SEA" and labels such as "25th percentile"
+    were set in mono); KPI tiles are two per row on phones. Raw statuses ("succeeded") show their labels ("Finished").

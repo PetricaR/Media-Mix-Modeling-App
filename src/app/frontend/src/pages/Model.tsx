@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, Box } from "@mui/material";
+import { Alert } from "@mui/material";
 import { useRun, useSection } from "../api/hooks";
 import { SectionRenderer } from "../components/Sections/SectionRenderer";
 
@@ -10,8 +10,9 @@ export const ModelPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const fit = stage("s12_meridian_fit");
   const selection = stage("s16_model_selection");
 
-  return (
-    <Box>
+  // Stage notices sit under the page title, above the results they are about
+  const notices = (
+    <>
       {fit?.status === "running" && (
         <Alert severity="info" sx={{ mb: 3 }}>
           Meridian's MCMC sampling is running on the background worker (main fit, then the forward hold-out refit). The
@@ -33,12 +34,16 @@ export const ModelPage: React.FC<{ runId: string | null }> = ({ runId }) => {
           The Meridian fit failed: {fit.error}
         </Alert>
       )}
-      <SectionRenderer
-        section={section}
-        isLoading={isLoading}
-        error={error as Error | null}
-        pendingMessage="The Meridian model page appears when the main Bayesian fit has finished (a few minutes after the analysis stages)."
-      />
-    </Box>
+    </>
+  );
+
+  return (
+    <SectionRenderer
+      section={section}
+      isLoading={isLoading}
+      error={error as Error | null}
+      afterHeader={notices}
+      pendingMessage="The Meridian model page appears when the main Bayesian fit has finished (a few minutes after the analysis stages)."
+    />
   );
 };

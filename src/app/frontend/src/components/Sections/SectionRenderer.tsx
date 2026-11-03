@@ -22,6 +22,8 @@ import type { SxProps, Theme } from "@mui/material/styles";
 import DownloadIcon from "@mui/icons-material/Download";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import HourglassEmptyOutlinedIcon from "@mui/icons-material/HourglassEmptyOutlined";
+import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
+import { Link as RouterLink } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import type {
   CalloutBlock,
@@ -32,8 +34,10 @@ import type {
   SectionBlock,
   TableBlock,
 } from "../../api/types";
-import { FONT_MONO, FONT_SANS, PALETTE } from "../../theme";
+import { FONT_SANS, NUMERIC, PALETTE } from "../../theme";
+import { PageHeader } from "../Layout/PageHeader";
 import { Markdown } from "./Markdown";
+import { OnThisPage, type TocEntry } from "./OnThisPage";
 
 const LazyPlotlyChart = React.lazy(() => import("../Charts/PlotlyChart"));
 
@@ -63,8 +67,9 @@ const KpisRenderer: React.FC<{ block: KpisBlock }> = ({ block }) => (
       m: 0,
       mb: 3,
       display: "grid",
-      gap: 2,
-      gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 210px), 1fr))",
+      // Two compact tiles per row on phones instead of one tall card each
+      gap: { xs: 1.5, sm: 2 },
+      gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(auto-fit, minmax(210px, 1fr))" },
     }}
   >
     {block.items.map((kpi, idx) => {
@@ -74,7 +79,7 @@ const KpisRenderer: React.FC<{ block: KpisBlock }> = ({ block }) => (
         <Paper
           component="li"
           key={`${kpi.label}-${idx}`}
-          sx={{ p: 2.25, borderTop: `3px solid ${toneColor(tone)}`, display: "flex", flexDirection: "column", gap: 0.75 }}
+          sx={{ p: { xs: 1.5, sm: 2.25 }, borderTop: `3px solid ${toneColor(tone)}`, display: "flex", flexDirection: "column", gap: 0.75, minWidth: 0 }}
         >
           <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={0.5}>
             <Typography
@@ -91,13 +96,13 @@ const KpisRenderer: React.FC<{ block: KpisBlock }> = ({ block }) => (
           </Stack>
           <Typography
             sx={{
-              fontFamily: FONT_MONO,
-              fontSize: "1.4rem",
-              fontWeight: 600,
+              ...NUMERIC,
+              fontSize: { xs: "1.25rem", sm: "1.6rem" },
+              fontWeight: 700,
+              letterSpacing: "-0.015em",
               color: PALETTE.inkPrimary,
-              fontVariantNumeric: "tabular-nums",
               overflowWrap: "anywhere",
-              lineHeight: 1.25,
+              lineHeight: 1.2,
             }}
           >
             {kpi.value}
@@ -135,8 +140,8 @@ const CalloutRenderer: React.FC<{ block: CalloutBlock }> = ({ block }) => {
   );
 };
 
-const MarkdownRenderer: React.FC<{ block: MarkdownBlock }> = ({ block }) => (
-  <Paper sx={{ p: { xs: 2, md: 3 }, mb: 3 }}>
+const MarkdownRenderer: React.FC<{ block: MarkdownBlock; anchorId?: string }> = ({ block, anchorId }) => (
+  <Paper sx={{ p: { xs: 2, md: 3 }, mb: 3 }} id={anchorId} data-anchor={anchorId ? "" : undefined}>
     {block.title && (
       <Typography variant="h3" component="h2" sx={{ mb: 1.5 }}>
         {block.title}
@@ -167,7 +172,7 @@ const BlockHeader: React.FC<{ id?: string; title: string; subtitle?: string | nu
   </Stack>
 );
 
-const ChartRenderer: React.FC<{ block: ChartBlock }> = ({ block }) => {
+const ChartRenderer: React.FC<{ block: ChartBlock; anchorId?: string }> = ({ block, anchorId }) => {
   const variantKeys = block.figure.variants ? Object.keys(block.figure.variants) : [];
   const [selectedVariant, setSelectedVariant] = useState<string>(variantKeys[0] || "default");
   const titleId = useId();
@@ -178,7 +183,7 @@ const ChartRenderer: React.FC<{ block: ChartBlock }> = ({ block }) => {
       : { data: block.figure.data, layout: block.figure.layout };
 
   return (
-    <Paper component="figure" sx={{ p: { xs: 1.5, md: 2.5 }, mb: 3, mx: 0 }} id={block.chart_id} aria-labelledby={titleId}>
+    <Paper component="figure" sx={{ p: { xs: 1.5, md: 2.5 }, mb: 3, mx: 0 }} id={anchorId ?? block.chart_id} data-anchor="" aria-labelledby={titleId}>
       <BlockHeader
         id={titleId}
         title={block.title}
@@ -229,7 +234,7 @@ function sortValue(v: unknown): number | string {
   return m[1] === "-" || m[1] === "−" ? -n : n;
 }
 
-const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
+const TableRenderer: React.FC<{ block: TableBlock; anchorId?: string }> = ({ block, anchorId }) => {
   const [orderBy, setOrderBy] = useState<string | null>(null);
   const [orderDir, setOrderDir] = useState<"asc" | "desc">("asc");
   const captionId = useId();
@@ -333,7 +338,7 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
   };
 
   return (
-    <Paper sx={{ p: { xs: 1.5, md: 2.5 }, mb: 3 }} id={block.table_id || block.id}>
+    <Paper sx={{ p: { xs: 1.5, md: 2.5 }, mb: 3 }} id={anchorId ?? (block.table_id || block.id)} data-anchor="">
       <BlockHeader
         id={captionId}
         title={block.title}
@@ -379,7 +384,7 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
               <TableRow key={rIdx} hover>
                 {block.columns.map((col, cIdx) => {
                   const val = row[col.key];
-                  const numeric = isNumericLike(val) && !longText(col.key);
+                  const numeric = cIdx > 0 && isNumericLike(val) && !longText(col.key);
                   return (
                     <TableCell
                       key={col.key}
@@ -388,8 +393,7 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
                       data-label={cIdx === 0 ? undefined : col.label}
                       align={col.align || (typeof val === "number" ? "right" : "left")}
                       sx={{
-                        fontFamily: numeric ? FONT_MONO : "inherit",
-                        fontSize: numeric ? "0.8rem" : undefined,
+                        ...(numeric ? NUMERIC : {}),
                         fontWeight: cIdx === 0 ? 600 : undefined,
                         // Text columns and the row header may wrap; numbers never do
                         whiteSpace: longText(col.key) || (cIdx === 0 && !numeric) ? "normal" : "nowrap",
@@ -415,39 +419,50 @@ const TableRenderer: React.FC<{ block: TableBlock }> = ({ block }) => {
   );
 };
 
-export const BlockRenderer: React.FC<{ block: SectionBlock }> = ({ block }) => {
+export const BlockRenderer: React.FC<{ block: SectionBlock; anchorId?: string }> = ({ block, anchorId }) => {
   switch (block.type) {
     case "kpis":
       return <KpisRenderer block={block} />;
     case "callout":
       return <CalloutRenderer block={block} />;
     case "markdown":
-      return <MarkdownRenderer block={block} />;
+      return <MarkdownRenderer block={block} anchorId={anchorId} />;
     case "chart":
-      return <ChartRenderer block={block} />;
+      return <ChartRenderer block={block} anchorId={anchorId} />;
     case "table":
-      return <TableRenderer block={block} />;
+      return <TableRenderer block={block} anchorId={anchorId} />;
     default:
       return null;
   }
 };
 
-export const SectionSkeleton: React.FC = () => (
+export const SectionSkeleton: React.FC<{ withTitle?: boolean }> = ({ withTitle = false }) => (
   <Box aria-busy="true" aria-label="Loading section">
-    <Skeleton variant="text" width="45%" height={44} />
-    <Skeleton variant="text" width="70%" />
-    <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", my: 3 }}>
+    {withTitle && (
+      <>
+        <Skeleton variant="text" width="45%" height={44} />
+        <Skeleton variant="text" width="70%" />
+      </>
+    )}
+    <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(auto-fit, minmax(210px, 1fr))" }, mb: 3 }}>
       {[0, 1, 2, 3].map((i) => (
-        <Skeleton key={i} variant="rounded" height={104} />
+        <Skeleton key={i} variant="rounded" height={112} />
       ))}
     </Box>
     <Skeleton variant="rounded" height={360} />
   </Box>
 );
 
-export const EmptyState: React.FC<{ title: string; children?: React.ReactNode; action?: React.ReactNode }> = ({ title, children, action }) => (
+export const EmptyState: React.FC<{ title: string; children?: React.ReactNode; action?: React.ReactNode; icon?: React.ReactNode }> = ({
+  title,
+  children,
+  action,
+  icon,
+}) => (
   <Paper sx={{ p: { xs: 3, md: 5 }, textAlign: "center", borderStyle: "dashed", backgroundColor: PALETTE.bgSubtle }}>
-    <HourglassEmptyOutlinedIcon sx={{ fontSize: 36, color: PALETTE.brandGold, mb: 1 }} aria-hidden="true" />
+    <Box aria-hidden="true" sx={{ color: PALETTE.brandGold, mb: 1, "& svg": { fontSize: 36 } }}>
+      {icon ?? <HourglassEmptyOutlinedIcon />}
+    </Box>
     <Typography variant="h3" component="h2" sx={{ mb: 0.75 }}>
       {title}
     </Typography>
@@ -456,9 +471,31 @@ export const EmptyState: React.FC<{ title: string; children?: React.ReactNode; a
         {children}
       </Typography>
     )}
-    {action && <Box sx={{ mt: 2 }}>{action}</Box>}
+    {action && <Box sx={{ mt: 2.5 }}>{action}</Box>}
   </Paper>
 );
+
+/** A section shows "On this page" once it has at least this many titled charts, tables or texts. */
+const MIN_TOC_ENTRIES = 4;
+
+const slug = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+
+/** The id each titled block is linked by: its own chart/table id, made unique within the page. */
+function blockAnchors(blocks: SectionBlock[]): (string | undefined)[] {
+  const seen = new Set<string>();
+  return blocks.map((b, idx) => {
+    if (b.type === "kpis" || b.type === "callout" || !b.title) return undefined;
+    let id = b.type === "chart" ? b.chart_id : b.type === "table" ? b.table_id || b.id : `text-${slug(b.title)}`;
+    if (!id || seen.has(id)) id = `block-${idx + 1}`;
+    seen.add(id);
+    return id;
+  });
+}
 
 export const SectionRenderer: React.FC<{
   section?: Section | null;
@@ -466,43 +503,96 @@ export const SectionRenderer: React.FC<{
   error?: Error | null;
   emptyMessage?: string;
   pendingMessage?: string;
-}> = ({ section, isLoading, error, emptyMessage, pendingMessage }) => {
-  if (isLoading) return <SectionSkeleton />;
+  /** 1: the section is the page (its title is the page's h1). 2: it sits under a page header of its own. */
+  headingLevel?: 1 | 2;
+  /** Page-level actions shown in the header. */
+  headerActions?: React.ReactNode;
+  /** Shown right below the header, whatever state the section is in (e.g. a page's own controls). */
+  afterHeader?: React.ReactNode;
+  /** Offer "On this page" for long sections. */
+  toc?: boolean;
+}> = ({ section, isLoading, error, emptyMessage, pendingMessage, headingLevel = 1, headerActions, afterHeader, toc = true }) => {
+  const anchors = React.useMemo(() => (section ? blockAnchors(section.blocks) : []), [section]);
+  const tocEntries: TocEntry[] = React.useMemo(
+    () =>
+      section
+        ? section.blocks.flatMap((b, idx) => (anchors[idx] && b.type !== "kpis" && b.type !== "callout" && b.title ? [{ id: anchors[idx]!, label: b.title }] : []))
+        : [],
+    [section, anchors]
+  );
+  const titleId = section ? `section-${section.id}-title` : undefined;
 
-  if (!section) {
-    const notReady = error instanceof ApiError && error.status === 404;
-    if (error && !notReady) {
-      return (
-        <Alert severity="error" sx={{ my: 2 }}>
-          <AlertTitle>Could not load this page</AlertTitle>
-          {error.message}
-        </Alert>
-      );
-    }
-    return (
-      <EmptyState title={notReady ? "Not computed yet" : "No run selected"}>
-        {notReady
-          ? pendingMessage || "This page fills in automatically as soon as the pipeline stage that produces it has finished."
-          : emptyMessage || "Upload the workbook on the Runs page, or pick a run in the header."}
-      </EmptyState>
-    );
-  }
-
-  return (
-    <Box component="article" aria-labelledby={`section-${section.id}-title`}>
-      <Box sx={{ mb: 3 }}>
-        <Typography id={`section-${section.id}-title`} variant="h1" sx={{ mb: 0.5 }}>
+  const header =
+    headingLevel === 1 ? (
+      <PageHeader title={section?.title} description={section?.subtitle} actions={headerActions} headingId={titleId} />
+    ) : section ? (
+      <Box sx={{ mb: 2.5 }}>
+        <Typography id={titleId} variant="h2">
           {section.title}
         </Typography>
         {section.subtitle && (
-          <Typography variant="body1" sx={{ color: PALETTE.inkSecondary, maxWidth: "75ch" }}>
+          <Typography variant="body1" sx={{ mt: 0.5, color: PALETTE.inkSecondary, maxWidth: "75ch" }}>
             {section.subtitle}
           </Typography>
         )}
       </Box>
-      {section.blocks.map((block, idx) => (
-        <BlockRenderer key={idx} block={block} />
-      ))}
+    ) : null;
+
+  let body: React.ReactNode;
+  if (isLoading) {
+    body = <SectionSkeleton withTitle={headingLevel === 2} />;
+  } else if (!section) {
+    const notReady = error instanceof ApiError && error.status === 404;
+    body =
+      error && !notReady ? (
+        <Alert severity="error" sx={{ my: 2 }}>
+          <AlertTitle>Could not load this page</AlertTitle>
+          {error.message}
+        </Alert>
+      ) : notReady ? (
+        <EmptyState title="Not computed yet">
+          {pendingMessage || "This page fills in automatically as soon as the pipeline stage that produces it has finished."}
+        </EmptyState>
+      ) : (
+        <EmptyState
+          title="No run selected"
+          icon={<FolderOpenOutlinedIcon />}
+          action={
+            <Button variant="contained" component={RouterLink} to="/runs">
+              Go to runs
+            </Button>
+          }
+        >
+          {emptyMessage || "Upload the workbook on the Runs page, or pick a run in the header."}
+        </EmptyState>
+      );
+  }
+
+  if (!section || isLoading) {
+    return (
+      <Box>
+        {header}
+        {afterHeader}
+        {body}
+      </Box>
+    );
+  }
+
+  const showToc = toc && tocEntries.length >= MIN_TOC_ENTRIES;
+  const blocks = section.blocks.map((block, idx) => <BlockRenderer key={idx} block={block} anchorId={anchors[idx]} />);
+
+  return (
+    <Box component="article" aria-labelledby={titleId}>
+      {header}
+      {afterHeader}
+      {showToc ? (
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", xl: "minmax(0, 1fr) 216px" }, columnGap: 4, alignItems: "start" }}>
+          <Box sx={{ minWidth: 0 }}>{blocks}</Box>
+          <OnThisPage entries={tocEntries} />
+        </Box>
+      ) : (
+        blocks
+      )}
     </Box>
   );
 };

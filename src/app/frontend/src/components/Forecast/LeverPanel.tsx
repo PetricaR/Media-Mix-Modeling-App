@@ -18,7 +18,7 @@ import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import BookmarkAddOutlinedIcon from "@mui/icons-material/BookmarkAddOutlined";
 import type { ScenarioChannelRow } from "../../api/types";
-import { FONT_MONO, PALETTE } from "../../theme";
+import { NUMERIC, PALETTE } from "../../theme";
 import { eurCompact, signedPct } from "./format";
 
 export interface Preset {
@@ -79,7 +79,7 @@ const PctInput: React.FC<{ value: number; label: string; disabled?: boolean; onC
       onKeyDown={(e) => {
         if (e.key === "Enter") commit();
       }}
-      inputProps={{ inputMode: "decimal", "aria-label": label, style: { textAlign: "right", fontFamily: FONT_MONO, padding: "5px 2px 5px 8px" } }}
+      inputProps={{ inputMode: "decimal", "aria-label": label, style: { textAlign: "right", ...NUMERIC, fontWeight: 600, padding: "5px 2px 5px 8px" } }}
       InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
       sx={{ width: 88, flexShrink: 0 }}
     />
@@ -125,7 +125,7 @@ export const LeverPanel: React.FC<LeverPanelProps> = ({
   return (
     <Box component="section" aria-labelledby="levers-title">
       <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-        <Typography id="levers-title" variant="h3">
+        <Typography id="levers-title" variant="h3" component="h2">
           Budget levers
         </Typography>
         <Button size="small" startIcon={<RestartAltIcon fontSize="small" />} onClick={() => onChange({})} disabled={!changed}>
@@ -170,7 +170,7 @@ export const LeverPanel: React.FC<LeverPanelProps> = ({
                   <Typography id={`lever-${ch.slug}`} sx={{ fontWeight: 700, fontSize: "0.9rem", lineHeight: 1.3 }}>
                     {ch.channel}
                   </Typography>
-                  <Typography variant="caption" sx={{ color: PALETTE.inkSecondary, fontFamily: FONT_MONO }}>
+                  <Typography variant="caption" sx={{ color: PALETTE.inkSecondary, ...NUMERIC }}>
                     {noSpend ? "No spend in this plan" : moved ? `${eurCompact(ch.base_spend)} → ${eurCompact(ch.base_spend * m)}` : `${eurCompact(ch.base_spend)} planned`}
                   </Typography>
                 </Box>
@@ -199,7 +199,7 @@ export const LeverPanel: React.FC<LeverPanelProps> = ({
                   sx={{ mt: -0.5, color: PALETTE.inkSecondary, opacity: effectsStale ? 0.5 : 1, transition: "opacity 0.2s" }}
                 >
                   Sales effect{" "}
-                  <Box component="span" sx={{ fontFamily: FONT_MONO, fontWeight: 700, color: PALETTE.inkPrimary }}>
+                  <Box component="span" sx={{ ...NUMERIC, fontWeight: 700, color: PALETTE.inkPrimary }}>
                     {eurCompact(eff.delta_sales, true)}
                   </Box>
                   {eff.delta_sales_lo != null && eff.delta_sales_hi != null && (

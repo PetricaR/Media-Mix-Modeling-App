@@ -43,8 +43,10 @@ import { ChannelEffects } from "../components/Forecast/ChannelEffects";
 import { LAST_YEAR_SHIFT_DAYS, PLANNER_COLORS, plannerFigure, type PlannerLine } from "../components/Forecast/figures";
 import { addDays, eur, eurCompact, multiplierLabel, shortDate, signedEur, signedPct } from "../components/Forecast/format";
 import { LeverPanel } from "../components/Forecast/LeverPanel";
+import { RUN_STATUS_LABEL, runStatusColor } from "../components/Import/format";
+import { PageHeader } from "../components/Layout/PageHeader";
 import { SectionRenderer } from "../components/Sections/SectionRenderer";
-import { FONT_MONO, PALETTE } from "../theme";
+import { NUMERIC, PALETTE } from "../theme";
 
 const LazyPlotlyChart = React.lazy(() => import("../components/Charts/PlotlyChart"));
 
@@ -123,7 +125,7 @@ const Tile: React.FC<{ label: string; value: string; sub?: React.ReactNode; acce
     <Typography variant="caption" component="p" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: PALETTE.inkSecondary }}>
       {label}
     </Typography>
-    <Typography sx={{ fontWeight: 700, fontSize: "1.2rem", lineHeight: 1.35 }}>{value}</Typography>
+    <Typography sx={{ ...NUMERIC, fontWeight: 700, fontSize: "1.2rem", lineHeight: 1.35, letterSpacing: "-0.01em" }}>{value}</Typography>
     {sub && (
       <Typography variant="caption" component="p" sx={{ color: PALETTE.inkSecondary }}>
         {sub}
@@ -348,19 +350,12 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
 
   return (
     <Box>
-      <Paper component="section" aria-labelledby="planner-title" sx={{ p: { xs: 2, md: 3 }, mb: 3, borderTop: `3px solid ${PALETTE.brandGold}` }}>
-        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="flex-start" spacing={2}>
-          <Box sx={{ maxWidth: "72ch" }}>
-            <Typography id="planner-title" variant="h2">
-              Forecast planner
-            </Typography>
-            <Typography variant="body2" sx={{ mt: 0.5 }}>
-              Actual sales lead into the forecast for a budget plan. Move a channel's budget and the forecast, the spend and each
-              channel's effect update in place; the fitted Meridian model is reused, so nothing is refit.
-            </Typography>
-          </Box>
-          {runId && (
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+      <PageHeader
+        title="Forecast planner"
+        description="Actual sales lead into the forecast for a budget plan. Move a channel's budget and the forecast, the spend and each channel's effect update in place; the fitted Meridian model is reused, so nothing is refit."
+        actions={
+          runId ? (
+            <>
               <Button size="small" variant="outlined" startIcon={<DownloadIcon fontSize="small" />} href={`/api/v1/runs/${runId}/plan-template?days=42`}>
                 Plan template (CSV)
               </Button>
@@ -384,14 +379,16 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                   if (f) void handleUploadPlanCsv(f);
                 }}
               />
-            </Stack>
-          )}
-        </Stack>
+            </>
+          ) : undefined
+        }
+      />
 
+      <Box component="section" aria-label="Budget plan" sx={{ mb: 3 }}>
         {errorMsg && (
           <Alert
             severity="error"
-            sx={{ mt: 2 }}
+            sx={{ mb: 2 }}
             onClose={() => setErrorMsg(null)}
             action={
               changed && !currentId ? (
@@ -406,20 +403,26 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
         )}
 
         {forecasts.length === 0 ? (
-          <Alert severity="info" sx={{ mt: 2 }}>
+          <Alert severity="info">
             No forecast yet. The example-plan forecast appears when the Meridian stages of this run have finished; you can also
             upload your own plan (the day after the history onwards, one cost column per paid channel).
           </Alert>
         ) : (
-          <Box sx={{ mt: 2.5 }}>
-            <FormControl size="small" sx={{ width: { xs: "100%", sm: 440 }, maxWidth: "100%" }}>
+          <Box>
+            <FormControl size="small" sx={{ width: { xs: "100%", sm: 480 }, maxWidth: "100%" }}>
               <InputLabel id="forecast-select-label">Budget plan</InputLabel>
-              <Select labelId="forecast-select-label" label="Budget plan" value={forecastId ?? ""} onChange={(e) => setForecastId(e.target.value as string)}>
+              <Select
+                labelId="forecast-select-label"
+                label="Budget plan"
+                value={forecastId ?? ""}
+                onChange={(e) => setForecastId(e.target.value as string)}
+                sx={{ backgroundColor: "#FFFFFF" }}
+              >
                 {forecasts.map((f) => (
                   <MenuItem key={f.id} value={f.id}>
                     <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%", minWidth: 0 }}>
                       <Box sx={{ flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</Box>
-                      <Chip size="small" label={f.status} color={f.status === "succeeded" ? "success" : f.status === "failed" ? "error" : "info"} />
+                      <Chip size="small" label={RUN_STATUS_LABEL[f.status] ?? f.status} color={runStatusColor(f.status)} />
                     </Stack>
                   </MenuItem>
                 ))}
@@ -441,7 +444,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
             )}
           </Box>
         )}
-      </Paper>
+      </Box>
 
       {result && figure && (
         <Box
@@ -481,7 +484,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
 
           <Stack spacing={3} sx={{ minWidth: 0 }}>
             <Paper component="section" aria-labelledby="forecast-chart-title" sx={{ p: { xs: 2, md: 2.5 } }}>
-              <Typography id="forecast-chart-title" variant="h3">
+              <Typography id="forecast-chart-title" variant="h3" component="h2">
                 {result.start_date && result.end_date
                   ? `Forecast ${shortDate(result.start_date)} – ${shortDate(result.end_date)}, with the sales that led into it`
                   : "Forecast, with the sales that led into it"}
@@ -626,13 +629,13 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                                 {shortDate(r.date)}
                               </TableCell>
                               {[r.actual, r.lastYear, r.plan, r.lo, r.hi].map((x, i) => (
-                                <TableCell key={i} align="right" sx={{ fontFamily: FONT_MONO }}>
+                                <TableCell key={i} align="right" sx={NUMERIC}>
                                   {v(x)}
                                 </TableCell>
                               ))}
-                              {shownResult && <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>{v(r.scenario)}</TableCell>}
-                              <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>{v(r.spend)}</TableCell>
-                              {shownResult && <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>{v(r.scenarioSpend)}</TableCell>}
+                              {shownResult && <TableCell align="right" sx={NUMERIC}>{v(r.scenario)}</TableCell>}
+                              <TableCell align="right" sx={NUMERIC}>{v(r.spend)}</TableCell>
+                              {shownResult && <TableCell align="right" sx={NUMERIC}>{v(r.scenarioSpend)}</TableCell>}
                             </TableRow>
                           );
                         })}
@@ -645,7 +648,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
 
             {shownResult && (
               <Paper component="section" aria-labelledby="effects-title" sx={{ p: { xs: 2, md: 2.5 } }}>
-                <Typography id="effects-title" variant="h3">
+                <Typography id="effects-title" variant="h3" component="h2">
                   What each change does to forecast sales
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 0.5, mb: 1.5 }}>
@@ -656,7 +659,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
             )}
 
             <Paper component="section" aria-labelledby="saved-title" sx={{ p: { xs: 2, md: 2.5 } }}>
-              <Typography id="saved-title" variant="h3">
+              <Typography id="saved-title" variant="h3" component="h2">
                 Saved scenarios
               </Typography>
               {saved.length === 0 ? (
@@ -679,7 +682,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                           <Box aria-hidden="true" sx={{ width: 22, flexShrink: 0, borderTop: `2.5px dashed ${PLANNER_COLORS.saved[entry.slot % MAX_SAVED]}` }} />
                           <Box sx={{ minWidth: 0 }}>
                             <Typography sx={{ fontWeight: 650, fontSize: "0.9rem" }}>{entry.name}</Typography>
-                            <Typography variant="caption" sx={{ color: PALETTE.inkSecondary, fontFamily: FONT_MONO }}>
+                            <Typography variant="caption" sx={{ color: PALETTE.inkSecondary, ...NUMERIC }}>
                               {r
                                 ? `${signedEur(r.delta_sales)} sales (${signedPct(r.delta_sales_pct, 2)}) · ${signedEur(r.delta_spend)} spend · ${r.horizon_days} days`
                                 : detail?.status === "failed"
@@ -716,6 +719,8 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
         section={section}
         isLoading={isLoading}
         error={error as Error | null}
+        headingLevel={2}
+        toc={false}
         pendingMessage="The back-test, the example-plan forecast and its scenarios appear when the Meridian forecast stage has finished."
       />
     </Box>

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from "react";
-import { Box, Button, Paper, Skeleton, Typography } from "@mui/material";
+import { Button, Paper, Skeleton, Typography } from "@mui/material";
 import { Link as RouterLink, useLocation } from "react-router-dom";
 import { PALETTE } from "../../theme";
+import { PageHeader } from "../Layout/PageHeader";
 
 /**
  * The title of a run page. After an action that moves the user here (upload, start), focus goes to the heading so
@@ -13,18 +14,7 @@ export const RunPageHeader: React.FC<{ title: string; children?: React.ReactNode
   useEffect(() => {
     if ((location.state as { focusHeading?: boolean } | null)?.focusHeading) heading.current?.focus();
   }, [location.key, location.state]);
-  return (
-    <Box sx={{ mb: 3, maxWidth: "75ch" }}>
-      <Typography ref={heading} tabIndex={-1} variant="h1" sx={{ mb: 0.5, "&:focus": { outline: "none" } }}>
-        {title}
-      </Typography>
-      {children && (
-        <Typography variant="body1" component="div" sx={{ color: PALETTE.inkSecondary }}>
-          {children}
-        </Typography>
-      )}
-    </Box>
-  );
+  return <PageHeader title={title} description={children} headingRef={heading} />;
 };
 
 export const NoRunSelected: React.FC<{ loading: boolean }> = ({ loading }) =>

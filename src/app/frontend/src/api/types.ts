@@ -142,6 +142,15 @@ export interface StageStatus {
   error?: string | null;
 }
 
+/** `GET /health`. */
+export interface HealthInfo {
+  status: string;
+  version: string;
+  git_sha?: string | null;
+  auth_required: boolean;
+  max_meridian_queued?: number;
+}
+
 export interface RunSummaryItem {
   id: string;
   name: string;
