@@ -326,10 +326,13 @@ export const AppShell: React.FC<{
           )}
           <Stack direction="row" alignItems="center" spacing={1.25} sx={{ flexGrow: 1, minWidth: 0 }}>
             <FormControl size="small" sx={{ minWidth: { xs: 140, sm: 220 }, maxWidth: 360, flexShrink: 1 }}>
-              <InputLabel id="run-select-label">Run</InputLabel>
+              <InputLabel id="run-select-label" shrink>
+                Run
+              </InputLabel>
               <Select
                 labelId="run-select-label"
                 label="Run"
+                notched
                 value={runs.some((r) => r.id === selectedRunId) ? selectedRunId ?? "" : ""}
                 displayEmpty
                 onChange={(e) => onSelectRunId((e.target.value as string) || null)}

@@ -235,4 +235,5 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     each rationale under its role (the separate "Why" column was squeezed to one word per line).
 18. axe-core (WCAG 2.1 A/AA + best practice) on every page at 1440 and 390 px: navigation links are wrapped in `<li>`,
     the plan upload is a real button (it was a `<label role="button">`), the downloads table has its own landmark
-    name, and scrollable code blocks are focusable.
+    name, and scrollable code blocks are focusable. With no runs, the header's "Run" label no longer overlaps "No run
+    yet" and the empty runs table says so (checked by uploading and deleting a run on an isolated test-DB stack).

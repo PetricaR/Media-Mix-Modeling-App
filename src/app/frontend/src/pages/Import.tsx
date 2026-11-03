@@ -279,6 +279,13 @@ export const ImportPage: React.FC<{
                   </TableRow>
                 </TableHead>
                 <TableBody>
+                  {(runsData?.runs || []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={3} sx={{ color: PALETTE.inkSecondary, py: 2 }}>
+                        No runs yet. Upload the workbook above to create one.
+                      </TableCell>
+                    </TableRow>
+                  )}
                   {(runsData?.runs || []).map((r) => (
                     <TableRow key={r.id} selected={r.id === selectedRunId} hover>
                       <TableCell>
