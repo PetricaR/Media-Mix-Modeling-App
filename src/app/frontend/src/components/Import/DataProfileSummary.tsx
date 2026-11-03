@@ -47,7 +47,8 @@ export const DataProfileSummary: React.FC<{ profile: DataProfile; channelCount: 
           value={profile.calendar_days ? `${profile.calendar_days.toLocaleString("en-GB")} days` : formatDay(start)}
           detail={`${formatDay(start)} – ${formatDay(end)}`}
         />
-        <Stat label="Channels" value={channelCount.toLocaleString("en-GB")} />
+        <Stat label="Channels" value={channelCount.toLocaleString("en-GB")} detail="Daily × Channel (National)" />
+        <Stat label="Spend granularity" value="Daily (€)" detail="1 row/day per channel" />
         <Stat label="Total sales" value={formatEuroCompact(profile.total_sales_sum)} />
         <Stat label="Media spend" value={formatEuroCompact(profile.total_media_spend_sum)} />
       </Box>

@@ -180,7 +180,9 @@ def test_executive_summary_follows_the_numbers(profiled_case_study: Any, wide_mo
         forecast_summary={"plan_time_mae_pct": 18.0},
     )
     body = next(b for b in sec.blocks if getattr(b, "title", "") == "Executive summary").body
-    assert body.startswith("**Can daily sales be forecast from the marketing budget?** Not reliably")  # plan-time misses
+    # Hold-outs meet the target, the back-test from a plan does not: the verdict says which
+    assert body.startswith("**Can daily sales be forecast from the marketing budget?** Only with the realised Affiliate cost")
+    assert "**18.0%**, outside it" in body
 
 
 def test_draft_brief_has_no_invented_roi_and_computed_channel_importance(profiled_case_study: Any, wide_model: pd.DataFrame) -> None:
@@ -313,3 +315,32 @@ def test_regime_breaks_are_detected_from_the_data(wide_model: pd.DataFrame) -> N
     assert commission is not None and commission[0] == pd.Timestamp("2024-02-01")
     flat = pd.Series(1.0, index=wide_model.index)
     assert detect_level_shift(flat) is None
+
+
+def test_a_worker_is_started_when_the_execution_list_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from google.cloud import run_v2
+
+    from mmm_studio.jobs import cloud_run
+    from mmm_studio.settings import get_settings
+
+    monkeypatch.setenv("MMM_WAKE_WORKERS", "cloudrun")
+    monkeypatch.setenv("MMM_GCP_PROJECT_ID", "test-project")
+    get_settings.cache_clear()
+    monkeypatch.setattr(cloud_run, "_LAST_WAKE_AT", {})
+    started: list[str] = []
+
+    def no_listing(queue: str) -> bool:
+        raise PermissionError("run.executions.list denied")
+
+    class Jobs:
+        def run_job(self, name: str) -> None:
+            started.append(name)
+
+    monkeypatch.setattr(cloud_run, "_worker_active", no_listing)
+    monkeypatch.setattr(run_v2, "JobsClient", Jobs)
+    try:
+        cloud_run.wake_worker("meridian")
+        expected = cloud_run.job_resource_name("meridian")
+    finally:
+        get_settings.cache_clear()  # no cached test settings for later tests
+    assert started == [expected]

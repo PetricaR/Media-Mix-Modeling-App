@@ -59,8 +59,14 @@ def wake_worker(queue: str) -> None:
             return
         _LAST_WAKE_AT[queue] = now
     try:
-        if _worker_active(queue):
-            return
+        active = _worker_active(queue)
+    except Exception:
+        # Without the execution list, a second worker is cheaper than a queue nobody drains
+        logger.warning("Could not list the executions of %s; starting a worker anyway.", queue, exc_info=True)
+        active = False
+    if active:
+        return
+    try:
         from google.cloud import run_v2
 
         run_v2.JobsClient().run_job(name=job_resource_name(queue))

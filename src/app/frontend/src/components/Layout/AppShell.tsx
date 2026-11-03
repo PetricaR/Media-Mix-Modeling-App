@@ -40,6 +40,7 @@ import { api } from "../../api/client";
 import { isRunActive, useHealth, useRun, useRuns } from "../../api/hooks";
 import { LAYOUT, PALETTE } from "../../theme";
 import { PROFILES, RUN_STATUS_LABEL as STATUS_LABEL, runStatusColor as statusColor } from "../Import/format";
+import { refreshSession } from "./AuthGate";
 import { BrandMark } from "./BrandMark";
 import { NAV_GROUPS, findNavItem } from "./nav";
 
@@ -60,11 +61,15 @@ export const AppShell: React.FC<{
   const { data: runsData } = useRuns();
   const runs = runsData?.runs || [];
 
-  // Fall back to the active (or newest) run when nothing is selected or the stored run no longer exists
+  // Fall back to the active succeeded run (or newest succeeded run) when nothing is selected or the stored run no longer exists
   useEffect(() => {
     if (!runsData) return;
     if (selectedRunId && runs.some((r) => r.id === selectedRunId)) return;
-    const fallback = runs.find((r) => r.is_active) || runs[0];
+    const fallback =
+      runs.find((r) => r.is_active && r.status === "succeeded") ||
+      runs.find((r) => r.status === "succeeded") ||
+      runs.find((r) => r.is_active) ||
+      runs[0];
     onSelectRunId(fallback ? fallback.id : null);
   }, [runsData, runs, selectedRunId, onSelectRunId]);
 
@@ -119,8 +124,7 @@ export const AppShell: React.FC<{
     try {
       await api.logout();
     } finally {
-      queryClient.clear();
-      await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+      await refreshSession(queryClient);
     }
   };
 

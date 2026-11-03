@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure
-from mmm_studio.charts.theme import SLATE, channel_color
+from mmm_studio.charts.theme import GOLD, SLATE
 from mmm_studio.core.meridian.spec import channel_label
 from mmm_studio.report.narrative import fmt_eur, fmt_eur_signed
 from mmm_studio.report.sections import (
@@ -452,11 +452,8 @@ def build_optimiser_section(
         categories=labels,
         series=[
             {"name": "Current spend (€M)", "values": [round(a["current_spend"] / 1e6, 2) for a in allocs_sorted], "color": SLATE},
-            {
-                "name": "Optimised spend (€M)",
-                "values": [round(a["optimised_spend"] / 1e6, 2) for a in allocs_sorted],
-                "colors": [channel_color(lbl) for lbl in labels],
-            },
+            # One colour per series: per-channel colours would put one channel's colour in the legend
+            {"name": "Optimised spend (€M)", "values": [round(a["optimised_spend"] / 1e6, 2) for a in allocs_sorted], "color": GOLD},
         ],
         barmode="group",
         orientation="h",

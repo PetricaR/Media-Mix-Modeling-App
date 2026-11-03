@@ -141,6 +141,8 @@ deploy/         deploy.sh (all | update | seed; GCP_PROJECT_ID=formare-dev, euro
    queued jobs (409), and only then stores the settings, clears a re-run's results (sections, data, models, reports,
    forecasts, scenarios, optimisations) and defers `run_analysis_job` (lock `analysis:{id}`). The analysis job defers
    `run_meridian_job` (lock `meridian_singleton`) when it finishes, so Meridian never runs before or alongside it.
+   Inside a worker the Procrastinate app is already open (async pool), and `app.open()` raises `NotImplementedError`:
+   `defer_task` defers through the open connector in that case; keep it that way.
 4. Each stage updates its `stages` row and writes `sections/{id}.json` plus `sections/_index.json`.
 5. The UI polls: the run every 2 s, sections every 4 s.
 

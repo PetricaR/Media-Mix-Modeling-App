@@ -407,8 +407,8 @@ def build_overview_section(
 
     pt_pct = forecast_summary.get("plan_time_mae_pct") if has_mer and forecast_summary else None
     ols_pct = 100 * float(ols_p["MAE_over_mean"]) if has_mer and ols_p else None
-    checks = [v for v in (q_pct, f_pct, pt_pct) if v is not None]
-    meets_target = all(v <= 15.0 for v in checks)
+    holdouts_meet = all(v <= 15.0 for v in (q_pct, f_pct) if v is not None)
+    meets_target = holdouts_meet and (pt_pct is None or pt_pct <= 15.0)
 
     findings: list[dict[str, str]] = []
     acc_text = f"{model_name}: {q_pct:.1f}% MAE / mean on the {p_label} hold-out (R² {float(main['R2']):.3f})"
@@ -422,8 +422,13 @@ def build_overview_section(
         {
             "area": "Forecast accuracy (target ≤ 15 %)",
             "finding": acc_text + ".",
-            "implication": "The target is met on every hold-out and back-test." if meets_target
-            else "The target is not met on every hold-out; see the Model, Benchmark and Forecast pages.",
+            "implication": "The target is met on every hold-out and back-test."
+            if meets_target
+            else (
+                "The hold-outs meet the target only with the realised commission; a forecast from a plan alone misses it."
+                if holdouts_meet
+                else "The target is not met on every hold-out; see the Model, Benchmark and Forecast pages."
+            ),
         }
     )
     print_name = names.print_name or facts.get("catalog")
@@ -540,14 +545,25 @@ def build_overview_section(
     hold_txt = f"the {p_label} hold-out with **{q_pct:.1f}% MAE / mean**" + (
         f" and the {f_label} forward hold-out with **{f_pct:.1f}%**" if f_pct is not None and f_label else ""
     )
+    commission_txt = ", ".join(names.commission)
+    pt_txt = (
+        f"from a budget plan alone (with {commission_txt} estimated instead of its realised cost) the back-test scores "
+        f"**{pt_pct:.1f}%**"
+        if pt_pct is not None
+        else ""
+    )
     if meets_target:
-        verdict = f"Yes: {model_name} forecasts {hold_txt}, within the brief's 15 % target."
+        verdict = f"Yes: {model_name} forecasts {hold_txt}, within the brief's 15 % target." + (
+            f" {pt_txt[0].upper()}{pt_txt[1:]}." if pt_txt else ""
+        )
+    elif holdouts_meet:
+        verdict = (
+            f"Only with the realised {commission_txt} cost: {model_name} forecasts {hold_txt}, within the brief's 15 % "
+            f"target, but {pt_txt}, outside it."
+        )
     else:
-        verdict = f"Not reliably: {model_name} forecasts {hold_txt}; at least one window misses the brief's 15 % target."
-    if pt_pct is not None:
-        verdict += (
-            f" From a budget plan alone (with {', '.join(names.commission)} estimated instead of its realised cost) the back-test "
-            f"scores **{pt_pct:.1f}%**."
+        verdict = f"Not reliably: {model_name} forecasts {hold_txt}; at least one hold-out misses the brief's 15 % target." + (
+            f" {pt_txt[0].upper()}{pt_txt[1:]}." if pt_txt else ""
         )
     if has_mer:
         comparison = ""

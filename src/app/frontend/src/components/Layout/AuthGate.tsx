@@ -1,12 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { Alert, Box, Button, CircularProgress, Paper, Stack, TextField, Typography } from "@mui/material";
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { api, onAuthRequired } from "../../api/client";
 import { useAuthSession } from "../../api/hooks";
 import { PALETTE } from "../../theme";
 import { BrandMark } from "./BrandMark";
 
 const errorText = (err: unknown) => (err instanceof Error && err.message ? err.message : "Sign-in failed.");
+
+/** After signing in or out: re-read the session first (the gate switches screens), then drop every other cached result.
+ * `queryClient.clear()` would also remove the session query, and nothing would refetch it. */
+export async function refreshSession(queryClient: QueryClient): Promise<void> {
+  await queryClient.refetchQueries({ queryKey: ["auth-session"] });
+  queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "auth-session" });
+}
 
 /** The sign-in screen: the access code is exchanged for an HttpOnly session cookie and never stored in the page. */
 const SignIn: React.FC = () => {
@@ -23,8 +30,7 @@ const SignIn: React.FC = () => {
     try {
       await api.login(code.trim());
       setCode("");
-      queryClient.clear();
-      await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+      await refreshSession(queryClient);
     } catch (err) {
       setError(errorText(err));
     } finally {

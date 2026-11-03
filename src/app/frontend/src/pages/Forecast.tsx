@@ -33,6 +33,7 @@ import {
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/Download";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
+import TuneIcon from "@mui/icons-material/Tune";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { useQueryClient } from "@tanstack/react-query";
@@ -41,8 +42,9 @@ import { useForecast, useForecasts, useRun, useRunHistory, useScenario, useScena
 import type { RunHistory, ScenarioChannelRow, ScenarioDetail, ScenarioResult } from "../api/types";
 import { ChannelEffects } from "../components/Forecast/ChannelEffects";
 import { LAST_YEAR_SHIFT_DAYS, PLANNER_COLORS, plannerFigure, type PlannerLine } from "../components/Forecast/figures";
-import { addDays, eur, eurCompact, multiplierLabel, shortDate, signedEur, signedPct } from "../components/Forecast/format";
+import { addDays, eur, eurCompact, multiplierLabel, shortDate, signedEur, signedPct, type BudgetInputMode, type SpendGranularity } from "../components/Forecast/format";
 import { LeverPanel } from "../components/Forecast/LeverPanel";
+import { PlanBuilderDialog } from "../components/Forecast/PlanBuilderDialog";
 import { RUN_STATUS_LABEL, runStatusColor } from "../components/Import/format";
 import { PageHeader } from "../components/Layout/PageHeader";
 import { SectionRenderer } from "../components/Sections/SectionRenderer";
@@ -200,6 +202,9 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const [forecastId, setForecastId] = useState<string | null>(null);
   const [multipliers, setMultipliers] = useState<Record<string, number>>({});
   const [horizonDays, setHorizonDays] = useState<number>(42);
+  const [inputMode, setInputMode] = useState<BudgetInputMode>("pct");
+  const [spendGranularity, setSpendGranularity] = useState<SpendGranularity>("period");
+  const [builderOpen, setBuilderOpen] = useState(false);
   const [historyRange, setHistoryRange] = useState("3m");
   const [showLastYear, setShowLastYear] = useState(false);
   const [scenarioIds, setScenarioIds] = useState<Record<string, string>>({});
@@ -239,7 +244,13 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const channelRows = useMemo(() => result?.channel_summary ?? [], [result]);
   const levers = useMemo(() => channelRows.filter((c) => !lockedSlugs.has(c.slug)), [channelRows, lockedSlugs]);
   const locked = useMemo(() => channelRows.filter((c) => lockedSlugs.has(c.slug)), [channelRows, lockedSlugs]);
-  const channelNames = useMemo(() => Object.fromEntries(channelRows.map((c) => [c.slug, c.channel])), [channelRows]);
+  const channelNames = useMemo(() => {
+    const fromRun = Object.fromEntries(
+      (run?.config?.role_config?.channels ?? []).map((c) => [c.slug ?? c.name, c.name])
+    );
+    const fromResult = Object.fromEntries(channelRows.map((c) => [c.slug, c.channel]));
+    return { ...fromRun, ...fromResult };
+  }, [run, channelRows]);
 
   // --- What-if: every lever change is evaluated on its own, a moment after the last change --------------------
   const horizon = Math.min(horizonDays, horizonMax);
@@ -352,22 +363,30 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
     <Box>
       <PageHeader
         title="Forecast planner"
-        description="Actual sales lead into the forecast for a budget plan. Move a channel's budget and the forecast, the spend and each channel's effect update in place; the fitted Meridian model is reused, so nothing is refit."
+        description="Set up your forecast period, total media budget, and channel allocations in either Percentage (%) or Fixed amount (€) mode. The fitted Meridian model evaluates scenario updates in place, or you can configure a custom plan up to 90 days."
         actions={
           runId ? (
             <>
+              <Button
+                size="small"
+                variant="contained"
+                color="secondary"
+                startIcon={<TuneIcon fontSize="small" />}
+                onClick={() => setBuilderOpen(true)}
+              >
+                Configure new plan
+              </Button>
               <Button size="small" variant="outlined" startIcon={<DownloadIcon fontSize="small" />} href={`/api/v1/runs/${runId}/plan-template?days=42`}>
                 Plan template (CSV)
               </Button>
               <Button
                 size="small"
-                variant="contained"
-                color="secondary"
+                variant="outlined"
                 onClick={() => planInput.current?.click()}
                 startIcon={uploading ? <CircularProgress size={14} color="inherit" /> : <UploadFileIcon fontSize="small" />}
                 disabled={uploading}
               >
-                {uploading ? "Uploading…" : "Upload a plan"}
+                {uploading ? "Uploading…" : "Upload CSV"}
               </Button>
               <input
                 ref={planInput}
@@ -403,31 +422,80 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
         )}
 
         {forecasts.length === 0 ? (
-          <Alert severity="info">
+          <Alert
+            severity="info"
+            action={
+              runId ? (
+                <Button color="inherit" size="small" onClick={() => setBuilderOpen(true)}>
+                  Configure new plan
+                </Button>
+              ) : undefined
+            }
+          >
             No forecast yet. The example-plan forecast appears when the Meridian stages of this run have finished; you can also
-            upload your own plan (the day after the history onwards, one cost column per paid channel).
+            configure or upload your own plan (the day after the history onwards, one cost column per paid channel).
           </Alert>
         ) : (
           <Box>
-            <FormControl size="small" sx={{ width: { xs: "100%", sm: 480 }, maxWidth: "100%" }}>
-              <InputLabel id="forecast-select-label">Budget plan</InputLabel>
-              <Select
-                labelId="forecast-select-label"
-                label="Budget plan"
-                value={forecastId ?? ""}
-                onChange={(e) => setForecastId(e.target.value as string)}
-                sx={{ backgroundColor: "#FFFFFF" }}
-              >
-                {forecasts.map((f) => (
-                  <MenuItem key={f.id} value={f.id}>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%", minWidth: 0 }}>
-                      <Box sx={{ flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</Box>
-                      <Chip size="small" label={RUN_STATUS_LABEL[f.status] ?? f.status} color={runStatusColor(f.status)} />
-                    </Stack>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} flexWrap="wrap" useFlexGap>
+              <FormControl size="small" sx={{ width: { xs: "100%", sm: 480 }, maxWidth: "100%" }}>
+                <InputLabel id="forecast-select-label">Budget plan</InputLabel>
+                <Select
+                  labelId="forecast-select-label"
+                  label="Budget plan"
+                  value={forecastId ?? ""}
+                  onChange={(e) => setForecastId(e.target.value as string)}
+                  sx={{ backgroundColor: "#FFFFFF" }}
+                >
+                  {forecasts.map((f) => (
+                    <MenuItem key={f.id} value={f.id}>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%", minWidth: 0 }}>
+                        <Box sx={{ flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</Box>
+                        <Chip size="small" label={RUN_STATUS_LABEL[f.status] ?? f.status} color={runStatusColor(f.status)} />
+                      </Stack>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {runId && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<TuneIcon fontSize="small" />}
+                  onClick={() => setBuilderOpen(true)}
+                  sx={{ backgroundColor: "#FFFFFF" }}
+                >
+                  New custom plan (1–90d)…
+                </Button>
+              )}
+            </Stack>
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              flexWrap="wrap"
+              useFlexGap
+              sx={{
+                mt: 1.25,
+                px: 1.5,
+                py: 0.75,
+                borderRadius: 1.5,
+                backgroundColor: "#FFFFFF",
+                border: `1px solid ${PALETTE.borderSubtle}`,
+              }}
+            >
+              <Typography variant="caption" sx={{ fontWeight: 700, color: PALETTE.inkPrimary }}>
+                Spend &amp; plan input granularity:
+              </Typography>
+              <Chip
+                size="small"
+                label="Daily × Channel · National · EUR (€)"
+                sx={{ height: 20, fontSize: "0.7rem", fontWeight: 600 }}
+              />
+              <Typography variant="caption" sx={{ color: PALETTE.inkSecondary }}>
+                1 row/day × {levers.length + locked.length || 7} paid channels ({levers.filter((c) => c.slug !== "catalog").length || 5} continuous daily digital · {levers.some((c) => c.slug === "catalog") ? "1 episodic Catalog send-out" : "Catalog"} · {locked.length || 1} commission control)
+              </Typography>
+            </Stack>
             {scenarioBusy && (
               <Box sx={{ mt: 2 }}>
                 <Typography variant="body2" sx={{ mb: 1 }}>
@@ -451,7 +519,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
           sx={{
             display: "grid",
             gap: 3,
-            gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "290px minmax(0, 1fr)", lg: "320px minmax(0, 1fr)" },
+            gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "340px minmax(0, 1fr)", lg: "380px minmax(0, 1fr)" },
             alignItems: "start",
             mb: 4,
           }}
@@ -475,10 +543,17 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
               evaluating={evaluating}
               horizonDays={horizon}
               horizonMax={horizonMax}
+              startDate={result.start_date}
+              planDaily={result.plan_daily}
+              inputMode={inputMode}
+              onInputModeChange={setInputMode}
+              spendGranularity={spendGranularity}
+              onSpendGranularityChange={setSpendGranularity}
               onHorizonChange={setHorizonDays}
               onSave={handleSave}
               canSave={canSave}
               saveHint={saveHint}
+              onOpenPlanBuilder={runId ? () => setBuilderOpen(true) : undefined}
             />
           </Paper>
 
@@ -735,6 +810,22 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
         toc={false}
         pendingMessage="The back-test, the example-plan forecast and its scenarios appear when the Meridian forecast stage has finished."
       />
+
+      {runId && (
+        <PlanBuilderDialog
+          open={builderOpen}
+          onClose={() => setBuilderOpen(false)}
+          runId={runId}
+          channelNames={channelNames}
+          lockedSlugs={lockedSlugs}
+          initialMode={inputMode}
+          initialGranularity={spendGranularity}
+          onPlanCreated={(newForecastId) => {
+            void queryClient.invalidateQueries({ queryKey: ["forecasts", runId] });
+            setForecastId(newForecastId);
+          }}
+        />
+      )}
     </Box>
   );
 };
