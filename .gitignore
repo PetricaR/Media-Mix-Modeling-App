@@ -211,6 +211,11 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+
+# csv files
+*.csv
+
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
@@ -227,3 +232,4 @@ outputs/*.binpb
 src/app/.env
 src/app/frontend/node_modules/
 src/app/frontend/dist/
+data/external/google_holidays_de.csv
