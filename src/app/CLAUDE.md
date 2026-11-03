@@ -406,3 +406,8 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     and the back-test chart, and every other block (example plan, weekly tables, notebook 05 scenarios) sits in a
     collapsed accordion, so parity content stays in the app. `PlotlyChart` sets `automargin` on y axes, so long
     horizontal-bar labels are no longer cut off.
+26. (2026-11-04) Zoom on a chart no longer resets after a second or two. Any re-render with a new figure object
+    (polling, the planner's scenario updates, react-plotly seeing a new inline `config`) made Plotly redraw from the
+    original ranges. `PlotlyChart` now sets `layout.uirevision` (prop `viewKey`; the Forecast chart uses forecast id +
+    history window, so changing those still resets the view), memoises `config`, and deep-copies the layout so Plotly
+    no longer writes axis ranges into the TanStack Query cache. Double-click still resets the zoom.

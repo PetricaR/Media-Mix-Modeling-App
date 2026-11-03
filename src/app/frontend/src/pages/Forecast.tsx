@@ -610,7 +610,13 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
 
               <Box sx={{ mt: 1, position: "relative" }}>
                 <Suspense fallback={<Skeleton variant="rounded" height={figure.layout.height} />}>
-                  <LazyPlotlyChart data={figure.data} layout={figure.layout} height={figure.layout.height} ariaLabel="Actual sales, plan forecast and scenarios" />
+                  <LazyPlotlyChart
+                    data={figure.data}
+                    layout={figure.layout}
+                    height={figure.layout.height}
+                    ariaLabel="Actual sales, plan forecast and scenarios"
+                    viewKey={`${forecastId ?? ""}:${historyRange}`}
+                  />
                 </Suspense>
               </Box>
               <Typography variant="caption" component="p" sx={{ color: PALETTE.inkSecondary }}>
