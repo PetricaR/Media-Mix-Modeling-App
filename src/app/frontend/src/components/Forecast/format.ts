@@ -183,30 +183,3 @@ export function scaleMultipliersToTotal(
   }
   return next;
 }
-
-/**
- * Split `targetTotalSpend` equally in euros across all active (unpaused) channels that have positive base spend.
- */
-export function splitMultipliersEqually(
-  slugs: string[],
-  baseBySlug: Record<string, number>,
-  currentMultipliers: Record<string, number>,
-  targetTotalSpend: number
-): Record<string, number> {
-  const spendable = slugs.filter((s) => (baseBySlug[s] ?? 0) > 0);
-  if (spendable.length === 0) return { ...currentMultipliers };
-
-  const active = spendable.filter((s) => (currentMultipliers[s] ?? 1) > 0);
-  const pool = active.length > 0 ? active : spendable;
-  const perChannelSpend = Math.max(0, targetTotalSpend) / pool.length;
-
-  const next = { ...currentMultipliers };
-  for (const s of pool) {
-    const base = baseBySlug[s] ?? 0;
-    if (base > 0) {
-      next[s] = Math.round((perChannelSpend / base) * 1000) / 1000;
-    }
-  }
-  return next;
-}
-

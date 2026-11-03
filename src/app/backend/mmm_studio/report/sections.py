@@ -43,6 +43,8 @@ class MarkdownBlock(BaseModel):
 
 class KpisBlock(BaseModel):
     type: Literal["kpis"] = "kpis"
+    # Optional, for pages that place a section's KPI rows separately (the forecast page)
+    id: str | None = None
     items: list[KpiItem]
 
 

@@ -208,6 +208,7 @@ export interface KpiCard {
 
 export interface KpisBlock {
   type: "kpis";
+  id?: string | null;
   items: KpiCard[];
 }
 

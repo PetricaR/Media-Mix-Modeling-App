@@ -748,7 +748,7 @@ def build_forecast_scenarios_section(
     print_cols = [c for c in plan_df.columns if c in print_slugs]
     n_sends = int((plan_df[print_cols] > 0).to_numpy().sum()) if print_cols else 0
     head_label = "from a plan" if plan_time_df is not None else "with realised costs"
-    kpis = [
+    plan_kpis = [
         KpiItem(
             label=f"Forecast sales, {len(forecast_daily)} days",
             value=fmt_eur(tot_fc_sales),
@@ -764,6 +764,8 @@ def build_forecast_scenarios_section(
             value=fmt_eur(tot_fc_spend),
             delta=(f"{n_sends} send-out{'s' if n_sends != 1 else ''} · " if print_cols else "") + f"{fc_dates[0]} → {fc_dates[-1]}",
         ),
+    ]
+    accuracy_kpis = [
         KpiItem(
             label=f"Back-test {backtest_label} {head_label} (MAE / mean)",
             value=f"{100.0 * head_m['MAE_over_mean']:.1f}%",
@@ -782,7 +784,8 @@ def build_forecast_scenarios_section(
         ),
     ]
     blocks: list[Any] = [
-        KpisBlock(items=kpis),
+        KpisBlock(id="forecast_accuracy_kpis", items=accuracy_kpis),
+        KpisBlock(id="forecast_plan_kpis", items=plan_kpis),
         MarkdownBlock(
             title="How the forecast works",
             body=(

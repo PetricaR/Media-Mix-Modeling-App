@@ -39,7 +39,7 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useForecast, useForecasts, useRun, useRunHistory, useScenario, useScenarios, useSection } from "../api/hooks";
-import type { RunHistory, ScenarioChannelRow, ScenarioDetail, ScenarioResult } from "../api/types";
+import type { RunHistory, ScenarioChannelRow, ScenarioDetail, ScenarioResult, SectionBlock } from "../api/types";
 import { ChannelEffects } from "../components/Forecast/ChannelEffects";
 import { LAST_YEAR_SHIFT_DAYS, PLANNER_COLORS, plannerFigure, type PlannerLine } from "../components/Forecast/figures";
 import { addDays, eur, eurCompact, multiplierLabel, shortDate, signedEur, signedPct, type BudgetInputMode, type SpendGranularity } from "../components/Forecast/format";
@@ -47,7 +47,7 @@ import { LeverPanel } from "../components/Forecast/LeverPanel";
 import { PlanBuilderDialog } from "../components/Forecast/PlanBuilderDialog";
 import { RUN_STATUS_LABEL, runStatusColor } from "../components/Import/format";
 import { PageHeader } from "../components/Layout/PageHeader";
-import { SectionRenderer } from "../components/Sections/SectionRenderer";
+import { BlockRenderer, SectionRenderer } from "../components/Sections/SectionRenderer";
 import { NUMERIC, PALETTE } from "../theme";
 
 const LazyPlotlyChart = React.lazy(() => import("../components/Charts/PlotlyChart"));
@@ -108,6 +108,11 @@ const describe = (m: Record<string, number>, order: ScenarioChannelRow[]) => {
 };
 
 const sumFirst = (values: number[], n: number) => values.slice(0, n).reduce((a, b) => a + b, 0);
+
+/** The section blocks shown open: the back-test says how far to trust the planner; the example plan's blocks repeat it. */
+const ACCURACY_BLOCK_IDS = new Set(["forecast_accuracy_kpis", "forecast_backtest_q4"]);
+const isAccuracyBlock = (b: SectionBlock) =>
+  ACCURACY_BLOCK_IDS.has((b.type === "chart" ? b.chart_id ?? b.id : b.type === "kpis" ? b.id : undefined) ?? "");
 
 /** Actual sales on the same weekdays one year before the first `n` forecast days; null when history does not cover them. */
 function lastYearTotal(history: RunHistory | undefined, dates: string[]) {
@@ -193,6 +198,11 @@ function downloadCsv(rows: DailyTableRow[], filename: string) {
 export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const queryClient = useQueryClient();
   const { data: section, isLoading, error } = useSection(runId, "forecast_scenarios");
+  const accuracySection = useMemo(
+    () => (section ? { ...section, title: "Forecast accuracy", subtitle: null, blocks: section.blocks.filter(isAccuracyBlock) } : section),
+    [section]
+  );
+  const exampleBlocks = useMemo(() => section?.blocks.filter((b) => !isAccuracyBlock(b)) ?? [], [section]);
   const { data: run } = useRun(runId);
   const { data: history } = useRunHistory(runId);
   const { data: forecastsData } = useForecasts(runId);
@@ -305,7 +315,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const shownIsSaved = Boolean(shown && saved.some((s) => s.id === shown.id));
   const canSave = Boolean(shownResult && !stale && !shownIsSaved && saved.length < MAX_SAVED);
   const saveHint = !changed
-    ? "Move a lever to build a scenario you can save and compare."
+    ? undefined
     : shownIsSaved
       ? "This scenario is saved."
       : saved.length >= MAX_SAVED
@@ -363,7 +373,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
     <Box>
       <PageHeader
         title="Forecast planner"
-        description="Set up your forecast period, total media budget, and channel allocations in either Percentage (%) or Fixed amount (€) mode. The fitted Meridian model evaluates scenario updates in place, or you can configure a custom plan up to 90 days."
+        description="Change a plan's media budget and see the sales the fitted Meridian model expects."
         actions={
           runId ? (
             <>
@@ -437,65 +447,25 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
           </Alert>
         ) : (
           <Box>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} flexWrap="wrap" useFlexGap>
-              <FormControl size="small" sx={{ width: { xs: "100%", sm: 480 }, maxWidth: "100%" }}>
-                <InputLabel id="forecast-select-label">Budget plan</InputLabel>
-                <Select
-                  labelId="forecast-select-label"
-                  label="Budget plan"
-                  value={forecastId ?? ""}
-                  onChange={(e) => setForecastId(e.target.value as string)}
-                  sx={{ backgroundColor: "#FFFFFF" }}
-                >
-                  {forecasts.map((f) => (
-                    <MenuItem key={f.id} value={f.id}>
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%", minWidth: 0 }}>
-                        <Box sx={{ flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</Box>
-                        <Chip size="small" label={RUN_STATUS_LABEL[f.status] ?? f.status} color={runStatusColor(f.status)} />
-                      </Stack>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              {runId && (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<TuneIcon fontSize="small" />}
-                  onClick={() => setBuilderOpen(true)}
-                  sx={{ backgroundColor: "#FFFFFF" }}
-                >
-                  New custom plan (1–90d)…
-                </Button>
-              )}
-            </Stack>
-            <Stack
-              direction="row"
-              spacing={1}
-              alignItems="center"
-              flexWrap="wrap"
-              useFlexGap
-              sx={{
-                mt: 1.25,
-                px: 1.5,
-                py: 0.75,
-                borderRadius: 1.5,
-                backgroundColor: "#FFFFFF",
-                border: `1px solid ${PALETTE.borderSubtle}`,
-              }}
-            >
-              <Typography variant="caption" sx={{ fontWeight: 700, color: PALETTE.inkPrimary }}>
-                Spend &amp; plan input granularity:
-              </Typography>
-              <Chip
-                size="small"
-                label="Daily × Channel · National · EUR (€)"
-                sx={{ height: 20, fontSize: "0.7rem", fontWeight: 600 }}
-              />
-              <Typography variant="caption" sx={{ color: PALETTE.inkSecondary }}>
-                1 row/day × {levers.length + locked.length || 7} paid channels ({levers.filter((c) => c.slug !== "catalog").length || 5} continuous daily digital · {levers.some((c) => c.slug === "catalog") ? "1 episodic Catalog send-out" : "Catalog"} · {locked.length || 1} commission control)
-              </Typography>
-            </Stack>
+            <FormControl size="small" sx={{ width: { xs: "100%", sm: 480 }, maxWidth: "100%" }}>
+              <InputLabel id="forecast-select-label">Budget plan</InputLabel>
+              <Select
+                labelId="forecast-select-label"
+                label="Budget plan"
+                value={forecastId ?? ""}
+                onChange={(e) => setForecastId(e.target.value as string)}
+                sx={{ backgroundColor: "#FFFFFF" }}
+              >
+                {forecasts.map((f) => (
+                  <MenuItem key={f.id} value={f.id}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%", minWidth: 0 }}>
+                      <Box sx={{ flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</Box>
+                      <Chip size="small" label={RUN_STATUS_LABEL[f.status] ?? f.status} color={runStatusColor(f.status)} />
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             {scenarioBusy && (
               <Box sx={{ mt: 2 }}>
                 <Typography variant="body2" sx={{ mb: 1 }}>
@@ -538,8 +508,6 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
               locked={locked}
               multipliers={multipliers}
               onChange={setMultipliers}
-              effects={shownResult ? Object.fromEntries(shownResult.channel_summary.map((r) => [r.slug, r])) : null}
-              effectsStale={stale}
               evaluating={evaluating}
               horizonDays={horizon}
               horizonMax={horizonMax}
@@ -553,16 +521,13 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
               onSave={handleSave}
               canSave={canSave}
               saveHint={saveHint}
-              onOpenPlanBuilder={runId ? () => setBuilderOpen(true) : undefined}
             />
           </Paper>
 
           <Stack spacing={3} sx={{ minWidth: 0 }}>
             <Paper component="section" aria-labelledby="forecast-chart-title" sx={{ p: { xs: 2, md: 2.5 } }}>
               <Typography id="forecast-chart-title" variant="h3" component="h2">
-                {result.start_date && result.end_date
-                  ? `Forecast ${shortDate(result.start_date)} – ${shortDate(result.end_date)}, with the sales that led into it`
-                  : "Forecast, with the sales that led into it"}
+                {planDates.length ? `Forecast ${shortDate(planDates[0])} – ${shortDate(planDates[planDates.length - 1])}` : "Forecast"}
               </Typography>
 
               <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", mt: 2, mb: 2.5 }}>
@@ -572,15 +537,12 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                   accent={PLANNER_COLORS.plan}
                   sub={
                     <>
-                      {horizon} days · {eurCompact(planSales / Math.max(horizon, 1))}/day
                       {horizon === horizonMax && result.prediction_total_lo != null && result.prediction_total_hi != null && (
-                        <>
-                          <br />
-                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>
-                            90 %: {eurCompact(result.prediction_total_lo)} to {eurCompact(result.prediction_total_hi)}
-                          </Box>
-                        </>
+                        <Box component="span" sx={{ display: "block", whiteSpace: "nowrap" }}>
+                          90 %: {eurCompact(result.prediction_total_lo)} to {eurCompact(result.prediction_total_hi)}
+                        </Box>
                       )}
+                      {lastYear != null && lastYear > 0 && `${signedPct((100 * (planSales - lastYear)) / lastYear)} vs same weekdays last year`}
                     </>
                   }
                 />
@@ -604,35 +566,21 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                       </>
                     ) : evaluating
                         ? "Evaluating…"
-                        : "Move a lever or pick a quick scenario"
+                        : "Move a lever"
                   }
                 />
                 <Tile
                   label="Spend"
                   dim={stale}
                   value={shownResult ? `${eurCompact(shownResult.base_total_spend)} → ${eurCompact(shownResult.scenario_total_spend)}` : eur(planSpend)}
-                  sub={shownResult ? `${signedEur(shownResult.delta_spend)} vs plan` : "Planned over the same days"}
+                  sub={shownResult ? `${signedEur(shownResult.delta_spend)} vs plan` : "Planned"}
                 />
                 <Tile
                   label="Δ sales per Δ € spend"
                   dim={stale}
                   value={shownResult?.marginal_roas != null ? shownResult.marginal_roas.toFixed(2) : "–"}
-                  sub={
-                    shownResult
-                      ? shownResult.marginal_roas != null
-                        ? "Return on the euros added or removed"
-                        : "Spend unchanged: budget moved between channels"
-                      : "Shown once a scenario changes spend"
-                  }
+                  sub={shownResult && shownResult.marginal_roas == null ? "Budget-neutral" : undefined}
                 />
-                {lastYear != null && lastYear > 0 && (
-                  <Tile
-                    label="Same weekdays last year"
-                    value={eur(lastYear)}
-                    accent={PLANNER_COLORS.lastYear}
-                    sub={`Plan forecast ${signedPct((100 * (planSales - lastYear)) / lastYear)} vs actual`}
-                  />
-                )}
               </Box>
 
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between" flexWrap="wrap" useFlexGap>
@@ -666,9 +614,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                 </Suspense>
               </Box>
               <Typography variant="caption" component="p" sx={{ color: PALETTE.inkSecondary }}>
-                The shaded band is the plan's 90 % prediction interval, where an actual day is expected to land. Lower panel: daily
-                spend, with the scenario's as narrow gold bars; catalog send-out days run off the top of the panel, and hovering
-                shows their cost. Hover a day of the scenario to see each channel's share of its change.
+                Band: the plan's 90 % prediction interval. Catalog send-out days run off the top of the spend panel; hover for their cost.
               </Typography>
               {failed && (
                 <Alert severity="error" sx={{ mt: 1.5 }}>
@@ -738,22 +684,15 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                 <Typography id="effects-title" variant="h3" component="h2">
                   What each change does to forecast sales
                 </Typography>
-                <Typography variant="body2" sx={{ mt: 0.5, mb: 1.5 }}>
-                  Each bar is one channel's own effect, with its 90 % credible interval; the last bar is the scenario as a whole.
-                </Typography>
                 <ChannelEffects result={shownResult} stale={stale} compact={compact} />
               </Paper>
             )}
 
-            <Paper component="section" aria-labelledby="saved-title" sx={{ p: { xs: 2, md: 2.5 } }}>
-              <Typography id="saved-title" variant="h3" component="h2">
-                Saved scenarios
-              </Typography>
-              {saved.length === 0 ? (
-                <Typography variant="body2" sx={{ mt: 0.5 }}>
-                  Save up to {MAX_SAVED} scenarios to keep them on the chart as dashed lines while you try others.
+            {saved.length > 0 && (
+              <Paper component="section" aria-labelledby="saved-title" sx={{ p: { xs: 2, md: 2.5 } }}>
+                <Typography id="saved-title" variant="h3" component="h2">
+                  Saved scenarios
                 </Typography>
-              ) : (
                 <Stack spacing={1.25} sx={{ mt: 1.5 }}>
                   {savedDetails.map(({ entry, detail }) => {
                     const r = detail?.result;
@@ -792,8 +731,8 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                     );
                   })}
                 </Stack>
-              )}
-            </Paper>
+              </Paper>
+            )}
           </Stack>
         </Box>
       )}
@@ -803,13 +742,32 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
       </Box>
 
       <SectionRenderer
-        section={section}
+        section={accuracySection}
         isLoading={isLoading}
         error={error as Error | null}
         headingLevel={2}
         toc={false}
         pendingMessage="The back-test, the example-plan forecast and its scenarios appear when the Meridian forecast stage has finished."
       />
+      {exampleBlocks.length > 0 && (
+        <Accordion
+          disableGutters
+          elevation={0}
+          TransitionProps={{ unmountOnExit: true }}
+          sx={{ border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5, "&:before": { display: "none" } }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-controls="example-plan-details" id="example-plan-details-header">
+            <Typography variant="body2" sx={{ fontWeight: 650, color: PALETTE.inkPrimary }}>
+              Example plan: forecast, weekly tables and budget scenarios
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails id="example-plan-details">
+            {exampleBlocks.map((block, idx) => (
+              <BlockRenderer key={idx} block={block} />
+            ))}
+          </AccordionDetails>
+        </Accordion>
+      )}
 
       {runId && (
         <PlanBuilderDialog

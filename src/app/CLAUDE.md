@@ -382,3 +382,15 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
       boundaries (UI-02), demand-following and missing-row settings, total intervals and measured coverage.
     - Not real (Gemini's report): `extend_history` does not rescale the trend (`features.seasonality_controls` uses days
       since the first day), and scenario prediction draws were already draw-aligned.
+25. (2026-11-03) The Forecast page was decluttered on the user's request ("keep only the most important data"). Removed:
+    the granularity strip (it also had invented fallback counts), the duplicate "New custom plan" button and chip, the
+    mode radio cards (now two small toggles), period preset chips, "n/n channels active", Plan mix / Equal split
+    (`splitMultipliersEqually` deleted), per-channel checkboxes, Daily/share chips, per-lever sales-effect lines (the
+    effects chart shows them), the empty saved-scenarios card and long helper texts; "Same weekdays last year" is a line
+    in the plan tile. The panel order is period → quick-scenario dropdown → channels → total media budget (the user
+    asked for the total below the last channel and the presets in a dropdown). A lever with no spend in the chosen days is disabled (it used to scale the full-plan spend), and
+    quick scenarios use the chosen period's spend. The `forecast_scenarios` section now has two KPI blocks with ids
+    (`forecast_accuracy_kpis`, `forecast_plan_kpis`; `KpisBlock.id` is optional): the page shows only the accuracy KPIs
+    and the back-test chart, and every other block (example plan, weekly tables, notebook 05 scenarios) sits in a
+    collapsed accordion, so parity content stays in the app. `PlotlyChart` sets `automargin` on y axes, so long
+    horizontal-bar labels are no longer cut off.

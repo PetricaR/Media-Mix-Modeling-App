@@ -10,7 +10,6 @@ import {
   parsePctChange,
   scaleMultipliersToTotal,
   signedPct,
-  splitMultipliersEqually,
   toDisplayEuro,
 } from "./format";
 
@@ -76,14 +75,6 @@ describe("channelPeriodBaseSpend and budget scaling", () => {
     expect(next.sea).toBe(1.5);
     expect(next.display).toBe(1.5);
     expect(next.social_media).toBe(0);
-  });
-
-  it("splits total budget equally across active channels within multiplier limits", () => {
-    const base = { sea: 100_000, display: 200_000 };
-    const current = { sea: 1, display: 1 };
-    const next = splitMultipliersEqually(["sea", "display"], base, current, 300_000);
-    expect(next.sea).toBe(1.5);
-    expect(next.display).toBe(0.75);
   });
 
   it("converts between period total and daily spend granularity and counts active spend days", () => {

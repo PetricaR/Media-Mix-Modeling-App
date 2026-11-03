@@ -29,8 +29,18 @@ export const PlotlyChart: React.FC<PlotlyChartProps> = ({ data, layout, height =
       margin.r = Math.min(margin.r, 12);
     }
     const font = { ...((rest.font as Record<string, unknown>) || {}), family: FONT_SANS, color: PALETTE.inkPrimary };
+    // Long category labels (horizontal bars) widen the left margin instead of being cut off at it
+    const yAxes = Object.fromEntries(
+      Object.keys({ yaxis: null, ...rest })
+        .filter((k) => /^yaxis\d*$/.test(k))
+        .map((k) => {
+          const axis = (rest[k] as Record<string, unknown>) || {};
+          return [k, { ...axis, automargin: axis.automargin ?? true }];
+        })
+    );
     return {
       ...rest,
+      ...yAxes,
       autosize: true,
       height: (rest.height as number) || height,
       margin,
