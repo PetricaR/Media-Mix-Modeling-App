@@ -19,10 +19,12 @@ from mmm_studio.core.meridian import (
     build_optimiser_section,
     fast_forecast_from_multipliers,
     fit_meridian,
+    generate_meridian_html_reports,
     meridian_roles,
 )
 from mmm_studio.core.tables import build_daily_wide_table
 from mmm_studio.core.workbook import profile_workbook
+from mmm_studio.report.meridian_html import is_polished
 
 
 def test_meridian_table_and_fast_forecast_helpers(fixture_xlsx_path: Path) -> None:
@@ -70,7 +72,7 @@ def test_meridian_table_and_fast_forecast_helpers(fixture_xlsx_path: Path) -> No
 
 
 @pytest.mark.slow
-def test_meridian_smoke_fit_and_sections(fixture_xlsx_path: Path) -> None:
+def test_meridian_smoke_fit_and_sections(fixture_xlsx_path: Path, tmp_path: Path) -> None:
     raw_df, profile = profile_workbook(fixture_xlsx_path)
     wide = build_daily_wide_table(raw_df, config=profile.role_config, drop_2025=False)
 
@@ -91,6 +93,12 @@ def test_meridian_smoke_fit_and_sections(fixture_xlsx_path: Path) -> None:
     opt_sec, opt_res = build_optimiser_section(roi_df, response_curves)
     assert opt_sec.id == "optimiser"
     assert opt_res["total_budget"] > 0
+
+    reports = generate_meridian_html_reports(mmm, tmp_path)
+    summary = reports["summary"].read_text(encoding="utf-8")
+    assert all(is_polished(p.read_text(encoding="utf-8")) for p in reports.values())
+    assert "Time period: Jan 1, 2023 – Jan 1, 2025" in summary  # the last modelled day, not the day after
+    assert "\\u0027\\u20ac\\u0027" in summary and "\\u0027$\\u0027" not in summary  # InputData.currency_code
 
 
 def test_response_curve_optimiser_moves_budget_to_the_higher_marginal_return() -> None:

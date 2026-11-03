@@ -92,7 +92,8 @@ backend/mmm_studio/            (flat package, NOT backend/src/mmm_studio as PLAN
                 features.py (notebook controls: weekday/holiday/Christmas/Black Week, Fourier, trend, catalog in-home adstock,
                 hold-out windows), metrics.py, preparation.py (nb 02), ols.py (nb 04), eda/* (+ notebook_stats.py: 01b tables),
                 meridian/{spec,fit,selection,analysis,optimise,forecast}.py
-  report/       sections.py (Section/Block models), narrative.py (formatters), facts.py (computed case facts for narratives)
+  report/       sections.py (Section/Block models), narrative.py (formatters), facts.py (computed case facts for narratives),
+                meridian_html.py (post-processes Meridian's HTML reports; stdlib + charts/theme only, so the API can import it)
   charts/       builders.py, theme.py
 backend/tests/  core/ unit + golden tests, test_pipeline_fast (CLI), test_api, test_jobs (Postgres), test_meridian_smoke
   fixtures/case_study.xlsx, golden/case_study.json   (reference numbers from the notebooks)
@@ -237,3 +238,12 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     the plan upload is a real button (it was a `<label role="button">`), the downloads table has its own landmark
     name, and scrollable code blocks are focusable. With no runs, the header's "Run" label no longer overlaps "No run
     yet" and the empty runs table says so (checked by uploading and deleting a run on an isolated test-DB stack).
+19. Meridian's three HTML reports are post-processed by `report/meridian_html.polish_meridian_report` (Meridian itself
+    is untouched). It loads Figtree (the reports ask for Roboto/Google Sans and never load them, so text was serif),
+    and wraps `vegaEmbed` to set container-width charts, wrap the optimisation response-curve facet into the columns
+    that fit (it was clipped below ~1,100 px), give the 90-row control-correlation chart a row step, and apply the
+    app's channel colours with a grey baseline. It also shows the last modelled day in the period chip (Meridian adds
+    one interval), swaps "$" for "€" and rounds float noise (ROI "3.3000000000000003"). `generate_meridian_html_reports`
+    polishes at write time; `GET /artifacts/reports/*.html` polishes older reports on the fly (a no-op once the
+    `mmm-studio-report-polish` meta marker is present). New fits set `InputData.currency_code = "EUR"`, so Meridian
+    writes € itself. The report iframe allows popups and downloads, so doc links and the chart export menu work.

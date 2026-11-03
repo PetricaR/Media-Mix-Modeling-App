@@ -229,9 +229,14 @@ def generate_meridian_html_reports(
     output_dir: Path | str,
     opt_result: Any = None,
 ) -> dict[str, Path]:
-    """Generate the 3 standalone Meridian HTML reports (`summary`, `health_card`, `optimization`)."""
+    """Generate the 3 standalone Meridian HTML reports (`summary`, `health_card`, `optimization`).
+
+    Each file is passed through `polish_meridian_report` (fonts, chart sizing, channel colours, text fixes).
+    """
     from meridian.analysis import summarizer
     from meridian.analysis.review import reviewer
+
+    from mmm_studio.report.meridian_html import polish_meridian_report
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -257,6 +262,10 @@ def generate_meridian_html_reports(
         opt_result.output_optimization_summary(opt_file, str(out), currency="€")
         paths["optimization"] = out / opt_file
 
+    interval_days = int(mmm.input_data.time_coordinates.interval_days)
+    for path in paths.values():
+        html = path.read_text(encoding="utf-8")
+        path.write_text(polish_meridian_report(html, currency="€", interval_days=interval_days), encoding="utf-8")
     return paths
 
 

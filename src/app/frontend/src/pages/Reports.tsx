@@ -82,7 +82,7 @@ export const ReportsPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                     key={active.path}
                     title={`Meridian ${REPORT_LABEL[active.path] ?? active.filename}`}
                     src={active.url}
-                    sandbox="allow-scripts"
+                    sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads"
                     loading="lazy"
                     style={{ width: "100%", height: "100%", border: "none", borderRadius: 10 }}
                   />

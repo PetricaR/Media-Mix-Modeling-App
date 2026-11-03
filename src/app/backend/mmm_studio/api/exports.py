@@ -95,6 +95,11 @@ def get_artifact(
 
     raw_bytes = storage.read_bytes(key)
     suffix = Path(clean_rel).suffix.lower()
+    if suffix == ".html" and clean_rel.startswith("reports/"):
+        # Reports written before the polish step existed are polished on the way out (a no-op for newer ones)
+        from mmm_studio.report.meridian_html import polish_meridian_report
+
+        raw_bytes = polish_meridian_report(raw_bytes.decode("utf-8")).encode("utf-8")
     media_type = _MIME_OVERRIDES.get(suffix) or mimetypes.guess_type(clean_rel)[0] or "application/octet-stream"
 
     headers: dict[str, str] = {}

@@ -147,9 +147,10 @@ def build_input_data(table: pd.DataFrame, cfg: MeridianSpecConfig) -> Any:
     from meridian.data import data_frame_input_data_builder as dfb
 
     spend_cols, media_channels, control_cols = meridian_roles(table, cfg)
+    builder = dfb.DataFrameInputDataBuilder(kpi_type="revenue", default_kpi_column="total_sales")
+    builder.currency_code = "EUR"  # Meridian's reports otherwise label the euro amounts with "$"
     return (
-        dfb.DataFrameInputDataBuilder(kpi_type="revenue", default_kpi_column="total_sales")
-        .with_kpi(table)
+        builder.with_kpi(table)
         .with_controls(table, control_cols=control_cols)
         .with_media(table, media_cols=spend_cols, media_spend_cols=spend_cols, media_channels=media_channels)
         .build()
