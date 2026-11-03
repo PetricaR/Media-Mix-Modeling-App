@@ -98,7 +98,7 @@ export const ReportsPage: React.FC<{ runId: string | null }> = ({ runId }) => {
           <Typography id="downloads-title" variant="h3" component="h2" sx={{ mb: 2 }}>
             All files of this run ({downloads.length})
           </Typography>
-          <TableContainer role="region" aria-labelledby="downloads-title" tabIndex={0} sx={{ maxHeight: 460, border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5 }}>
+          <TableContainer role="region" aria-label="Files of this run" tabIndex={0} sx={{ maxHeight: 460, border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5 }}>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>

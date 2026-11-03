@@ -162,19 +162,26 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
               <Button size="small" variant="outlined" startIcon={<DownloadIcon fontSize="small" />} href={`/api/v1/runs/${runId}/plan-template?days=42`}>
                 Plan template (CSV)
               </Button>
-              <Button size="small" variant="contained" color="secondary" component="label" startIcon={uploading ? <CircularProgress size={14} color="inherit" /> : <UploadFileIcon fontSize="small" />} disabled={uploading}>
+              <Button
+                size="small"
+                variant="contained"
+                color="secondary"
+                onClick={() => planInput.current?.click()}
+                startIcon={uploading ? <CircularProgress size={14} color="inherit" /> : <UploadFileIcon fontSize="small" />}
+                disabled={uploading}
+              >
                 {uploading ? "Uploading…" : "Upload a plan"}
-                <input
-                  ref={planInput}
-                  type="file"
-                  hidden
-                  accept=".csv,text/csv"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void handleUploadPlanCsv(f);
-                  }}
-                />
               </Button>
+              <input
+                ref={planInput}
+                type="file"
+                hidden
+                accept=".csv,text/csv"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleUploadPlanCsv(f);
+                }}
+              />
             </Stack>
           )}
         </Stack>

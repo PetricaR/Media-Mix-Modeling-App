@@ -16,6 +16,7 @@ import {
   InputLabel,
   LinearProgress,
   List,
+  ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
@@ -252,28 +253,29 @@ export const AppShell: React.FC<{
               {group.items.map((item) => {
                 const isCurrent = location.pathname.startsWith(item.path);
                 return (
-                  <ListItemButton
-                    key={item.path}
-                    component={RouterLink}
-                    to={item.path}
-                    selected={isCurrent}
-                    aria-current={isCurrent ? "page" : undefined}
-                    sx={{
-                      mx: 1,
-                      borderRadius: 999,
-                      mb: 0.25,
-                      minHeight: 40,
-                      "&.Mui-selected": {
-                        backgroundColor: PALETTE.bgGoldTint,
-                        color: PALETTE.brandNavy,
-                        "& .MuiListItemIcon-root": { color: PALETTE.brandGold },
-                      },
-                      "&.Mui-selected:hover": { backgroundColor: PALETTE.bgSubtle },
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 34, color: PALETTE.inkSecondary }}>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: "0.88rem", fontWeight: isCurrent ? 700 : 550 }} />
-                  </ListItemButton>
+                  <ListItem key={item.path} disablePadding>
+                    <ListItemButton
+                      component={RouterLink}
+                      to={item.path}
+                      selected={isCurrent}
+                      aria-current={isCurrent ? "page" : undefined}
+                      sx={{
+                        mx: 1,
+                        borderRadius: 999,
+                        mb: 0.25,
+                        minHeight: 40,
+                        "&.Mui-selected": {
+                          backgroundColor: PALETTE.bgGoldTint,
+                          color: PALETTE.brandNavy,
+                          "& .MuiListItemIcon-root": { color: PALETTE.brandGold },
+                        },
+                        "&.Mui-selected:hover": { backgroundColor: PALETTE.bgSubtle },
+                      }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 34, color: PALETTE.inkSecondary }}>{item.icon}</ListItemIcon>
+                      <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: "0.88rem", fontWeight: isCurrent ? 700 : 550 }} />
+                    </ListItemButton>
+                  </ListItem>
                 );
               })}
             </List>

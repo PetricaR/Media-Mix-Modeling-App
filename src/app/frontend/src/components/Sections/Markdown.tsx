@@ -117,6 +117,7 @@ export const Markdown: React.FC<{ source: string; dense?: boolean; color?: strin
             <Box
               key={key}
               component="pre"
+              tabIndex={0}
               sx={{
                 m: 0,
                 p: 1.5,

@@ -233,3 +233,6 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     as a control). `ChannelConfig` reads a stored "paid" Affiliate as commission and the run API returns the
     re-validated role config, so older runs show the role the model uses. The Import page's channel-role table shows
     each rationale under its role (the separate "Why" column was squeezed to one word per line).
+18. axe-core (WCAG 2.1 A/AA + best practice) on every page at 1440 and 390 px: navigation links are wrapped in `<li>`,
+    the plan upload is a real button (it was a `<label role="button">`), the downloads table has its own landmark
+    name, and scrollable code blocks are focusable.
