@@ -4,6 +4,7 @@ import type {
   ForecastItem,
   OptimisationDetail,
   RunDetail,
+  RunHistory,
   RunSummaryItem,
   ScenarioDetail,
   Section,
@@ -135,6 +136,8 @@ export const api = {
 
   getSection: (runId: string, sectionId: string) =>
     apiFetch<Section>(`/api/v1/runs/${runId}/sections/${sectionId}`),
+
+  getHistory: (runId: string) => apiFetch<RunHistory>(`/api/v1/runs/${runId}/history`),
 
   listForecasts: (runId: string) =>
     apiFetch<{ run_id: string; forecasts: ForecastItem[] }>(`/api/v1/runs/${runId}/forecasts`),

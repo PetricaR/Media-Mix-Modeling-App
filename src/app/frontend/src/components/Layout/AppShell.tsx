@@ -159,7 +159,7 @@ export const AppShell: React.FC<{
     if (lastStatus.current && lastStatus.current !== st) {
       setAnnouncement(`Run ${currentRun?.name}: ${STATUS_LABEL[st] ?? st}`);
       if (!isRunActive(currentRun)) {
-        for (const key of ["section", "sections", "artifacts", "forecasts", "runs"]) {
+        for (const key of ["section", "sections", "artifacts", "forecasts", "history", "runs"]) {
           queryClient.invalidateQueries({ queryKey: [key] });
         }
       }

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { ApiError, api } from "./client";
 import type { RunDetail } from "./types";
 
@@ -53,6 +53,17 @@ export function useSection(runId: string | null, sectionId: string | null) {
   });
 }
 
+/** The run's daily sales and paid spend, shown before a forecast; it only changes when the run is re-run. */
+export function useRunHistory(runId: string | null) {
+  return useQuery({
+    queryKey: ["history", runId],
+    queryFn: () => api.getHistory(runId!),
+    enabled: Boolean(runId),
+    retry: (count, err) => !notFound(err) && !(err instanceof ApiError && err.status === 409) && count < 2,
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useForecasts(runId: string | null) {
   return useQuery({
     queryKey: ["forecasts", runId],
@@ -79,6 +90,18 @@ export function useScenario(scenarioId: string | null) {
     queryFn: () => api.getScenario(scenarioId!),
     enabled: Boolean(scenarioId),
     refetchInterval: (query) => (ACTIVE.has(query.state.data?.status ?? "") ? 1000 : false),
+  });
+}
+
+/** Several finished scenarios at once (the saved scenarios drawn on the forecast chart). */
+export function useScenarios(scenarioIds: string[]) {
+  return useQueries({
+    queries: scenarioIds.map((id) => ({
+      queryKey: ["scenario", id],
+      queryFn: () => api.getScenario(id),
+      retry: (count: number, err: unknown) => !notFound(err) && count < 2,
+      refetchInterval: (query: { state: { data?: { status?: string } } }) => (ACTIVE.has(query.state.data?.status ?? "") ? 1000 : false),
+    })),
   });
 }
 

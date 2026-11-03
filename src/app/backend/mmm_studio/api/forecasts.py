@@ -16,10 +16,11 @@ from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db, requi
 from mmm_studio.core.meridian.forecast import (
     PlanValidationError,
     build_example_plan,
+    plan_arrays,
     scenario_payload,
     validate_plan,
 )
-from mmm_studio.core.meridian.spec import MeridianSpecConfig
+from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig
 from mmm_studio.core.schema import extract_role_config, slugify_channel
 from mmm_studio.db.models import ForecastRun, Run, ScenarioRun
 from mmm_studio.jobs.app import count_active_queue_jobs, defer_task, get_queue_position, sweep_stale_runs
@@ -144,8 +145,21 @@ def _serialize_forecast(fc: ForecastRun, storage: StorageBackend, include_result
         "updated_at": fc.updated_at.isoformat() if fc.updated_at else None,
     }
     if include_result and fc.result_path and storage.exists(fc.result_path):
-        out["result"] = storage.read_json(fc.result_path)
+        result = storage.read_json(fc.result_path)
+        if "plan_daily" not in result and fc.plan_path and storage.exists(fc.plan_path):
+            # Results written before the planner chart showed spend carry no daily plan: read it from the plan file
+            plan = _read_plan(storage, fc.plan_path).iloc[: int(result.get("horizon_days") or 0) or None]
+            result["plan_daily"] = result["scenario_plan_daily"] = plan_arrays(plan)
+        out["result"] = result
     return out
+
+
+def _read_plan(storage: StorageBackend, key: str) -> pd.DataFrame:
+    """A stored plan: the pipeline's parquet (date index) or an upload's cleaned CSV (`date` column)."""
+    raw = io.BytesIO(storage.read_bytes(key))
+    if key.endswith(".parquet"):
+        return pd.read_parquet(raw)
+    return pd.read_csv(raw, parse_dates=["date"]).set_index("date")
 
 
 def _serialize_scenario(sc: ScenarioRun, storage: StorageBackend) -> dict[str, Any]:
@@ -188,6 +202,32 @@ def get_plan_template(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="plan_template_{days}d.csv"'},
     )
+
+
+@router.get("/runs/{run_id}/history")
+def get_history(
+    run_id: str,
+    db: Session = Depends(get_db),
+    storage: StorageBackend = Depends(get_app_storage),
+) -> dict[str, Any]:
+    """Daily actual sales and paid-channel spend of the modelling panel, shown before a forecast for context."""
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
+
+    wide_df = _load_wide_df(storage, run_id)
+    slugs = [s for s in _paid_channels_for_run(run, wide_df) if f"cost_{s}" in wide_df.columns]
+
+    def values(col: str) -> list[float | None]:
+        return [None if pd.isna(v) else round(float(v), 0) for v in wide_df[col]]
+
+    return {
+        "run_id": run_id,
+        "dates": [d.strftime("%Y-%m-%d") for d in pd.DatetimeIndex(wide_df.index)],
+        "sales": values("total_sales"),
+        "spend": {s: values(f"cost_{s}") for s in slugs},
+        "channels": [{"slug": s, "channel": CHANNEL_DISPLAY_NAMES.get(s, s)} for s in slugs],
+    }
 
 
 @router.get("/runs/{run_id}/forecasts")

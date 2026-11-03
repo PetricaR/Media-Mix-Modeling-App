@@ -70,6 +70,43 @@ def test_meridian_table_and_fast_forecast_helpers(fixture_xlsx_path: Path) -> No
     assert "data" in scen["figure"]
     assert scen["delta_spend"] < 0 and "delta_sales_pct" in scen and scen["channel_summary"]
 
+    # The planner chart's inputs: daily plan per channel, the scenario's plan and each channel's own effect
+    assert set(scen["plan_daily"]) == set(plan.columns) and len(scen["plan_daily"]["sea"]) == 28
+    assert scen["scenario_plan_daily"]["catalog"] == [0.0] * 28
+    assert scen["scenario_plan_daily"]["sea"][0] == pytest.approx(1.2 * scen["plan_daily"]["sea"][0], abs=1)
+    rows = {r["slug"]: r for r in scen["channel_summary"]}
+    assert rows["sea"]["delta_sales"] > 0 > rows["catalog"]["delta_sales"]
+    assert rows["sea"]["delta_sales_lo"] is None  # one approximation, no posterior: no interval is invented
+    assert rows["display"]["delta_sales"] is None  # no mROI given, so no effect of its own
+    assert scen["delta_sales_lo"] is None and scen["delta_sales_hi"] is None
+    assert sum(scen["channel_daily_delta"]["sea"]) == pytest.approx(rows["sea"]["delta_sales"], abs=30)
+
+
+def test_scenario_payload_channel_effects_from_posterior_draws() -> None:
+    """Per-channel effects and 90 % intervals come from the draws; controls (no media effect) stay None."""
+    import numpy as np
+
+    from mmm_studio.core.meridian.forecast import scenario_payload
+
+    dates = pd.date_range("2025-01-02", periods=4, freq="D", name="date")
+    plan = pd.DataFrame({"sea": [100.0] * 4, "display": [50.0] * 4, "affiliate": [10.0] * 4}, index=dates)
+    alt = plan.assign(sea=plan["sea"] * 1.5, display=plan["display"] * 0.5)
+    rng = np.random.default_rng(0)
+    # 400 draws × 4 days × 2 media channels (sea gains, display loses)
+    draws = np.stack([rng.normal(30.0, 5.0, (400, 4)), rng.normal(-4.0, 1.0, (400, 4))], axis=-1)
+    base = pd.DataFrame({"forecast": 1000.0, "prediction_lo": 900.0, "prediction_hi": 1100.0}, index=dates)
+    scen_daily = base.assign(forecast=base["forecast"] + draws.mean(axis=0).sum(axis=1))
+
+    res = scenario_payload(base, plan, scen_daily, alt, "test", effect_draws=draws, effect_channels=["sea", "display"])
+    rows = {r["slug"]: r for r in res["channel_summary"]}
+    assert rows["sea"]["delta_sales"] == pytest.approx(draws[:, :, 0].sum(axis=1).mean(), abs=1)
+    assert rows["sea"]["delta_sales_lo"] < rows["sea"]["delta_sales"] < rows["sea"]["delta_sales_hi"]
+    assert rows["display"]["delta_sales"] < 0 and rows["display"]["delta_roas"] > 0
+    assert rows["affiliate"]["delta_sales"] is None and rows["affiliate"]["delta_spend"] == 0
+    assert rows["sea"]["delta_sales"] + rows["display"]["delta_sales"] == pytest.approx(res["delta_sales"], abs=2)
+    assert res["delta_sales_lo"] < res["delta_sales"] < res["delta_sales_hi"]
+    assert len(res["channel_daily_delta"]["display"]) == 4
+
 
 @pytest.mark.slow
 def test_meridian_smoke_fit_and_sections(fixture_xlsx_path: Path, tmp_path: Path) -> None:

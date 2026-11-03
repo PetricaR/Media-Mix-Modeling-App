@@ -253,6 +253,43 @@ def evaluate_forecast_scenario(
     return daily
 
 
+def channel_effect_draws(
+    mmm: Any,
+    history: pd.DataFrame,
+    plan: pd.DataFrame,
+    cfg: MeridianSpecConfig,
+) -> tuple[np.ndarray, list[str]]:
+    """Posterior draws of each media channel's incremental sales on the plan's days for `plan`.
+
+    Returns `(draws, channels)` with draws of shape `(n_draws, n_plan_days, n_media_channels)`. Meridian's media
+    effects are additive, so the difference of these draws between two plans is each channel's own share of the
+    change in forecast sales, and their sum over channels equals the change in the expected outcome.
+    """
+    from meridian.analysis import analyzer
+    from meridian.analysis.tensors import DataTensors
+
+    table = build_meridian_table(
+        extend_history(history, plan),
+        catalog_shift=cfg.catalog_shift,
+        n_fourier=cfg.n_fourier,
+        paid_channels=cfg.paid_channels,
+    )
+    spend_cols, media_channels, _ = meridian_roles(table, cfg)
+    media = table[spend_cols].to_numpy(dtype=float)[np.newaxis, :, :]
+    inc = analyzer.Analyzer(mmm).incremental_outcome(
+        new_data=DataTensors(media=media),
+        selected_times=[d.strftime("%Y-%m-%d") for d in plan.index],
+        aggregate_times=False,
+        include_non_paid_channels=False,
+    )
+    return _flatten_draws(inc), media_channels
+
+
+def plan_arrays(plan: pd.DataFrame) -> dict[str, list[float]]:
+    """Daily spend per plan column, rounded to whole euros, for the planner chart."""
+    return {str(col): [round(float(v), 0) for v in plan[col]] for col in plan.columns}
+
+
 def apply_multipliers(
     plan: pd.DataFrame,
     multipliers: dict[str, float] | None,
@@ -274,8 +311,15 @@ def scenario_payload(
     alt_plan: pd.DataFrame,
     method: str,
     multipliers: dict[str, float] | None = None,
+    effect_draws: np.ndarray | None = None,
+    effect_channels: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Result payload shared by forecasts and scenarios (totals, deltas, per-channel summary, daily rows, figure)."""
+    """Result payload shared by forecasts and scenarios (totals, deltas, per-channel summary, daily rows, figure).
+
+    `effect_draws` holds each media channel's change in daily sales, shape `(n_draws, n_days, n_channels)` in the
+    order of `effect_channels`. With more than one draw the payload carries 90 % credible intervals; a single draw
+    (the marginal-ROI approximation) gives point estimates only.
+    """
     n_days = len(alt_daily)
     base_daily = base_daily.iloc[:n_days]
     base_plan = base_plan.iloc[:n_days]
@@ -289,20 +333,43 @@ def scenario_payload(
     m_roas = round(delta_sales / delta_spend, 2) if abs(delta_spend) > 1.0 else None
     dates = [d.strftime("%Y-%m-%d") for d in alt_daily.index]
 
+    effects: dict[str, np.ndarray] = {}
+    total_ci: tuple[float, float] | None = None
+    if effect_draws is not None and effect_channels:
+        draws = np.asarray(effect_draws, dtype=float)[:, :n_days, :]
+        effects = {str(ch): draws[:, :, i] for i, ch in enumerate(effect_channels)}
+        if draws.shape[0] > 1:
+            totals = draws.sum(axis=(1, 2))
+            total_ci = (float(np.quantile(totals, 0.05)), float(np.quantile(totals, 0.95)))
+
     channel_summary = []
     for col in alt_plan.columns:
         b_sp = float(base_plan[col].sum())
         a_sp = float(alt_plan[col].sum())
-        channel_summary.append(
-            {
-                "channel": CHANNEL_DISPLAY_NAMES.get(col, col),
-                "slug": col,
-                "multiplier": round(a_sp / b_sp, 3) if b_sp > 0 else float((multipliers or {}).get(col, 1.0)),
-                "base_spend": round(b_sp, 0),
-                "scenario_spend": round(a_sp, 0),
-                "delta_spend": round(a_sp - b_sp, 0),
-            }
-        )
+        row: dict[str, Any] = {
+            "channel": CHANNEL_DISPLAY_NAMES.get(col, col),
+            "slug": col,
+            "multiplier": round(a_sp / b_sp, 3) if b_sp > 0 else float((multipliers or {}).get(col, 1.0)),
+            "base_spend": round(b_sp, 0),
+            "scenario_spend": round(a_sp, 0),
+            "delta_spend": round(a_sp - b_sp, 0),
+        }
+        if effects:
+            ch_draws = effects.get(col)
+            if ch_draws is None:
+                # Not a media channel of the model (a control such as Affiliate): it has no sales effect of its own
+                row.update(delta_sales=None, delta_sales_lo=None, delta_sales_hi=None, delta_roas=None)
+            else:
+                ch_totals = ch_draws.sum(axis=1)
+                ch_delta = float(ch_totals.mean())
+                multi = ch_totals.size > 1
+                row.update(
+                    delta_sales=round(ch_delta, 0),
+                    delta_sales_lo=round(float(np.quantile(ch_totals, 0.05)), 0) if multi else None,
+                    delta_sales_hi=round(float(np.quantile(ch_totals, 0.95)), 0) if multi else None,
+                    delta_roas=round(ch_delta / (a_sp - b_sp), 2) if abs(a_sp - b_sp) > 1.0 else None,
+                )
+        channel_summary.append(row)
 
     same = alt_daily["forecast"].round(0).equals(base_daily["forecast"].round(0))
     series = [
@@ -343,9 +410,14 @@ def scenario_payload(
         "scenario_total_spend": round(alt_spend, 0),
         "delta_spend": round(delta_spend, 0),
         "marginal_roas": m_roas,
+        "delta_sales_lo": round(total_ci[0], 0) if total_ci else None,
+        "delta_sales_hi": round(total_ci[1], 0) if total_ci else None,
         "prediction_lo_total": round(float(alt_daily["prediction_lo"].sum()), 0),
         "prediction_hi_total": round(float(alt_daily["prediction_hi"].sum()), 0),
         "channel_summary": channel_summary,
+        "plan_daily": plan_arrays(base_plan),
+        "scenario_plan_daily": plan_arrays(alt_plan),
+        "channel_daily_delta": {ch: [round(float(v), 0) for v in d.mean(axis=0)] for ch, d in effects.items()},
         "figure": fig,
         "daily": daily_rows,
     }
@@ -360,13 +432,27 @@ def model_scenario_from_multipliers(
     multipliers: dict[str, float] | None = None,
     horizon_days: int | None = None,
     seed: int = 0,
+    base_effects: tuple[np.ndarray, list[str]] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a multiplier scenario with the fitted forecast model (no refit), as in notebook 05 §4."""
+    """Evaluate a multiplier scenario with the fitted forecast model (no refit), as in notebook 05 §4.
+
+    Each channel's own effect is the difference of its incremental-sales draws between the scenario and the plan;
+    pass `base_effects` (`channel_effect_draws` of `base_plan`) to reuse the plan's draws across scenarios.
+    """
     alt_plan = apply_multipliers(base_plan, multipliers, locked=tuple(cfg.as_controls))
     alt_daily = evaluate_forecast_scenario(mmm, history, base_daily, alt_plan, cfg, seed=seed)
     n = min(horizon_days or len(base_daily), len(base_daily))
+    base_draws, channels = base_effects or channel_effect_draws(mmm, history, base_plan, cfg)
+    alt_draws, _ = channel_effect_draws(mmm, history, alt_plan, cfg)
     return scenario_payload(
-        base_daily.iloc[:n], base_plan.iloc[:n], alt_daily.iloc[:n], alt_plan.iloc[:n], "Meridian posterior (fitted model, no refit)", multipliers
+        base_daily.iloc[:n],
+        base_plan.iloc[:n],
+        alt_daily.iloc[:n],
+        alt_plan.iloc[:n],
+        "Meridian posterior (fitted model, no refit)",
+        multipliers,
+        effect_draws=alt_draws - base_draws,
+        effect_channels=channels,
     )
 
 
@@ -390,6 +476,8 @@ def fast_forecast_from_multipliers(
     p_base = base_plan.iloc[:n_days].copy()
     p_alt = p_base.copy()
     delta = np.zeros(n_days, dtype=float)
+    channels: list[str] = []
+    per_channel: list[np.ndarray] = []
     for col in p_alt.columns:
         slug = slugify_channel(col)
         if slug not in mroi:
@@ -401,12 +489,25 @@ def fast_forecast_from_multipliers(
         else:
             kernel = 0.5 ** np.arange(4)
         kernel = kernel / kernel.sum()
-        delta += np.convolve(diff, kernel)[:n_days] * mroi[slug]
+        ch_delta = np.convolve(diff, kernel)[:n_days] * mroi[slug]
+        delta += ch_delta
+        channels.append(str(col))
+        per_channel.append(ch_delta)
     d_alt = d_base.copy()
     for col in ("forecast", "credible_lo", "credible_hi", "prediction_lo", "prediction_hi"):
         d_alt[col] = np.maximum(0.0, d_base[col].to_numpy(dtype=float) + delta)
     d_alt["planned_spend"] = p_alt.sum(axis=1).to_numpy(dtype=float)
-    return scenario_payload(d_base, p_base, d_alt, p_alt, "Marginal-ROI approximation (fitted model not available)", multipliers)
+    effect_draws = np.stack(per_channel, axis=-1)[np.newaxis] if per_channel else None
+    return scenario_payload(
+        d_base,
+        p_base,
+        d_alt,
+        p_alt,
+        "Marginal-ROI approximation (fitted model not available)",
+        multipliers,
+        effect_draws=effect_draws,
+        effect_channels=channels,
+    )
 
 
 def build_forecast_scenarios_section(

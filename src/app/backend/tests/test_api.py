@@ -196,6 +196,25 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     assert any(f["id"] == default_fc_id and f["status"] == "succeeded" for f in r_fcs.json()["forecasts"])
     r_fc = client.get(f"/api/v1/forecasts/{default_fc_id}")
     assert r_fc.json()["result"]["scenario_total_sales"] > 0
+    assert len(r_fc.json()["result"]["plan_daily"]["sea"]) == 42
+
+    # A result stored before the planner showed spend gets its daily plan from the plan file
+    storage = get_storage()
+    result_key = f"runs/{run_id}/forecasts/{default_fc_id}/result.json"
+    old = storage.read_json(result_key)
+    storage.write_json(result_key, {k: v for k, v in old.items() if k not in ("plan_daily", "scenario_plan_daily")})
+    backfilled = client.get(f"/api/v1/forecasts/{default_fc_id}").json()["result"]
+    assert backfilled["plan_daily"] == old["plan_daily"] == backfilled["scenario_plan_daily"]
+
+    # The history shown before the forecast: every modelled day, actual sales and paid spend per channel
+    r_hist = client.get(f"/api/v1/runs/{run_id}/history")
+    assert r_hist.status_code == 200
+    hist = r_hist.json()
+    assert len(hist["dates"]) == len(hist["sales"]) == 732
+    assert hist["dates"][-1] == "2025-01-01"
+    assert {c["slug"] for c in hist["channels"]} == set(hist["spend"]) >= {"sea", "catalog", "affiliate"}
+    assert all(len(v) == 732 for v in hist["spend"].values())
+    assert client.get("/api/v1/runs/run_missing/history").status_code == 404
 
     # An unknown channel or a negative multiplier is rejected instead of silently returning "no change"
     for bad in ({"Teletext": 1.2}, {"sea": -0.5}):

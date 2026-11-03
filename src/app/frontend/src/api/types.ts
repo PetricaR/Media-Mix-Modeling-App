@@ -32,6 +32,7 @@ export interface DataProfile {
   filename: string;
   sha256: string;
   sheet_names: string[];
+  selected_sheet?: string | null;
   n_rows: number;
   n_columns: number;
   date_min: string;
@@ -197,6 +198,20 @@ export interface ScenarioChannelRow {
   base_spend: number;
   scenario_spend: number;
   delta_spend: number;
+  /** The channel's own change in forecast sales; null for a control channel (no sales effect of its own) */
+  delta_sales?: number | null;
+  delta_sales_lo?: number | null;
+  delta_sales_hi?: number | null;
+  delta_roas?: number | null;
+}
+
+export interface ScenarioDailyRow {
+  date: string;
+  baseline_forecast: number;
+  scenario_forecast: number;
+  prediction_lo: number;
+  prediction_hi: number;
+  planned_spend: number;
 }
 
 export interface ScenarioResult {
@@ -212,11 +227,27 @@ export interface ScenarioResult {
   scenario_total_spend: number;
   delta_spend: number;
   marginal_roas?: number | null;
+  /** 90 % credible interval of delta_sales (Meridian posterior only) */
+  delta_sales_lo?: number | null;
+  delta_sales_hi?: number | null;
   prediction_lo_total?: number;
   prediction_hi_total?: number;
   channel_summary: ScenarioChannelRow[];
+  /** Daily spend per channel slug: the plan as submitted, and the scenario's plan */
+  plan_daily?: Record<string, number[]>;
+  scenario_plan_daily?: Record<string, number[]>;
+  /** Each media channel's mean change in daily sales */
+  channel_daily_delta?: Record<string, number[]>;
   figure?: PlotlySpec;
-  daily: Record<string, unknown>[];
+  daily: ScenarioDailyRow[];
+}
+
+export interface RunHistory {
+  run_id: string;
+  dates: string[];
+  sales: (number | null)[];
+  spend: Record<string, (number | null)[]>;
+  channels: { slug: string; channel: string }[];
 }
 
 export interface ScenarioDetail {

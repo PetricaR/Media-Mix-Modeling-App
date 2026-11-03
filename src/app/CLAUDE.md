@@ -84,7 +84,7 @@ backend/mmm_studio/            (flat package, NOT backend/src/mmm_studio as PLAN
   storage.py    ArtifactStorage -> LocalStorage | GCSStorage; get_storage() is lru_cached
   main.py       FastAPI app; lifespan runs init_db() + ensure_procrastinate_schema()
   cli.py        mmm-studio run | api | worker | migrate
-  api/          router.py (/api/v1, /health, /auth/check), runs, sections, forecasts (+scenarios), optimiser, exports (artifacts), deps (access code, rate limit)
+  api/          router.py (/api/v1, /health, /auth/check), runs, sections, forecasts (+scenarios, run history), optimiser, exports (artifacts), deps (access code, rate limit)
   db/           SQLAlchemy 2.0 models: runs, stages, forecasts, scenarios, optimisations. create_all only, no Alembic
   jobs/         app.py (Procrastinate app, defer_task, queue counts, stale sweep), tasks.py (5 tasks + LRU cache), worker.py, cloud_run.py (wake-up)
   pipeline/     context.py (RunContext: storage keys, save_section/dataframe/json, cancel + heartbeat), stages.py (s01–s16)
@@ -100,6 +100,8 @@ backend/tests/  core/ unit + golden tests, test_pipeline_fast (CLI), test_api, t
 frontend/src/   main.tsx, App.tsx (routes; selected run lives in React state, not the URL), theme.ts (PALETTE, light mode only)
   api/client.ts (all HTTP via native fetch + X-Access-Code from sessionStorage), hooks.ts (TanStack Query + polling), types.ts
   components/Sections/SectionRenderer.tsx (lazy Plotly), Layout/AppShell.tsx (nav, run switcher, cancel), Charts/PlotlyChart.tsx
+                Forecast/* (the planner: LeverPanel, ChannelEffects, figures.ts builds its Plotly figures client-side,
+                format.ts)
   pages/        one per nav item; most pages are just useSection(runId, "<id>") + SectionRenderer
 deploy/         deploy.sh (GCP formare-dev / europe-west3), nginx.conf (template: ${PORT}, ${API_ORIGIN})
 ```
@@ -247,3 +249,15 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     polishes at write time; `GET /artifacts/reports/*.html` polishes older reports on the fly (a no-op once the
     `mmm-studio-report-polish` meta marker is present). New fits set `InputData.currency_code = "EUR"`, so Meridian
     writes € itself. The report iframe allows popups and downloads, so doc links and the chart export menu work.
+21. The Forecast page is a planner: budget levers on the left (sticky; ±100 % sliders with a % field, quick scenarios
+    including notebook 05's "+10 % digital" and "20 % Display → SEA"), and on the right the KPI strip (plan, scenario
+    with its 90 % interval, spend, Δ sales / Δ spend, same weekdays last year), one chart with the run's history
+    (`GET /runs/{id}/history`, 6 weeks … all) leading into the forecast, the scenario and up to two saved scenarios,
+    plus a spend panel. A lever change is evaluated on its own 450 ms after the last edit (one scenario per
+    multiplier set, cached by key; the previous result stays dimmed until the new one lands). Scenario payloads carry
+    each media channel's own effect (`channel_effect_draws`: Meridian `incremental_outcome` for the scenario minus the
+    plan; media effects are additive, so they sum exactly to the scenario's Δ, with 90 % intervals from the draws),
+    `channel_daily_delta` (the chart hover) and `plan_daily` / `scenario_plan_daily`; older stored forecast results get
+    `plan_daily` from their plan file on read. The interactive worker caches the plan's draws, so a warm scenario
+    takes about 1.3 s. Saved scenarios are per viewer (`localStorage`); the chart's overlapping line colours passed the
+    dataviz palette validator, which is why only two saved scenarios are drawn.

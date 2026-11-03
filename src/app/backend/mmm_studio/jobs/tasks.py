@@ -561,6 +561,7 @@ def execute_scenario_job(
 ) -> None:
     """Evaluate a what-if scenario with the fitted forecast model (warm LRU cache, `interactive` queue)."""
     from mmm_studio.core.meridian.forecast import (
+        channel_effect_draws,
         fast_forecast_from_multipliers,
         model_scenario_from_multipliers,
     )
@@ -591,6 +592,11 @@ def execute_scenario_job(
         horizon_days = int(inputs.get("horizon_days", len(cached["base_plan"])))
 
         if cached["mmm"] is not None:
+            if cached.get("base_effects") is None:
+                # The plan's per-channel draws are the same for every scenario of this forecast
+                cached["base_effects"] = channel_effect_draws(
+                    cached["mmm"], cached["history"], cached["base_plan"], cached["spec_cfg"]
+                )
             res = model_scenario_from_multipliers(
                 cached["mmm"],
                 cached["history"],
@@ -599,6 +605,7 @@ def execute_scenario_job(
                 cached["spec_cfg"],
                 multipliers=multipliers,
                 horizon_days=horizon_days,
+                base_effects=cached["base_effects"],
             )
         elif cached.get("mroi"):
             res = fast_forecast_from_multipliers(

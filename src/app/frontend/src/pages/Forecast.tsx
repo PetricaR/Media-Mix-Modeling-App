@@ -1,19 +1,23 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   FormControl,
-  Grid,
+  FormControlLabel,
+  IconButton,
   InputLabel,
   LinearProgress,
   MenuItem,
   Paper,
   Select,
   Skeleton,
-  Slider,
   Stack,
   Table,
   TableBody,
@@ -21,50 +25,172 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  ToggleButton,
+  ToggleButtonGroup,
+  Tooltip,
   Typography,
+  useMediaQuery,
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/Download";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import PlayArrowIcon from "@mui/icons-material/PlayArrow";
-import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { useForecast, useForecasts, useRun, useScenario, useSection } from "../api/hooks";
-import type { ScenarioResult } from "../api/types";
+import { useForecast, useForecasts, useRun, useRunHistory, useScenario, useScenarios, useSection } from "../api/hooks";
+import type { RunHistory, ScenarioChannelRow, ScenarioDetail, ScenarioResult } from "../api/types";
+import { ChannelEffects } from "../components/Forecast/ChannelEffects";
+import { LAST_YEAR_SHIFT_DAYS, PLANNER_COLORS, plannerFigure, type PlannerLine } from "../components/Forecast/figures";
+import { addDays, eur, eurCompact, multiplierLabel, shortDate, signedEur, signedPct } from "../components/Forecast/format";
+import { LeverPanel } from "../components/Forecast/LeverPanel";
 import { SectionRenderer } from "../components/Sections/SectionRenderer";
 import { FONT_MONO, PALETTE } from "../theme";
 
 const LazyPlotlyChart = React.lazy(() => import("../components/Charts/PlotlyChart"));
 
-const eur = (v: number) => `€${Math.round(v).toLocaleString("en-GB")}`;
-const signedEur = (v: number) => `${v >= 0 ? "+" : "−"}€${Math.abs(Math.round(v)).toLocaleString("en-GB")}`;
+const HISTORY_RANGES: { id: string; label: string; days: number | null }[] = [
+  { id: "6w", label: "6 weeks", days: 42 },
+  { id: "3m", label: "3 months", days: 91 },
+  { id: "6m", label: "6 months", days: 182 },
+  { id: "1y", label: "1 year", days: 365 },
+  { id: "all", label: "All", days: null },
+];
 
-const Money: React.FC<{ label: string; value: string; sub?: string }> = ({ label, value, sub }) => (
-  <Box>
-    <Typography variant="caption" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: PALETTE.inkSecondary }}>
+/** A scenario kept for comparison; its result is read back from the API by id. */
+interface SavedScenario {
+  id: string;
+  name: string;
+  multipliers: Record<string, number>;
+  horizonDays: number;
+  slot: number;
+}
+
+const MAX_SAVED = PLANNER_COLORS.saved.length;
+const savedKey = (forecastId: string) => `mmm-studio:saved-scenarios:${forecastId}`;
+
+function loadSaved(forecastId: string | null): SavedScenario[] {
+  if (!forecastId) return [];
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(savedKey(forecastId)) ?? "[]");
+    return Array.isArray(parsed)
+      ? (parsed as SavedScenario[]).filter((s) => s && typeof s.id === "string" && typeof s.slot === "number").slice(0, MAX_SAVED)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function storeSaved(forecastId: string, items: SavedScenario[]) {
+  try {
+    window.localStorage.setItem(savedKey(forecastId), JSON.stringify(items));
+  } catch {
+    // Storage can be unavailable (private mode, blocked site data): saving then lasts for this visit only
+  }
+}
+
+/** Only the channels that move, rounded so 1.2 and 1.2000001 are one scenario. */
+const changedEntries = (m: Record<string, number>) =>
+  Object.entries(m)
+    .filter(([, v]) => Math.abs(v - 1) > 1e-6)
+    .map(([k, v]) => [k, Math.round(v * 1000) / 1000] as const)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+const scenarioKey = (forecastId: string | null, m: Record<string, number>, horizon: number) => JSON.stringify([forecastId, changedEntries(m), horizon]);
+
+const describe = (m: Record<string, number>, order: ScenarioChannelRow[]) => {
+  const parts = order.filter((c) => Math.abs((m[c.slug] ?? 1) - 1) > 1e-6).map((c) => `${c.channel} ${multiplierLabel(m[c.slug])}`);
+  if (!parts.length) return "As planned";
+  return parts.length > 3 ? `${parts.slice(0, 3).join(", ")} +${parts.length - 3} more` : parts.join(", ");
+};
+
+const sumFirst = (values: number[], n: number) => values.slice(0, n).reduce((a, b) => a + b, 0);
+
+/** Actual sales on the same weekdays one year before the first `n` forecast days; null when history does not cover them. */
+function lastYearTotal(history: RunHistory | undefined, dates: string[]) {
+  if (!history) return null;
+  const byDate = new Map(history.dates.map((d, i) => [d, history.sales[i]]));
+  let total = 0;
+  for (const d of dates) {
+    const v = byDate.get(addDays(d, -LAST_YEAR_SHIFT_DAYS));
+    if (v == null) return null;
+    total += v;
+  }
+  return total;
+}
+
+const Tile: React.FC<{ label: string; value: string; sub?: React.ReactNode; accent?: string; dim?: boolean }> = ({ label, value, sub, accent, dim }) => (
+  <Box sx={{ pl: 1.5, borderLeft: `3px solid ${accent ?? PALETTE.borderSubtle}`, opacity: dim ? 0.55 : 1, transition: "opacity 0.2s", minWidth: 0 }}>
+    <Typography variant="caption" component="p" sx={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: PALETTE.inkSecondary }}>
       {label}
     </Typography>
-    <Typography sx={{ fontFamily: FONT_MONO, fontWeight: 600, fontSize: "1.15rem" }}>{value}</Typography>
+    <Typography sx={{ fontWeight: 700, fontSize: "1.2rem", lineHeight: 1.35 }}>{value}</Typography>
     {sub && (
-      <Typography variant="caption" sx={{ color: PALETTE.inkSecondary }}>
+      <Typography variant="caption" component="p" sx={{ color: PALETTE.inkSecondary }}>
         {sub}
       </Typography>
     )}
   </Box>
 );
 
-const ResultChart: React.FC<{ result: ScenarioResult; title: string }> = ({ result, title }) =>
-  result.figure ? (
-    <Suspense fallback={<Skeleton variant="rounded" height={340} />}>
-      <LazyPlotlyChart data={result.figure.data} layout={result.figure.layout} height={340} ariaLabel={title} />
-    </Suspense>
-  ) : null;
+interface DailyTableRow {
+  date: string;
+  actual: number | null;
+  lastYear: number | null;
+  plan: number | null;
+  lo: number | null;
+  hi: number | null;
+  scenario: number | null;
+  spend: number | null;
+  scenarioSpend: number | null;
+}
+
+function dailyTableRows(history: RunHistory | undefined, plan: ScenarioResult, scenario: ScenarioResult | null, historyDays: number | null): DailyTableRow[] {
+  const fcStart = plan.daily[0].date;
+  const from = historyDays == null ? null : addDays(fcStart, -historyDays);
+  const salesByDate = new Map((history?.dates ?? []).map((d, i) => [d, history!.sales[i]]));
+  const lastYear = (d: string) => salesByDate.get(addDays(d, -LAST_YEAR_SHIFT_DAYS)) ?? null;
+  const rows: DailyTableRow[] = [];
+  history?.dates.forEach((d, i) => {
+    if ((from == null || d >= from) && d < fcStart) {
+      const spend = Object.values(history.spend).reduce<number>((acc, arr) => acc + (arr[i] ?? 0), 0);
+      rows.push({ date: d, actual: history.sales[i], lastYear: lastYear(d), plan: null, lo: null, hi: null, scenario: null, spend, scenarioSpend: null });
+    }
+  });
+  const scen = new Map((scenario?.daily ?? []).map((r) => [r.date, r]));
+  for (const r of plan.daily) {
+    const s = scen.get(r.date);
+    rows.push({
+      date: r.date,
+      actual: null,
+      lastYear: lastYear(r.date),
+      plan: r.scenario_forecast,
+      lo: r.prediction_lo,
+      hi: r.prediction_hi,
+      scenario: s ? s.scenario_forecast : null,
+      spend: r.planned_spend,
+      scenarioSpend: s ? s.planned_spend : null,
+    });
+  }
+  return rows;
+}
+
+function downloadCsv(rows: DailyTableRow[], filename: string) {
+  const header = "date,actual_sales,same_weekday_last_year,plan_forecast,plan_pi90_low,plan_pi90_high,scenario_forecast,spend,scenario_spend";
+  const cell = (v: number | null) => (v == null ? "" : String(Math.round(v)));
+  const body = rows.map((r) => [r.date, cell(r.actual), cell(r.lastYear), cell(r.plan), cell(r.lo), cell(r.hi), cell(r.scenario), cell(r.spend), cell(r.scenarioSpend)].join(","));
+  const url = URL.createObjectURL(new Blob([[header, ...body].join("\n")], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const queryClient = useQueryClient();
   const { data: section, isLoading, error } = useSection(runId, "forecast_scenarios");
   const { data: run } = useRun(runId);
+  const { data: history } = useRunHistory(runId);
   const { data: forecastsData } = useForecasts(runId);
   const forecasts = useMemo(() => forecastsData?.forecasts ?? [], [forecastsData]);
   const planInput = useRef<HTMLInputElement>(null);
@@ -72,10 +198,17 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const [forecastId, setForecastId] = useState<string | null>(null);
   const [multipliers, setMultipliers] = useState<Record<string, number>>({});
   const [horizonDays, setHorizonDays] = useState<number>(42);
-  const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [historyRange, setHistoryRange] = useState("3m");
+  const [showLastYear, setShowLastYear] = useState(false);
+  const [scenarioIds, setScenarioIds] = useState<Record<string, string>>({});
+  const [shown, setShown] = useState<ScenarioDetail | null>(null);
+  const [saved, setSaved] = useState<SavedScenario[]>([]);
+  const [retryToken, setRetryToken] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const pending = useRef(new Set<string>());
+  const compact = useMediaQuery("(max-width: 600px)", { noSsr: true });
 
   // Default to the newest finished forecast (the example plan until a custom plan has been forecast)
   useEffect(() => {
@@ -85,15 +218,14 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   }, [forecasts, forecastId]);
 
   useEffect(() => {
-    setActiveScenarioId(null);
     setMultipliers({});
+    setShown(null);
+    setSaved(loadSaved(forecastId));
   }, [forecastId, runId]);
 
   const { data: forecast } = useForecast(forecastId);
-  const { data: scenario } = useScenario(activeScenarioId);
   const result = forecast?.result ?? null;
   const horizonMax = result?.horizon_days ?? 42;
-
   useEffect(() => setHorizonDays(horizonMax), [horizonMax]);
 
   const lockedSlugs = useMemo(() => {
@@ -102,26 +234,80 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
       channels.filter((c) => c.role === "commission" || c.role === "control" || c.slug === "affiliate" || c.name === "Affiliate").map((c) => c.slug ?? c.name)
     );
   }, [run]);
+  const channelRows = useMemo(() => result?.channel_summary ?? [], [result]);
+  const levers = useMemo(() => channelRows.filter((c) => !lockedSlugs.has(c.slug)), [channelRows, lockedSlugs]);
+  const locked = useMemo(() => channelRows.filter((c) => lockedSlugs.has(c.slug)), [channelRows, lockedSlugs]);
+  const channelNames = useMemo(() => Object.fromEntries(channelRows.map((c) => [c.slug, c.channel])), [channelRows]);
 
-  const levers = (result?.channel_summary ?? []).filter((c) => !lockedSlugs.has(c.slug));
-  const locked = (result?.channel_summary ?? []).filter((c) => lockedSlugs.has(c.slug));
+  // --- What-if: every lever change is evaluated on its own, a moment after the last change --------------------
+  const horizon = Math.min(horizonDays, horizonMax);
+  const key = scenarioKey(forecastId, multipliers, horizon);
+  const changed = changedEntries(multipliers).length > 0;
+  const forecastReady = forecast?.status === "succeeded" && Boolean(result);
 
-  const handleEvaluateScenario = async () => {
-    if (!forecastId) return;
-    setSubmitting(true);
-    setErrorMsg(null);
-    try {
-      const resp = await api.createScenario(forecastId, {
-        name: `What-if over ${horizonDays} days`,
-        multipliers,
-        horizon_days: horizonDays,
-      });
-      setActiveScenarioId(resp.id);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Scenario evaluation failed");
-    } finally {
-      setSubmitting(false);
-    }
+  useEffect(() => {
+    if (!forecastId || !forecastReady || !changed || scenarioIds[key] || pending.current.has(key)) return;
+    const body = { name: describe(multipliers, levers), multipliers: Object.fromEntries(changedEntries(multipliers)), horizon_days: horizon };
+    const timer = window.setTimeout(() => {
+      pending.current.add(key);
+      setErrorMsg(null);
+      api
+        .createScenario(forecastId, body)
+        .then((resp) => setScenarioIds((prev) => ({ ...prev, [key]: resp.id })))
+        .catch((err) => setErrorMsg(err instanceof Error ? err.message : "The scenario could not be started."))
+        .finally(() => pending.current.delete(key));
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [key, forecastId, forecastReady, changed, retryToken]); // multipliers, levers and horizon are all part of `key`
+
+  const currentId = changed ? scenarioIds[key] ?? null : null;
+  const { data: current } = useScenario(currentId);
+  useEffect(() => {
+    if (current?.status === "succeeded" && current.result) setShown(current);
+  }, [current]);
+  useEffect(() => {
+    if (!changed) setShown(null);
+  }, [changed]);
+
+  const shownResult = changed ? shown?.result ?? null : null;
+  const stale = changed && (!current || current.id !== shown?.id);
+  const evaluating = changed && (!currentId || current?.status === "queued" || current?.status === "running");
+  const failed = changed && current?.status === "failed";
+
+  useEffect(() => {
+    const r = shown?.result;
+    if (!r) return;
+    setAnnouncement(
+      `Scenario updated: forecast sales ${eur(r.scenario_total_sales)}, ${signedEur(r.delta_sales)} (${signedPct(r.delta_sales_pct, 2)}) versus the plan over ${r.horizon_days} days.`
+    );
+  }, [shown?.id, shown?.result]);
+
+  // --- Saved scenarios -------------------------------------------------------------------------------------------
+  const savedQueries = useScenarios(saved.map((s) => s.id));
+  const savedDetails = saved.map((s, i) => ({ entry: s, detail: savedQueries[i]?.data }));
+  const persistSaved = (items: SavedScenario[]) => {
+    setSaved(items);
+    if (forecastId) storeSaved(forecastId, items);
+  };
+  const shownIsSaved = Boolean(shown && saved.some((s) => s.id === shown.id));
+  const canSave = Boolean(shownResult && !stale && !shownIsSaved && saved.length < MAX_SAVED);
+  const saveHint = !changed
+    ? "Move a lever to build a scenario you can save and compare."
+    : shownIsSaved
+      ? "This scenario is saved."
+      : saved.length >= MAX_SAVED
+        ? `${MAX_SAVED} scenarios are saved: remove one to save another.`
+        : undefined;
+  const handleSave = () => {
+    if (!shown || !canSave) return;
+    const used = new Set(saved.map((s) => s.slot));
+    const slot = [...Array(MAX_SAVED).keys()].find((i) => !used.has(i)) ?? 0;
+    persistSaved([...saved, { id: shown.id, name: describe(multipliers, levers), multipliers: Object.fromEntries(changedEntries(multipliers)), horizonDays: horizon, slot }]);
+  };
+  const handleLoad = (s: SavedScenario) => {
+    setScenarioIds((prev) => ({ ...prev, [scenarioKey(forecastId, s.multipliers, s.horizonDays)]: s.id }));
+    setHorizonDays(s.horizonDays);
+    setMultipliers(s.multipliers);
   };
 
   const handleUploadPlanCsv = async (file: File) => {
@@ -140,21 +326,37 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
     }
   };
 
-  const scenarioBusy = submitting || scenario?.status === "queued" || scenario?.status === "running";
-  const forecastBusy = forecast?.status === "queued" || forecast?.status === "running";
-  const changed = Object.values(multipliers).some((v) => Math.abs(v - 1) > 1e-9);
+  // --- Chart and totals ------------------------------------------------------------------------------------------
+  const historyDays = HISTORY_RANGES.find((r) => r.id === historyRange)?.days ?? null;
+  const figure = useMemo(() => {
+    if (!result) return null;
+    const lines: PlannerLine[] = savedDetails
+      .filter(({ detail }) => detail?.status === "succeeded" && detail.result && detail.id !== shown?.id)
+      .map(({ entry, detail }) => ({ name: `Saved: ${entry.name}`, result: detail!.result!, color: PLANNER_COLORS.saved[entry.slot % MAX_SAVED], dash: "dash" as const }));
+    if (shownResult) lines.push({ name: `Scenario: ${describe(multipliers, levers)}`, result: shownResult, color: PLANNER_COLORS.scenario, dash: "solid", dimmed: stale, primary: true });
+    return plannerFigure({ history: history ?? null, plan: result, historyDays, showLastYear, lines, channelNames, compact });
+    // useQueries returns a new array every render, so the saved results are tracked by their update times
+  }, [result, history, historyDays, showLastYear, shownResult, stale, channelNames, compact, savedQueries.map((q) => q.dataUpdatedAt).join(","), saved]);
+
+  const planDates = result ? result.daily.slice(0, horizon).map((r) => r.date) : [];
+  const planSales = result ? sumFirst(result.daily.map((r) => r.scenario_forecast), horizon) : 0;
+  const planSpend = result ? sumFirst(result.daily.map((r) => r.planned_spend), horizon) : 0;
+  const lastYear = lastYearTotal(history, planDates);
+  const tableRows = useMemo(() => (result ? dailyTableRows(history, result, shownResult, historyDays) : []), [history, result, shownResult, historyDays]);
+
+  const scenarioBusy = forecast?.status === "queued" || forecast?.status === "running";
 
   return (
     <Box>
-      <Paper component="section" aria-labelledby="planner-title" sx={{ p: { xs: 2, md: 3 }, mb: 4, borderTop: `3px solid ${PALETTE.brandGold}` }}>
-        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "flex-start" }} spacing={2} sx={{ mb: 2.5 }}>
-          <Box sx={{ maxWidth: "70ch" }}>
+      <Paper component="section" aria-labelledby="planner-title" sx={{ p: { xs: 2, md: 3 }, mb: 3, borderTop: `3px solid ${PALETTE.brandGold}` }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="flex-start" spacing={2}>
+          <Box sx={{ maxWidth: "72ch" }}>
             <Typography id="planner-title" variant="h2">
-              Budget plan forecast and what-if scenarios
+              Forecast planner
             </Typography>
             <Typography variant="body2" sx={{ mt: 0.5 }}>
-              Pick a forecast (the example plan, or upload your own daily plan as CSV), then scale channel budgets to see the
-              effect on forecast sales. Scenarios reuse the fitted model, so they need no refit.
+              Actual sales lead into the forecast for a budget plan. Move a channel's budget and the forecast, the spend and each
+              channel's effect update in place; the fitted Meridian model is reused, so nothing is refit.
             </Typography>
           </Box>
           {runId && (
@@ -187,21 +389,32 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
         </Stack>
 
         {errorMsg && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErrorMsg(null)}>
+          <Alert
+            severity="error"
+            sx={{ mt: 2 }}
+            onClose={() => setErrorMsg(null)}
+            action={
+              changed && !currentId ? (
+                <Button color="inherit" size="small" onClick={() => setRetryToken((t) => t + 1)}>
+                  Retry
+                </Button>
+              ) : undefined
+            }
+          >
             {errorMsg}
           </Alert>
         )}
 
         {forecasts.length === 0 ? (
-          <Alert severity="info">
-            No forecast yet. The example-plan forecast appears when the Meridian stages of this run have finished; you can
-            also upload your own plan (the day after the history onwards, one cost column per paid channel).
+          <Alert severity="info" sx={{ mt: 2 }}>
+            No forecast yet. The example-plan forecast appears when the Meridian stages of this run have finished; you can also
+            upload your own plan (the day after the history onwards, one cost column per paid channel).
           </Alert>
         ) : (
-          <>
-            <FormControl size="small" sx={{ width: { xs: "100%", sm: 420 }, maxWidth: "100%", mb: 2 }}>
-              <InputLabel id="forecast-select-label">Forecast</InputLabel>
-              <Select labelId="forecast-select-label" label="Forecast" value={forecastId ?? ""} onChange={(e) => setForecastId(e.target.value as string)}>
+          <Box sx={{ mt: 2.5 }}>
+            <FormControl size="small" sx={{ width: { xs: "100%", sm: 440 }, maxWidth: "100%" }}>
+              <InputLabel id="forecast-select-label">Budget plan</InputLabel>
+              <Select labelId="forecast-select-label" label="Budget plan" value={forecastId ?? ""} onChange={(e) => setForecastId(e.target.value as string)}>
                 {forecasts.map((f) => (
                   <MenuItem key={f.id} value={f.id}>
                     <Stack direction="row" spacing={1} alignItems="center" sx={{ width: "100%", minWidth: 0 }}>
@@ -212,9 +425,8 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                 ))}
               </Select>
             </FormControl>
-
-            {forecastBusy && (
-              <Box sx={{ mb: 2 }}>
+            {scenarioBusy && (
+              <Box sx={{ mt: 2 }}>
                 <Typography variant="body2" sx={{ mb: 1 }}>
                   Refitting Meridian on the history plus your plan window
                   {typeof forecast?.queue_position === "number" && forecast.queue_position > 0 ? ` (queue position ${forecast.queue_position})` : ""}…
@@ -223,176 +435,282 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
               </Box>
             )}
             {forecast?.status === "failed" && (
-              <Alert severity="error" sx={{ mb: 2 }}>
+              <Alert severity="error" sx={{ mt: 2 }}>
                 {forecast.error || "The forecast failed."}
               </Alert>
             )}
-
-            {result && (
-              <>
-                <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", mb: 2 }}>
-                  <Money label="Forecast sales" value={eur(result.scenario_total_sales)} sub={`${result.horizon_days} days · ${result.start_date} → ${result.end_date}`} />
-                  <Money label="Planned spend" value={eur(result.scenario_total_spend)} />
-                  {result.prediction_lo_total !== undefined && result.prediction_hi_total !== undefined && (
-                    <Money label="Sum of daily 90 % bounds" value={`${eur(result.prediction_lo_total)} – ${eur(result.prediction_hi_total)}`} sub="Conservative (bounds add up)" />
-                  )}
-                </Box>
-                <ResultChart result={result} title={forecast?.name ?? "Forecast"} />
-              </>
-            )}
-          </>
-        )}
-
-        {result && (
-          <Box sx={{ mt: 3, pt: 2.5, borderTop: `1px solid ${PALETTE.borderSubtle}` }}>
-            <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1} sx={{ mb: 2 }}>
-              <Typography variant="h3" component="h3">
-                What-if: scale channel budgets
-              </Typography>
-              <Button size="small" startIcon={<RestartAltIcon fontSize="small" />} onClick={() => setMultipliers({})} disabled={!changed}>
-                Reset to plan
-              </Button>
-            </Stack>
-            <Grid container spacing={2.5} alignItems="flex-start">
-              {levers.map((ch) => {
-                const val = multipliers[ch.slug] ?? 1.0;
-                return (
-                  <Grid item xs={12} sm={6} md={4} key={ch.slug}>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography id={`m-${ch.slug}`} variant="caption" sx={{ fontWeight: 700 }}>
-                        {ch.channel}
-                      </Typography>
-                      <Typography variant="caption" sx={{ fontFamily: FONT_MONO, fontWeight: 600 }}>
-                        {val.toFixed(2)}× · {eur(ch.base_spend * val)}
-                      </Typography>
-                    </Stack>
-                    <Slider
-                      size="small"
-                      color="secondary"
-                      min={0}
-                      max={2}
-                      step={0.05}
-                      value={val}
-                      aria-labelledby={`m-${ch.slug}`}
-                      getAriaValueText={(v) => `${v.toFixed(2)} times the planned budget`}
-                      marks={[{ value: 1 }]}
-                      onChange={(_, v) => setMultipliers((prev) => ({ ...prev, [ch.slug]: v as number }))}
-                    />
-                  </Grid>
-                );
-              })}
-              {locked.map((ch) => (
-                <Grid item xs={12} sm={6} md={4} key={ch.slug}>
-                  <Stack direction="row" spacing={0.75} alignItems="center" sx={{ color: PALETTE.inkMuted }}>
-                    <LockOutlinedIcon sx={{ fontSize: 15 }} aria-hidden="true" />
-                    <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                      {ch.channel}: stays as planned
-                    </Typography>
-                  </Stack>
-                  <Typography variant="caption" sx={{ color: PALETTE.inkMuted, display: "block", mt: 0.5 }}>
-                    Its cost is a commission on sales, so it enters the model as a control, not as a budget lever.
-                  </Typography>
-                </Grid>
-              ))}
-              <Grid item xs={12} sm={6} md={4}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="horizon-label">Horizon</InputLabel>
-                  <Select labelId="horizon-label" label="Horizon" value={Math.min(horizonDays, horizonMax)} onChange={(e) => setHorizonDays(Number(e.target.value))}>
-                    {[7, 14, 28, 42, 56, 90]
-                      .filter((d) => d < horizonMax)
-                      .concat(horizonMax)
-                      .map((d) => (
-                        <MenuItem key={d} value={d}>
-                          First {d} days{d === horizonMax ? " (whole plan)" : ""}
-                        </MenuItem>
-                      ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Button
-                  variant="contained"
-                  fullWidth
-                  startIcon={scenarioBusy ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
-                  disabled={!runId || scenarioBusy || forecast?.status !== "succeeded"}
-                  onClick={handleEvaluateScenario}
-                >
-                  {scenarioBusy ? "Evaluating…" : "Evaluate scenario"}
-                </Button>
-              </Grid>
-            </Grid>
-
-            <Box aria-live="polite">
-              {scenario?.status === "failed" && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  {scenario.error || "The scenario failed."}
-                </Alert>
-              )}
-              {scenario?.result && scenario.status === "succeeded" && (
-                <Box sx={{ mt: 3 }}>
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-                    <Chip color="primary" label={`Scenario sales ${eur(scenario.result.scenario_total_sales)}`} />
-                    <Chip
-                      color={scenario.result.delta_sales >= 0 ? "success" : "warning"}
-                      label={`Δ sales ${signedEur(scenario.result.delta_sales)} (${scenario.result.delta_sales_pct >= 0 ? "+" : ""}${scenario.result.delta_sales_pct.toFixed(2)}%)`}
-                    />
-                    <Chip variant="outlined" label={`Δ spend ${signedEur(scenario.result.delta_spend)}`} />
-                    {scenario.result.marginal_roas != null && <Chip color="info" label={`Δ sales / Δ spend ${scenario.result.marginal_roas.toFixed(2)}`} />}
-                  </Stack>
-                  {scenario.result.method && (
-                    <Typography variant="caption" sx={{ display: "block", mb: 1, color: PALETTE.inkSecondary }}>
-                      Method: {scenario.result.method}
-                    </Typography>
-                  )}
-                  <ResultChart result={scenario.result} title="Scenario forecast" />
-                  <TableContainer role="region" aria-label="Scenario spend by channel" tabIndex={0} sx={{ mt: 2, border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5 }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell scope="col">Channel</TableCell>
-                          <TableCell scope="col" align="right">
-                            Multiplier
-                          </TableCell>
-                          <TableCell scope="col" align="right">
-                            Plan spend
-                          </TableCell>
-                          <TableCell scope="col" align="right">
-                            Scenario spend
-                          </TableCell>
-                          <TableCell scope="col" align="right">
-                            Δ spend
-                          </TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {scenario.result.channel_summary.map((row) => (
-                          <TableRow key={row.slug} hover>
-                            <TableCell component="th" scope="row" sx={{ fontWeight: 600 }}>
-                              {row.channel}
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>
-                              {row.multiplier.toFixed(2)}×
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>
-                              {eur(row.base_spend)}
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>
-                              {eur(row.scenario_spend)}
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>
-                              {signedEur(row.delta_spend)}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Box>
-              )}
-            </Box>
           </Box>
         )}
       </Paper>
+
+      {result && figure && (
+        <Box
+          sx={{
+            display: "grid",
+            gap: 3,
+            gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "290px minmax(0, 1fr)", lg: "320px minmax(0, 1fr)" },
+            alignItems: "start",
+            mb: 4,
+          }}
+        >
+          <Paper
+            sx={{
+              p: { xs: 2, md: 2.5 },
+              position: { md: "sticky" },
+              top: { md: 76 },
+              maxHeight: { md: "calc(100vh - 92px)" },
+              overflowY: { md: "auto" },
+            }}
+          >
+            <LeverPanel
+              levers={levers}
+              locked={locked}
+              multipliers={multipliers}
+              onChange={setMultipliers}
+              effects={shownResult ? Object.fromEntries(shownResult.channel_summary.map((r) => [r.slug, r])) : null}
+              effectsStale={stale}
+              evaluating={evaluating}
+              horizonDays={horizon}
+              horizonMax={horizonMax}
+              onHorizonChange={setHorizonDays}
+              onSave={handleSave}
+              canSave={canSave}
+              saveHint={saveHint}
+            />
+          </Paper>
+
+          <Stack spacing={3} sx={{ minWidth: 0 }}>
+            <Paper component="section" aria-labelledby="forecast-chart-title" sx={{ p: { xs: 2, md: 2.5 } }}>
+              <Typography id="forecast-chart-title" variant="h3">
+                {result.start_date && result.end_date
+                  ? `Forecast ${shortDate(result.start_date)} – ${shortDate(result.end_date)}, with the sales that led into it`
+                  : "Forecast, with the sales that led into it"}
+              </Typography>
+
+              <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", mt: 2, mb: 2.5 }}>
+                <Tile
+                  label="Plan forecast"
+                  value={eur(planSales)}
+                  accent={PLANNER_COLORS.plan}
+                  sub={`${horizon} days · ${eurCompact(planSales / Math.max(horizon, 1))}/day`}
+                />
+                <Tile
+                  label="Scenario"
+                  accent={PLANNER_COLORS.scenario}
+                  dim={stale}
+                  value={shownResult ? eur(shownResult.scenario_total_sales) : "As planned"}
+                  sub={
+                    shownResult ? (
+                      <>
+                        {signedEur(shownResult.delta_sales)} ({signedPct(shownResult.delta_sales_pct, 2)})
+                        {shownResult.delta_sales_lo != null && shownResult.delta_sales_hi != null && (
+                          <>
+                            <br />
+                            <Box component="span" sx={{ whiteSpace: "nowrap" }}>
+                              90 %: {eurCompact(shownResult.delta_sales_lo, true)} to {eurCompact(shownResult.delta_sales_hi, true)}
+                            </Box>
+                          </>
+                        )}
+                      </>
+                    ) : evaluating
+                        ? "Evaluating…"
+                        : "Move a lever or pick a quick scenario"
+                  }
+                />
+                <Tile
+                  label="Spend"
+                  dim={stale}
+                  value={shownResult ? `${eurCompact(shownResult.base_total_spend)} → ${eurCompact(shownResult.scenario_total_spend)}` : eur(planSpend)}
+                  sub={shownResult ? `${signedEur(shownResult.delta_spend)} vs plan` : "Planned over the same days"}
+                />
+                <Tile
+                  label="Δ sales per Δ € spend"
+                  dim={stale}
+                  value={shownResult?.marginal_roas != null ? shownResult.marginal_roas.toFixed(2) : "–"}
+                  sub={
+                    shownResult
+                      ? shownResult.marginal_roas != null
+                        ? "Return on the euros added or removed"
+                        : "Spend unchanged: budget moved between channels"
+                      : "Shown once a scenario changes spend"
+                  }
+                />
+                {lastYear != null && lastYear > 0 && (
+                  <Tile
+                    label="Same weekdays last year"
+                    value={eur(lastYear)}
+                    accent={PLANNER_COLORS.lastYear}
+                    sub={`Plan forecast ${signedPct((100 * (planSales - lastYear)) / lastYear)} vs actual`}
+                  />
+                )}
+              </Box>
+
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between" flexWrap="wrap" useFlexGap>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography id="history-range-label" variant="caption" sx={{ fontWeight: 700, color: PALETTE.inkSecondary }}>
+                    History shown
+                  </Typography>
+                  <ToggleButtonGroup
+                    size="small"
+                    exclusive
+                    value={historyRange}
+                    onChange={(_, v: string | null) => v && setHistoryRange(v)}
+                    aria-labelledby="history-range-label"
+                  >
+                    {HISTORY_RANGES.map((r) => (
+                      <ToggleButton key={r.id} value={r.id} sx={{ textTransform: "none", px: 1.25, py: 0.25, fontWeight: 600 }}>
+                        {r.label}
+                      </ToggleButton>
+                    ))}
+                  </ToggleButtonGroup>
+                </Stack>
+                <FormControlLabel
+                  control={<Checkbox size="small" checked={showLastYear} onChange={(e) => setShowLastYear(e.target.checked)} />}
+                  label={<Typography variant="body2">Same weekday last year</Typography>}
+                />
+              </Stack>
+
+              <Box sx={{ mt: 1, position: "relative" }}>
+                <Suspense fallback={<Skeleton variant="rounded" height={figure.layout.height} />}>
+                  <LazyPlotlyChart data={figure.data} layout={figure.layout} height={figure.layout.height} ariaLabel="Actual sales, plan forecast and scenarios" />
+                </Suspense>
+              </Box>
+              <Typography variant="caption" component="p" sx={{ color: PALETTE.inkSecondary }}>
+                The shaded band is the plan's 90 % prediction interval, where an actual day is expected to land. Lower panel: daily
+                spend, with the scenario's as narrow gold bars; catalog send-out days run off the top of the panel, and hovering
+                shows their cost. Hover a day of the scenario to see each channel's share of its change.
+              </Typography>
+              {failed && (
+                <Alert severity="error" sx={{ mt: 1.5 }}>
+                  {current?.error || "The scenario failed."}
+                </Alert>
+              )}
+
+              <Accordion disableGutters elevation={0} sx={{ mt: 2, border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5, "&:before": { display: "none" } }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-controls="daily-table" id="daily-table-header">
+                  <Typography variant="body2" sx={{ fontWeight: 650, color: PALETTE.inkPrimary }}>
+                    Daily numbers behind the chart
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails id="daily-table">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<DownloadIcon fontSize="small" />}
+                    onClick={() => downloadCsv(tableRows, `forecast_${result.start_date ?? "plan"}${shownResult ? "_scenario" : ""}.csv`)}
+                    sx={{ mb: 1.5 }}
+                  >
+                    Download CSV
+                  </Button>
+                  <TableContainer role="region" aria-label="Daily sales, forecast and spend" tabIndex={0} sx={{ maxHeight: 420, border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5 }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell scope="col">Date</TableCell>
+                          <TableCell scope="col" align="right">Actual sales</TableCell>
+                          <TableCell scope="col" align="right">Same weekday last year</TableCell>
+                          <TableCell scope="col" align="right">Plan forecast</TableCell>
+                          <TableCell scope="col" align="right">90 % low</TableCell>
+                          <TableCell scope="col" align="right">90 % high</TableCell>
+                          {shownResult && <TableCell scope="col" align="right">Scenario</TableCell>}
+                          <TableCell scope="col" align="right">Spend</TableCell>
+                          {shownResult && <TableCell scope="col" align="right">Scenario spend</TableCell>}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {tableRows.map((r) => {
+                          const v = (x: number | null) => (x == null ? "–" : eur(x));
+                          return (
+                            <TableRow key={r.date} sx={r.plan != null ? { backgroundColor: "rgba(140, 114, 59, 0.05)" } : undefined}>
+                              <TableCell component="th" scope="row" sx={{ whiteSpace: "nowrap" }}>
+                                {shortDate(r.date)}
+                              </TableCell>
+                              {[r.actual, r.lastYear, r.plan, r.lo, r.hi].map((x, i) => (
+                                <TableCell key={i} align="right" sx={{ fontFamily: FONT_MONO }}>
+                                  {v(x)}
+                                </TableCell>
+                              ))}
+                              {shownResult && <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>{v(r.scenario)}</TableCell>}
+                              <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>{v(r.spend)}</TableCell>
+                              {shownResult && <TableCell align="right" sx={{ fontFamily: FONT_MONO }}>{v(r.scenarioSpend)}</TableCell>}
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </AccordionDetails>
+              </Accordion>
+            </Paper>
+
+            {shownResult && (
+              <Paper component="section" aria-labelledby="effects-title" sx={{ p: { xs: 2, md: 2.5 } }}>
+                <Typography id="effects-title" variant="h3">
+                  What each change does to forecast sales
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5, mb: 1.5 }}>
+                  Each bar is one channel's own effect, with its 90 % credible interval; the last bar is the scenario as a whole.
+                </Typography>
+                <ChannelEffects result={shownResult} stale={stale} compact={compact} />
+              </Paper>
+            )}
+
+            <Paper component="section" aria-labelledby="saved-title" sx={{ p: { xs: 2, md: 2.5 } }}>
+              <Typography id="saved-title" variant="h3">
+                Saved scenarios
+              </Typography>
+              {saved.length === 0 ? (
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  Save up to {MAX_SAVED} scenarios to keep them on the chart as dashed lines while you try others.
+                </Typography>
+              ) : (
+                <Stack spacing={1.25} sx={{ mt: 1.5 }}>
+                  {savedDetails.map(({ entry, detail }) => {
+                    const r = detail?.result;
+                    return (
+                      <Stack
+                        key={entry.id}
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={{ xs: 0.5, sm: 2 }}
+                        alignItems={{ xs: "flex-start", sm: "center" }}
+                        sx={{ p: 1.25, border: `1px solid ${PALETTE.borderSubtle}`, borderRadius: 1.5 }}
+                      >
+                        <Stack direction="row" spacing={1.25} alignItems="center" sx={{ flexGrow: 1, minWidth: 0 }}>
+                          <Box aria-hidden="true" sx={{ width: 22, flexShrink: 0, borderTop: `2.5px dashed ${PLANNER_COLORS.saved[entry.slot % MAX_SAVED]}` }} />
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography sx={{ fontWeight: 650, fontSize: "0.9rem" }}>{entry.name}</Typography>
+                            <Typography variant="caption" sx={{ color: PALETTE.inkSecondary, fontFamily: FONT_MONO }}>
+                              {r
+                                ? `${signedEur(r.delta_sales)} sales (${signedPct(r.delta_sales_pct, 2)}) · ${signedEur(r.delta_spend)} spend · ${r.horizon_days} days`
+                                : detail?.status === "failed"
+                                  ? "This scenario failed."
+                                  : "Loading…"}
+                            </Typography>
+                          </Box>
+                        </Stack>
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Button size="small" onClick={() => handleLoad(entry)}>
+                            Load
+                          </Button>
+                          <Tooltip title="Remove">
+                            <IconButton size="small" aria-label={`Remove saved scenario ${entry.name}`} onClick={() => persistSaved(saved.filter((s) => s.id !== entry.id))}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              )}
+            </Paper>
+          </Stack>
+        </Box>
+      )}
+
+      <Box className="visually-hidden" role="status" aria-live="polite">
+        {announcement}
+      </Box>
 
       <SectionRenderer
         section={section}
