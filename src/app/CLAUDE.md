@@ -100,10 +100,13 @@ backend/tests/  core/ unit + golden tests, test_pipeline_fast (CLI), test_api, t
 frontend/src/   main.tsx, App.tsx (routes; selected run lives in React state, not the URL), theme.ts (PALETTE, light mode only)
   api/client.ts (all HTTP via native fetch + X-Access-Code from sessionStorage), hooks.ts (TanStack Query + polling), types.ts
   components/Sections/SectionRenderer.tsx (lazy Plotly), Layout/AppShell.tsx (nav, run switcher, cancel), Charts/PlotlyChart.tsx
+                Import/* (the Import page's parts: UploadDropzone, RunList, RunHeader, RunOutcome, PipelineProgress,
+                DataProfileCard, RunSettingsForm, format.ts with status/profile/role labels and duration formatting)
                 Forecast/* (the planner: LeverPanel, ChannelEffects, figures.ts builds its Plotly figures client-side,
                 format.ts)
   pages/        one per nav item; most pages are just useSection(runId, "<id>") + SectionRenderer
-deploy/         deploy.sh (GCP formare-dev / europe-west3), nginx.conf (template: ${PORT}, ${API_ORIGIN})
+deploy/         deploy.sh (all | update | seed; GCP_PROJECT_ID=formare-dev, europe-west3, no access code unless APP_ACCESS_CODE),
+                nginx.conf (template: ${PORT}, ${API_ORIGIN}; on Cloud Run the API is a sidecar at 127.0.0.1:8000)
 ```
 
 **Run lifecycle:**
@@ -202,7 +205,11 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
 ## Resolved issues (verified on 2026-11-02)
 
 1. `backend/Dockerfile` uses `python:3.12-slim` and installs `--extra worker` on the `worker` stage while keeping the `api` stage slim.
-2. `deploy.sh` builds separate `api` and `worker` images from `src/app/backend` via temporary Cloud Build configs with explicit `--target api` and `--target worker`.
+2. `deploy.sh` builds the `api`, `worker` and `web` images in one temporary Cloud Build config (explicit `--target api` /
+   `--target worker`, build SA `mmm-studio-build`). Containers run the venv's programs directly (`PATH=/app/.venv/bin`);
+   `uv run` at start-up would sync the `dev` group into the image on every cold start. The old two-service layout
+   proxied to the API's run.app URL with the web host's `Host` header, which Cloud Run cannot route, so the API is now a
+   sidecar of one service, and `src/app/.gcloudignore` keeps the 2 GB `backend/.venv` out of the upload.
 3. `cloud_run.wake_worker` accepts `"cloudrun"`, `"true"`, `"1"`, and `"yes"`, and `Settings` defaults to `mmm-studio-worker-{analysis,meridian,interactive}`.
 4. `docker-compose.yml` runs one worker per queue (`worker`, `worker-meridian`, `worker-interactive`); `start.sh` and `Procfile.dev` do the same, so scenarios never wait behind a Meridian fit.
 5. `mmm_studio.main` lazy-imports heavy analytics/model packages so importing the API never loads `statsmodels`, `scipy`, `holidays`, `meridian`, `tensorflow`, or `jax`.
@@ -249,6 +256,15 @@ Task names are explicit strings: `mmm_studio.jobs.tasks.<fn>`.
     polishes at write time; `GET /artifacts/reports/*.html` polishes older reports on the fly (a no-op once the
     `mmm-studio-report-polish` meta marker is present). New fits set `InputData.currency_code = "EUR"`, so Meridian
     writes € itself. The report iframe allows popups and downloads, so doc links and the chart export menu work.
+20. The Import page is a master-detail layout: the upload zone and run list on the left; on the right, the selected run's
+    header (lifecycle stepper, actions menu), its outcome (results-ready with hold-out MAE / mean and max R-hat from
+    `run.summary`, failed or cancelled with a re-run action), pipeline lanes per queue with live stage durations from
+    `started_at`/`finished_at`, the workbook profile, and the settings form (Meridian switch, sampling profiles as radio
+    cards, channel roles with "Changed" tags and undo, a sticky start bar). Re-runs are confirmed. After an upload the
+    page waits for the refreshed run list before selecting the new draft (otherwise AppShell's fallback reset the
+    selection). Visually hidden text inside a `Collapse` needs `position: relative` on the Collapse, or the absolute
+    spans escape the clip and lengthen the page. MUI dialogs focus their container, so the safe button is focused in
+    `TransitionProps.onEntered`.
 21. The Forecast page is a planner: budget levers on the left (sticky; ±100 % sliders with a % field, quick scenarios
     including notebook 05's "+10 % digital" and "20 % Display → SEA"), and on the right the KPI strip (plan, scenario
     with its 90 % interval, spend, Δ sales / Δ spend, same weekdays last year), one chart with the run's history

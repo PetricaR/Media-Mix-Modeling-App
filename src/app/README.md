@@ -94,20 +94,23 @@ uv run pytest tests/test_meridian_smoke.py -v
 
 ## 4. Google Cloud Run Deployment (`formare-dev` / `europe-west3`)
 
-The idempotent deployment script [`src/app/deploy/deploy.sh`](deploy/deploy.sh) can be run to provision and deploy:
-- **Cloud SQL PostgreSQL 16** (`mmm-studio-pg`, `db-f1-micro`)
+The idempotent deployment script [`src/app/deploy/deploy.sh`](deploy/deploy.sh) provisions and deploys, using Cloud
+Build (no local Docker):
+- **Cloud SQL PostgreSQL 16** (`mmm-studio-pg`, `db-f1-micro`, Enterprise edition), the only resource billed while idle
 - **Cloud Storage Bucket** (`gs://formare-dev-mmm-studio-artifacts`)
-- **Artifact Registry** (`mmm-studio`) & **Secret Manager** (`mmm-studio-db-url`, `mmm-studio-access-code`)
-- **3 Cloud Run Jobs** (scale-to-zero workers woken on demand via Cloud Run Admin API v2):
+- **Artifact Registry** (`mmm-studio`) & **Secret Manager** (`mmm-studio-database-url`, and `mmm-studio-access-code`
+  only when `APP_ACCESS_CODE` is given; without it the app is open to anyone with the link)
+- **3 Cloud Run Jobs** (scale-to-zero workers; the API starts an execution whenever it defers work on their queue):
   - `mmm-studio-worker-analysis` (2 vCPU / 4 GiB, `--burst`)
-  - `mmm-studio-worker-meridian` (4 vCPU / 16 GiB, `--burst`)
-  - `mmm-studio-worker-interactive` (2 vCPU / 8 GiB, `--idle-exit 300` with warm 2-run LRU cache)
-- **2 Cloud Run Services**:
-  - `mmm-studio-api` (FastAPI)
-  - `mmm-studio-web` (Nginx + React SPA)
+  - `mmm-studio-worker-meridian` (8 vCPU / 16 GiB, `--burst`, 4 h timeout)
+  - `mmm-studio-worker-interactive` (4 vCPU / 8 GiB, `--idle-exit 300` with warm 2-run LRU cache)
+- **1 Cloud Run Service** `mmm-studio`: nginx + React SPA, with the FastAPI API as a sidecar on `localhost:8000`
+  (public through `invoker-iam-disabled`, which works under domain-restricted sharing)
 
-To deploy:
+To deploy (from the repo root, after `gcloud auth login`):
 
 ```bash
-PROJECT_ID=formare-dev REGION=europe-west3 bash src/app/deploy/deploy.sh
+GCP_PROJECT_ID=formare-dev ./src/app/deploy/deploy.sh          # everything, then seeds one Full run if none exists
+GCP_PROJECT_ID=formare-dev ./src/app/deploy/deploy.sh update   # code changes: rebuild images, roll out jobs + service
+GCP_PROJECT_ID=formare-dev ./src/app/deploy/deploy.sh seed     # upload the case-study workbook and start a run
 ```

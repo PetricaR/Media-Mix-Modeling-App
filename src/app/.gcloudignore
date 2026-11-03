@@ -3,8 +3,11 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
 .app_data/
+.env
 frontend/node_modules/
 frontend/dist/
 backend/.venv/
 backend/.pytest_cache/
+backend/tests/
