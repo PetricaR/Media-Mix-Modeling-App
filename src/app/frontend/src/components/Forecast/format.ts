@@ -8,9 +8,10 @@ export const signedEur = (v: number) => `${v >= 0 ? "+" : MINUS}€${Math.abs(Ma
 
 /** €8.01M, €514k, €950: for chart labels and the short lines under each lever. */
 export const eurCompact = (v: number, signed = false) => {
+  if (!Number.isFinite(v)) return "—";
   const a = Math.abs(v);
   const sign = v < 0 ? MINUS : signed ? "+" : "";
-  if (a >= 1e6) return `${sign}€${(a / 1e6).toFixed(a >= 1e7 ? 1 : 2)}M`;
+  if (a >= 999_500) return `${sign}€${(a / 1e6).toFixed(a >= 1e7 ? 1 : 2)}M`;
   if (a >= 1e3) return `${sign}€${(a / 1e3).toFixed(a >= 1e5 ? 0 : 1)}k`;
   return `${sign}€${Math.round(a)}`;
 };

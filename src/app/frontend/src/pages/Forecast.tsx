@@ -233,7 +233,7 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
   const lockedSlugs = useMemo(() => {
     const channels = run?.config?.role_config?.channels ?? [];
     return new Set(
-      channels.filter((c) => c.role === "commission" || c.role === "control" || c.slug === "affiliate" || c.name === "Affiliate").map((c) => c.slug ?? c.name)
+      channels.filter((c) => c.role === "commission" || c.role === "control").map((c) => c.slug ?? c.name)
     );
   }, [run]);
   const channelRows = useMemo(() => result?.channel_summary ?? [], [result]);
@@ -495,7 +495,19 @@ export const ForecastPage: React.FC<{ runId: string | null }> = ({ runId }) => {
                   label="Plan forecast"
                   value={eur(planSales)}
                   accent={PLANNER_COLORS.plan}
-                  sub={`${horizon} days · ${eurCompact(planSales / Math.max(horizon, 1))}/day`}
+                  sub={
+                    <>
+                      {horizon} days · {eurCompact(planSales / Math.max(horizon, 1))}/day
+                      {horizon === horizonMax && result.prediction_total_lo != null && result.prediction_total_hi != null && (
+                        <>
+                          <br />
+                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>
+                            90 %: {eurCompact(result.prediction_total_lo)} to {eurCompact(result.prediction_total_hi)}
+                          </Box>
+                        </>
+                      )}
+                    </>
+                  }
                 />
                 <Tile
                   label="Scenario"

@@ -1,5 +1,6 @@
 import type {
   ArtifactItem,
+  AuthSession,
   DataRoleConfig,
   ForecastItem,
   HealthInfo,
@@ -14,28 +15,15 @@ import type {
   SettingsDefaults,
 } from "./types";
 
-const ACCESS_CODE_STORAGE_KEY = "mmm_studio_access_code";
-
 type AuthPromptListener = () => void;
 const authListeners = new Set<AuthPromptListener>();
 
+/** Called whenever the API answers 401: the session is missing or has expired, so the sign-in screen shows. */
 export function onAuthRequired(listener: AuthPromptListener): () => void {
   authListeners.add(listener);
   return () => {
     authListeners.delete(listener);
   };
-}
-
-export function getAccessCode(): string {
-  return sessionStorage.getItem(ACCESS_CODE_STORAGE_KEY) || "";
-}
-
-export function setAccessCode(code: string): void {
-  if (code) {
-    sessionStorage.setItem(ACCESS_CODE_STORAGE_KEY, code);
-  } else {
-    sessionStorage.removeItem(ACCESS_CODE_STORAGE_KEY);
-  }
 }
 
 export class ApiError extends Error {
@@ -46,12 +34,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Every request carries the HttpOnly session cookie (same origin); the access code itself is never stored here. */
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers || {});
-  const code = getAccessCode();
-  if (code) {
-    headers.set("X-Access-Code", code);
-  }
   if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -59,9 +44,10 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     ...init,
     headers,
+    credentials: "same-origin",
   });
 
-  if (resp.status === 401 || resp.status === 403) {
+  if (resp.status === 401) {
     authListeners.forEach((fn) => fn());
   }
 
@@ -69,7 +55,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = resp.statusText;
     try {
       const payload = await resp.json();
-      detail = payload.detail || JSON.stringify(payload);
+      detail = typeof payload.detail === "string" ? payload.detail : formatValidationDetail(payload.detail) || JSON.stringify(payload);
     } catch {
       // ignore json parse failure
     }
@@ -79,10 +65,27 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return (await resp.json()) as T;
 }
 
+/** FastAPI's 422 body lists each invalid field; show their messages instead of raw JSON. */
+function formatValidationDetail(detail: unknown): string {
+  if (!Array.isArray(detail)) return "";
+  return detail
+    .map((d) => (d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg).replace(/^Value error, /, "") : ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
 export const api = {
   health: () => apiFetch<HealthInfo>("/api/v1/health"),
 
-  checkAuth: () => apiFetch<{ ok: boolean; protected: boolean }>("/api/v1/auth/check", { method: "POST" }),
+  session: () => apiFetch<AuthSession>("/api/v1/auth/session"),
+
+  login: (accessCode: string) =>
+    apiFetch<{ ok: boolean; protected: boolean }>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ access_code: accessCode }),
+    }),
+
+  logout: () => apiFetch<{ ok: boolean }>("/api/v1/auth/logout", { method: "POST" }),
 
   listRuns: () => apiFetch<{ runs: RunSummaryItem[]; active_run_id: string | null }>("/api/v1/runs"),
 
@@ -113,9 +116,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  /** Start a draft or re-run a finished run with these settings in one request (nothing changes if it is refused). */
   startRun: (
     runId: string,
-    payload: { profile?: Profile; skip_meridian?: boolean; seed?: number }
+    payload: { profile?: Profile; skip_meridian?: boolean; seed?: number; role_config?: DataRoleConfig }
   ) =>
     apiFetch<{ id: string; status: string }>(`/api/v1/runs/${runId}/start`, {
       method: "POST",

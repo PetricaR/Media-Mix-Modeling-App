@@ -25,6 +25,8 @@ RUN_PROFILES: tuple[str, ...] = ("full", "quick", "smoke", "custom")
 MERIDIAN_ROI_PRIOR: tuple[float, float] = (0.2, 0.9)
 DEFAULT_IN_HOME_SHIFT = 2
 DEFAULT_HOLDOUT_DAYS = 93
+# A run needs at least one full seasonal cycle of training days before its hold-out
+MIN_TRAINING_DAYS = 365
 MAX_SEED = 2**31 - 1
 SELECTION_SHIFT_CHOICES: tuple[int, ...] = tuple(range(8))
 CALENDAR_GROUPS: tuple[str, ...] = ("weekdays", "holidays", "christmas", "black_week")
@@ -65,6 +67,9 @@ class ModelSettings(BaseModel):
     calendar: CalendarControls = Field(default_factory=CalendarControls)
     n_fourier: int = Field(2, ge=0, le=6)
     trend: bool = True
+    # A 0/1 control per channel with missing workbook rows: those days otherwise look like real sales drops. The
+    # notebooks have no such control; switch it off to reproduce them exactly.
+    missing_row_controls: bool = True
     max_lag: int = Field(21, ge=1, le=60)
     baseline: Literal["constant", "knots", "auto"] = "constant"
     n_knots: int = Field(8, ge=2, le=60)
@@ -133,6 +138,7 @@ def settings_defaults() -> dict[str, Any]:
         "drop_trailing_isolated_days": False,
         "seed": 0,
         "in_home_shift_days": DEFAULT_IN_HOME_SHIFT,
+        "min_training_days": MIN_TRAINING_DAYS,
         "profiles": {k: dict(v) for k, v in PROFILE_SAMPLING.items()},
         "limits": {
             **_bounds(ModelSettings),
@@ -207,6 +213,7 @@ def settings_changes(role_config: DataRoleConfig, seed: int = 0, profile: str = 
     add("Calendar controls", _calendar_label(ms.calendar), _calendar_label(base.calendar))
     add("Yearly Fourier pairs", str(ms.n_fourier), str(base.n_fourier))
     add("Linear trend", _on_off(ms.trend), _on_off(base.trend))
+    add("Missing-row controls", _on_off(ms.missing_row_controls), _on_off(base.missing_row_controls))
 
     for ch in role_config.channels:
         inferred = ch.inferred_role or ch.role
@@ -216,6 +223,12 @@ def settings_changes(role_config: DataRoleConfig, seed: int = 0, profile: str = 
         default_shape = default_adstock_shape(ch.role)
         add(f"Adstock · {ch.name}", (ch.adstock_shape or default_shape).capitalize(), default_shape.capitalize())
         add(f"Saturation · {ch.name}", "None" if ch.saturation == "none" else "Hill", "Hill")
+        if ch.demand_following is not None and ch.demand_following != bool(ch.inferred_demand_following):
+            add(
+                f"Demand-following cost · {ch.name}",
+                _on_off(ch.demand_following),
+                _on_off(bool(ch.inferred_demand_following)),
+            )
         if ch.role == "print_event":
             shift = ch.in_home_shift_days if ch.in_home_shift_days is not None else DEFAULT_IN_HOME_SHIFT
             add(f"In-home shift · {ch.name}", f"{shift} days", f"{DEFAULT_IN_HOME_SHIFT} days")
@@ -245,3 +258,27 @@ def settings_changes(role_config: DataRoleConfig, seed: int = 0, profile: str = 
     if ms.selection_enabled(profile):
         add("Selection catalog shifts", ", ".join(map(str, ms.selection_shifts)), ", ".join(map(str, base.selection_shifts)))
     return rows
+
+
+def run_config_errors(role_config: DataRoleConfig, modelling_days: int | None) -> list[str]:
+    """Problems that make a run's settings unusable, in plain words (empty when the run can start).
+
+    `modelling_days` is the length of the modelling panel from the workbook profile.
+    """
+    errors: list[str] = []
+    if modelling_days is not None:
+        training_days = int(modelling_days) - int(role_config.holdout_days)
+        if training_days < MIN_TRAINING_DAYS:
+            errors.append(
+                f"A {role_config.holdout_days}-day hold-out leaves {training_days} training days of {modelling_days}; at "
+                f"least {MIN_TRAINING_DAYS} are needed. Shorten the hold-out or upload a longer history."
+            )
+    media = [c.slug for c in role_config.channels if c.enabled and c.role in ("paid", "digital_paid", "print_event")]
+    if not media:
+        errors.append("No channel is modelled as paid media or a print event; Meridian needs at least one media channel.")
+    ms = role_config.model_settings
+    if ms.media_prior_type == "roi" and ms.roi_prior == "custom":
+        unknown = sorted(set(ms.custom_roi_priors) - set(media))
+        if unknown:
+            errors.append(f"Custom ROI priors are set for {', '.join(unknown)}, which are not media channels of this run.")
+    return errors

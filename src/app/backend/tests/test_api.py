@@ -189,8 +189,14 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
     r_opt_early = client.post(f"/api/v1/runs/{run_id}/optimisations", json={})
     assert r_opt_early.status_code == 409
 
-    # Seed the artifacts a Meridian run writes (ROI table, response curves, example-plan forecast)
+    # Seed the artifacts a Meridian run writes (ROI table, response curves, example-plan forecast); the Meridian job
+    # registers the example forecast when it finishes (GET requests never write)
     _seed_meridian_artifacts(run_id)
+    assert all(f["id"] != default_fc_id for f in client.get(f"/api/v1/runs/{run_id}/forecasts").json()["forecasts"])
+    from mmm_studio.jobs.registry import register_default_forecast
+
+    with get_session_factory()() as db:
+        register_default_forecast(db, get_storage(), run_id)
 
     r_fcs = client.get(f"/api/v1/runs/{run_id}/forecasts")
     assert any(f["id"] == default_fc_id and f["status"] == "succeeded" for f in r_fcs.json()["forecasts"])
@@ -283,14 +289,15 @@ def test_full_api_lifecycle_and_interactive_endpoints(api_env) -> None:
 def test_access_code_guard_rate_limiter_and_meridian_queue_cap(api_env) -> None:
     client, monkeypatch = api_env
 
-    # Enable APP_ACCESS_CODE
     monkeypatch.setenv("MMM_APP_ACCESS_CODE", "secret-studio-2026")
     get_settings.cache_clear()
 
-    # Open read endpoints still return 200 without header
-    assert client.get("/api/v1/runs").status_code == 200
+    # Every data route needs the code: reads included (runs, uploads, artifacts)
+    assert client.get("/api/v1/health").status_code == 200
+    assert client.get("/api/v1/health").json()["auth_required"] is True
+    assert client.get("/api/v1/runs").status_code == 401
+    assert client.get("/api/v1/auth/session").json() == {"auth_required": True, "authenticated": False}
 
-    # Write endpoint without header -> 401
     with FIXTURE_XLSX.open("rb") as fh:
         r_no_auth = client.post(
             "/api/v1/runs",
@@ -298,7 +305,6 @@ def test_access_code_guard_rate_limiter_and_meridian_queue_cap(api_env) -> None:
         )
     assert r_no_auth.status_code == 401
 
-    # Write endpoint with wrong header -> 403
     with FIXTURE_XLSX.open("rb") as fh:
         r_bad_auth = client.post(
             "/api/v1/runs",
@@ -307,7 +313,8 @@ def test_access_code_guard_rate_limiter_and_meridian_queue_cap(api_env) -> None:
         )
     assert r_bad_auth.status_code == 403
 
-    # Test Meridian queue cap (max 3 queued jobs)
+    # Test Meridian queue cap (max 3 queued fits); the Meridian job is chained after the analysis job, so runs that
+    # are still in their analysis stage count too
     headers = {"X-Access-Code": "secret-studio-2026"}
     run_ids = []
     for i in range(4):
@@ -321,15 +328,18 @@ def test_access_code_guard_rate_limiter_and_meridian_queue_cap(api_env) -> None:
         assert resp.status_code == 201
         run_ids.append(resp.json()["id"])
 
+    # The uploaded workbook is private: no code, no download
+    assert client.get(f"/api/v1/runs/{run_ids[0]}/artifacts/input/workbook.xlsx").status_code == 401
+    assert client.get(f"/api/v1/runs/{run_ids[0]}/artifacts/input/workbook.xlsx", headers=headers).status_code == 200
+
     for rid in run_ids[:3]:
         r_st = client.post(f"/api/v1/runs/{rid}/start", headers=headers, json={"skip_meridian": False})
         assert r_st.status_code == 202
 
-    # 4th Meridian start should return 429 Too Many Requests
     r_fourth = client.post(f"/api/v1/runs/{run_ids[3]}/start", headers=headers, json={"skip_meridian": False})
     assert r_fourth.status_code == 429
+    assert client.get(f"/api/v1/runs/{run_ids[3]}", headers=headers).json()["status"] == "draft"  # nothing changed
 
-    # Cancelling one frees a slot
     r_cancel = client.post(f"/api/v1/runs/{run_ids[0]}/cancel", headers=headers)
     assert r_cancel.status_code == 200
     assert r_cancel.json()["status"] == "cancelled"
@@ -337,13 +347,130 @@ def test_access_code_guard_rate_limiter_and_meridian_queue_cap(api_env) -> None:
     r_fourth_retry = client.post(f"/api/v1/runs/{run_ids[3]}/start", headers=headers, json={"skip_meridian": False})
     assert r_fourth_retry.status_code == 202
 
-    # Rate limit on /api/v1/auth/check (5 attempts per minute)
+    # Signing in sets an HttpOnly session cookie that authenticates reads (links and report frames send no headers)
     reset_rate_limiter()
+    r_login = client.post("/api/v1/auth/login", json={"access_code": "secret-studio-2026"})
+    assert r_login.status_code == 200
+    assert "httponly" in r_login.headers["set-cookie"].lower() and "samesite=strict" in r_login.headers["set-cookie"].lower()
+    assert client.get("/api/v1/runs").status_code == 200
+    assert client.get("/api/v1/auth/session").json()["authenticated"] is True
+    client.post("/api/v1/auth/logout")
+    client.cookies.clear()
+    assert client.get("/api/v1/runs").status_code == 401
+
+    # Failed attempts are rate limited per client (5 a minute), on sign-in and on every guarded route
     for _ in range(5):
-        r_chk = client.post("/api/v1/auth/check", headers=headers)
-        assert r_chk.status_code == 200
-    r_limited = client.post("/api/v1/auth/check", headers=headers)
-    assert r_limited.status_code == 429
+        assert client.post("/api/v1/auth/login", json={"access_code": "nope"}).status_code == 403
+    assert client.post("/api/v1/auth/login", json={"access_code": "secret-studio-2026"}).status_code == 429
+    assert client.get("/api/v1/runs", headers={"X-Access-Code": "nope"}).status_code == 429
+    reset_rate_limiter()
+
+
+def test_finished_runs_keep_their_settings_and_reruns_are_atomic(api_env) -> None:
+    client, monkeypatch = api_env
+    with FIXTURE_XLSX.open("rb") as fh:
+        run = client.post(
+            "/api/v1/runs",
+            files={"file": ("case.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            data={"name": "Frozen"},
+        ).json()
+    run_id = run["id"]
+    assert client.post(f"/api/v1/runs/{run_id}/start", json={"skip_meridian": True}).status_code == 202
+    run_worker_loop(queue="analysis", burst=True)
+    assert client.get(f"/api/v1/runs/{run_id}").json()["status"] == "succeeded"
+
+    # Settings of a run with results cannot change without a re-run; the name can
+    rc = client.get(f"/api/v1/runs/{run_id}").json()["config"]["role_config"]
+    rc_changed = {**rc, "holdout_days": 60}
+    assert client.patch(f"/api/v1/runs/{run_id}", json={"role_config": rc_changed}).status_code == 409
+    assert client.patch(f"/api/v1/runs/{run_id}", json={"seed": 5}).status_code == 409
+    assert client.patch(f"/api/v1/runs/{run_id}", json={"name": "Renamed"}).json()["name"] == "Renamed"
+
+    # A refused re-run (queue full) changes nothing
+    monkeypatch.setenv("MMM_MAX_MERIDIAN_QUEUED", "0")
+    get_settings.cache_clear()
+    r = client.post(f"/api/v1/runs/{run_id}/start", json={"skip_meridian": False, "role_config": rc_changed})
+    assert r.status_code == 429
+    after = client.get(f"/api/v1/runs/{run_id}").json()
+    assert after["status"] == "succeeded" and after["config"]["role_config"]["holdout_days"] == 93
+    monkeypatch.setenv("MMM_MAX_MERIDIAN_QUEUED", "3")
+    get_settings.cache_clear()
+
+    # Settings that cannot run are a 422 that says why
+    rc_bad = {
+        **rc,
+        "model_settings": {**rc["model_settings"], "roi_prior": "custom", "custom_roi_priors": {"affiliate": {"median": 2.0, "sigma": 0.5}}},
+    }
+    r = client.post(f"/api/v1/runs/{run_id}/start", json={"skip_meridian": True, "role_config": rc_bad})
+    assert r.status_code == 422 and "not media channels" in r.json()["detail"]
+
+    # A re-run removes what the previous settings produced, including optimisations and custom forecasts
+    _seed_meridian_artifacts(run_id)
+    assert client.post(f"/api/v1/runs/{run_id}/optimisations", json={}).status_code == 202
+    r = client.post(f"/api/v1/runs/{run_id}/start", json={"skip_meridian": True, "role_config": rc_changed})
+    assert r.status_code == 202, r.text
+    assert r.json()["config"]["role_config"]["holdout_days"] == 60
+    assert client.get(f"/api/v1/runs/{run_id}/optimisations").json()["optimisations"] == []
+
+    # A run whose previous job is still queued cannot be started twice (409, never a 500)
+    client.post(f"/api/v1/runs/{run_id}/cancel")
+    with psycopg.connect(TEST_DB_URL, autocommit=True) as conn:
+        conn.execute(
+            "UPDATE procrastinate_jobs SET status = 'todo', abort_requested = false "
+            "WHERE id = (SELECT max(id) FROM procrastinate_jobs WHERE queueing_lock = %s)",
+            (f"analysis:{run_id}",),
+        )
+    assert client.post(f"/api/v1/runs/{run_id}/start", json={"skip_meridian": True}).status_code == 409
+
+
+def test_optimiser_requests_are_validated(api_env) -> None:
+    client, _ = api_env
+    with FIXTURE_XLSX.open("rb") as fh:
+        run_id = client.post(
+            "/api/v1/runs",
+            files={"file": ("case.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        ).json()["id"]
+    assert client.post(f"/api/v1/runs/{run_id}/start", json={"skip_meridian": True}).status_code == 202
+    run_worker_loop(queue="analysis", burst=True)
+    _seed_meridian_artifacts(run_id)
+
+    def post(body: dict) -> object:
+        return client.post(f"/api/v1/runs/{run_id}/optimisations", json=body)
+
+    assert post({"channel_bounds": {"Display": [0.5, 0.5]}}).status_code == 202  # display names are accepted
+    assert post({"channel_bounds": {"Teletext": [0.5, 1.0]}}).status_code == 422  # unknown channel
+    assert post({"channel_bounds": {"affiliate": [0.5, 1.0]}}).status_code == 422  # a control, not media
+    assert post({"channel_bounds": {"display": [0.9]}}).status_code == 422  # malformed
+    assert post({"channel_bounds": {"display": [-5, 0.2]}}).status_code == 422  # negative
+    assert post({"channel_bounds": {"display": [1.2, 0.8]}}).status_code == 422  # reversed
+    assert post({"max_multiplier": 3.0}).status_code == 422  # beyond the response curves
+    r = post({"total_budget": 50_000_000, "min_multiplier": 0.9, "max_multiplier": 1.1})
+    assert r.status_code == 422 and "cannot be allocated" in r.json()["detail"]
+
+    run_worker_loop(queue="interactive", burst=True)
+    opt = client.get(f"/api/v1/runs/{run_id}/optimisations").json()["optimisations"][0]
+    assert opt["status"] == "succeeded", opt.get("error")
+    display = next(a for a in opt["result"]["allocations"] if a["channel"] == "display")
+    assert display["multiplier"] == pytest.approx(0.5, abs=0.002)
+
+
+def test_plans_with_wrong_columns_are_rejected(api_env) -> None:
+    import io
+
+    import pandas as pd
+
+    client, _ = api_env
+    with FIXTURE_XLSX.open("rb") as fh:
+        run_id = client.post(
+            "/api/v1/runs",
+            files={"file": ("case.xlsx", fh, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        ).json()["id"]
+    assert client.post(f"/api/v1/runs/{run_id}/start", json={"skip_meridian": True}).status_code == 202
+    run_worker_loop(queue="analysis", burst=True)
+    template = pd.read_csv(io.StringIO(client.get(f"/api/v1/runs/{run_id}/plan-template?days=14").text))
+    bad = template.rename(columns={"catalog": "catalgo"})
+    r = client.post(f"/api/v1/runs/{run_id}/forecasts", files={"file": ("plan.csv", bad.to_csv(index=False).encode())})
+    assert r.status_code == 422 and "catalgo" in r.json()["detail"]
 
 
 def test_run_settings_are_validated_and_reported(api_env) -> None:

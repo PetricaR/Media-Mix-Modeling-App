@@ -1,0 +1,20 @@
+[FAIL] SEC-1 reads require the access code when one is configured
+        without X-Access-Code: {'GET /runs': 200, 'GET /runs/{id}': 200, 'GET uploaded workbook': 200, 'GET profile.json': 200}; workbook bytes returned=399012
+[FAIL] DQ-API upload with duplicates / negative costs is rejected or warned
+        duplicates -> 201, warnings=['Missing channel-date rows detected (Catalog: 4 days, Owned: 2 days, TV: 38 days).', 'TV channel has 8 present days with near-zero sales (< 1 €).', "Trailing isolated year dates ['2025-01-01'] stay in the models (as in the notebooks) but are left out of yearly and monthly comparisons."]; negatives -> 201, negative_values_count=5
+[FAIL] STATE-1 a finished run's settings cannot change without a re-run
+        PATCH on a succeeded run -> 200; status still succeeded; settings_changes now ['Hold-out length=60 days', 'Random seed=99', 'Yearly Fourier pairs=4']; results unchanged=True; meta/config.json holdout_days=93 vs DB 60
+[FAIL] STATE-2 a refused re-run leaves the run's settings unchanged
+        PATCH 200 then start 429 (Meridian queue depth limit reached (0/0 active/queued jobs)....); run status=succeeded, stored trend=False, skip_meridian=False
+[FAIL] OPT-API-1 a display-name key in channel_bounds is applied or rejected
+        channel_bounds={'Display': [0.5, 0.5]} -> display multiplier 0.7 (bound ignored silently)
+[FAIL] OPT-API-2 malformed channel_bounds are rejected
+        channel_bounds={'display': [0.9]} -> HTTP 202, status succeeded
+[FAIL] OPT-API-3 negative bounds are rejected
+        channel_bounds={'display': [-5, 0.2]} -> HTTP 202, display spend 5960980.0
+[FAIL] OPT-API-4 an infeasible budget is reported, not silently re-bounded
+        budget EUR 50M vs EUR 121.8M history with bounds [0.9, 1.1] -> status succeeded, allocations outside bounds ['sea x0.411', 'catalog x0.411', 'display x0.411', 'display_network x0.411', 'social_media x0.411', 'psm x0.411']
+[FAIL] FC-API a plan with unknown or missing channel columns is rejected
+        plan columns ['date', 'sea', 'catalgo', 'display'] -> HTTP 202 (queued)
+[FAIL] STATE-3 a re-run clears results computed from the previous model
+        re-run start -> 202; optimisations before/after 4/4; custom forecasts before/after 1/1

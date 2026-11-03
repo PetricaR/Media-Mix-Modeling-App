@@ -59,4 +59,12 @@ def test_affiliate_role_shows_what_the_model_uses() -> None:
     cfg = extract_role_config({"role_config": {"channels": [{"name": "Affiliate", "role": "paid"}, {"name": "SEA", "role": "paid"}]}})
     roles = {c.name: c.role for c in cfg.channels}
     assert roles == {"Affiliate": "commission", "SEA": "paid"}
-    assert MeridianSpecConfig.from_role_config(cfg).as_controls == ("affiliate",)
+    index = pd.date_range("2023-01-01", periods=500, freq="D")
+    assert MeridianSpecConfig.from_role_config(cfg, index=index).as_controls == ("affiliate",)
+
+    # A user who deliberately models the commission channel as media is followed (and told why that is risky)
+    cfg.channels[0].role = "paid"
+    changed = extract_role_config({"role_config": cfg.model_dump(mode="json")})
+    assert changed.channels[0].role == "paid"
+    assert "biased upwards" in (changed.channels[0].rationale or "")
+    assert MeridianSpecConfig.from_role_config(changed, index=index).as_controls == ()

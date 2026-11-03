@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import platform
 import uuid
 from typing import Any
@@ -12,23 +13,34 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from mmm_studio import __version__
-from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db, require_access_code
-from mmm_studio.core.model_settings import MAX_SEED, RUN_PROFILES, settings_changes, settings_defaults
+from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db
+from mmm_studio.core.model_settings import (
+    MAX_SEED,
+    RUN_PROFILES,
+    run_config_errors,
+    settings_changes,
+    settings_defaults,
+)
 from mmm_studio.core.schema import DataRoleConfig, extract_role_config
 from mmm_studio.core.workbook import WorkbookValidationError, profile_workbook
-from mmm_studio.db.models import ForecastRun, Run, utcnow
+from mmm_studio.db.models import ForecastRun, OptimisationRun, Run, utcnow
 from mmm_studio.jobs.app import (
+    QueueUnavailable,
     cancel_procrastinate_job,
     count_active_queue_jobs,
     defer_task,
-    get_queue_position,
-    sweep_stale_runs,
+    get_queue_positions,
+    pending_queueing_locks,
+    sweep_stale_runs_throttled,
 )
-from mmm_studio.jobs.tasks import ensure_stage_rows, run_analysis_job, run_meridian_job
+from mmm_studio.jobs.tasks import ensure_stage_rows, run_analysis_job
 from mmm_studio.settings import Settings
 from mmm_studio.storage import StorageBackend
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+logger = logging.getLogger(__name__)
+# Results a re-run replaces; the uploaded workbook (`input/`) and its profile are kept
+RERUN_PREFIXES = ("sections", "data", "models", "reports", "forecasts", "scenarios", "optimisations")
 
 
 class RunPatchRequest(BaseModel):
@@ -41,10 +53,12 @@ class RunPatchRequest(BaseModel):
 
 
 class RunStartRequest(BaseModel):
+    """Settings to start (or re-run) with; a field left out keeps the run's stored value."""
+
     profile: str | None = None
-    skip_meridian: bool = False
+    skip_meridian: bool | None = None
     role_config: DataRoleConfig | None = None
-    seed: int = Field(default=0, ge=0, le=MAX_SEED)
+    seed: int | None = Field(default=None, ge=0, le=MAX_SEED)
 
 
 def _capture_versions(settings: Settings) -> dict[str, str]:
@@ -85,9 +99,20 @@ def _store_role_config(run: Run, storage: StorageBackend, role_config: DataRoleC
     storage.write_json(f"runs/{run.id}/meta/profile.json", schema_dict)
 
 
-def serialize_run(run: Run) -> dict[str, Any]:
+def _validated(role_config: DataRoleConfig, run: Run) -> DataRoleConfig:
+    """`role_config` if the run can start with it, else a 422 listing every problem in plain words."""
+    modelling_days = (run.schema_json or {}).get("modelling_days")
+    errors = run_config_errors(role_config, int(modelling_days) if modelling_days else None)
+    if errors:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=" ".join(errors))
+    return role_config
+
+
+def serialize_run(run: Run, queue_positions: dict[int, int] | None = None) -> dict[str, Any]:
     """Serialize a Run ORM instance (including ordered StageProgress rows and queue position)."""
-    q_pos = get_queue_position(run.meridian_job_id, "meridian") if run.meridian_job_id else None
+    if queue_positions is None:
+        queue_positions = get_queue_positions([run.meridian_job_id] if run.meridian_job_id else [], "meridian")
+    q_pos = queue_positions.get(run.meridian_job_id) if run.meridian_job_id else None
     stages_out = [
         {
             "key": st.key,
@@ -125,8 +150,8 @@ def serialize_run(run: Run) -> dict[str, Any]:
     }
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_access_code)])
-async def create_run(
+@router.post("", status_code=status.HTTP_201_CREATED)
+def create_run(
     file: UploadFile = File(...),
     name: str = Form("Case Study Run"),
     profile: str = Form("quick"),
@@ -134,7 +159,11 @@ async def create_run(
     storage: StorageBackend = Depends(get_app_storage),
     settings: Settings = Depends(get_app_settings),
 ) -> dict[str, Any]:
-    """Step 1 of the Import flow: upload an `.xlsx` workbook, infer data roles, and create a `draft` Run."""
+    """Step 1 of the Import flow: upload an `.xlsx` workbook, infer data roles, and create a `draft` Run.
+
+    A plain (sync) handler on purpose: FastAPI runs it in its thread pool, so profiling a workbook never blocks the
+    event loop for the other requests.
+    """
     filename = file.filename or "workbook.xlsx"
     if not filename.lower().endswith(".xlsx"):
         raise HTTPException(
@@ -142,8 +171,8 @@ async def create_run(
             detail="Only Excel (.xlsx) workbooks are supported.",
         )
 
-    raw_bytes = await file.read()
     max_bytes = settings.max_upload_mb * 1024 * 1024
+    raw_bytes = file.file.read(max_bytes + 1)
     if len(raw_bytes) > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -159,13 +188,14 @@ async def create_run(
         _, data_profile = profile_workbook(raw_bytes, filename=filename)
     except WorkbookValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     except Exception as exc:
+        logger.warning("Workbook %r could not be profiled", filename, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse Excel workbook: {exc}",
+            detail="The file could not be read as an Excel workbook with date, channel, sales and cost columns.",
         ) from exc
 
     if profile not in RUN_PROFILES:
@@ -202,18 +232,28 @@ async def create_run(
     return serialize_run(run)
 
 
-@router.patch("/{run_id}", dependencies=[Depends(require_access_code)])
+@router.patch("/{run_id}")
 def patch_run(
     run_id: str,
     payload: RunPatchRequest,
     db: Session = Depends(get_db),
     storage: StorageBackend = Depends(get_app_storage),
 ) -> dict[str, Any]:
-    """Step 2 of the Import flow: update run name, sampling profile, or channel role assignments before starting."""
+    """Rename a run, or (drafts only) change its roles, settings, profile and seed.
+
+    Once a run has started its settings are frozen: they describe the results it holds. Changing them means a re-run
+    (`POST /runs/{id}/start` with the new settings), which replaces the results in one step.
+    """
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
 
+    changes_settings = any(v is not None for v in (payload.profile, payload.role_config, payload.skip_meridian, payload.seed))
+    if changes_settings and run.status != "draft":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run {run_id} is {run.status}; its settings describe its results. Start a re-run with the new settings instead.",
+        )
     if payload.name is not None:
         run.name = payload.name.strip() or run.name
     if payload.profile is not None:
@@ -226,7 +266,7 @@ def patch_run(
 
     cfg = dict(run.config or {})
     if payload.role_config is not None:
-        _store_role_config(run, storage, payload.role_config, cfg)
+        _store_role_config(run, storage, _validated(payload.role_config, run), cfg)
     if payload.skip_meridian is not None:
         cfg["skip_meridian"] = bool(payload.skip_meridian)
     if payload.seed is not None:
@@ -238,7 +278,24 @@ def patch_run(
     return serialize_run(run)
 
 
-@router.post("/{run_id}/start", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_access_code)])
+def _pending_meridian_runs(db: Session, exclude: str) -> int:
+    """Runs that will queue a Meridian job when their analysis job finishes (it is chained, not queued at start)."""
+    rows = db.query(Run).filter(Run.status.in_(("queued", "running")), Run.meridian_job_id.is_(None), Run.id != exclude).all()
+    return sum(1 for r in rows if not bool((r.config or {}).get("skip_meridian", False)))
+
+
+def _clear_results(db: Session, storage: StorageBackend, run_id: str) -> None:
+    """Remove everything computed from the previous settings: sections, data, models, reports and every forecast,
+    scenario and optimisation (their models and curves came from the old fit)."""
+    for sub in RERUN_PREFIXES:
+        storage.delete_prefix(f"runs/{run_id}/{sub}")
+    for meta in ("summary.json", "meridian_metrics.json", "config.json"):
+        storage.delete_prefix(f"runs/{run_id}/meta/{meta}")
+    db.query(OptimisationRun).filter(OptimisationRun.run_id == run_id).delete(synchronize_session=False)
+    db.query(ForecastRun).filter(ForecastRun.run_id == run_id).delete(synchronize_session=False)  # scenarios cascade
+
+
+@router.post("/{run_id}/start", status_code=status.HTTP_202_ACCEPTED)
 def start_run(
     run_id: str,
     payload: RunStartRequest | None = None,
@@ -246,7 +303,12 @@ def start_run(
     storage: StorageBackend = Depends(get_app_storage),
     settings: Settings = Depends(get_app_settings),
 ) -> dict[str, Any]:
-    """Step 3 of the Import flow: enqueue `analysis` and `meridian` jobs for a draft Run."""
+    """Start a draft run, or re-run a finished one, with the settings in `payload` (all-or-nothing).
+
+    Everything is checked before anything changes: the settings, the Meridian queue's capacity and leftover queued
+    jobs. Only then are the new settings stored, the previous results removed and the analysis job queued; the
+    Meridian job follows when the analysis job finishes.
+    """
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
@@ -259,67 +321,75 @@ def start_run(
 
     cfg = dict(run.config or {})
     skip_meridian = bool(cfg.get("skip_meridian", False))
-
+    profile = run.profile
+    role_config = extract_role_config(cfg)
     if payload is not None:
-        if payload.profile in RUN_PROFILES:
-            run.profile = payload.profile
-        skip_meridian = bool(payload.skip_meridian)
-        cfg["skip_meridian"] = skip_meridian
-        cfg["seed"] = int(payload.seed)
+        if payload.profile is not None:
+            if payload.profile not in RUN_PROFILES:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"profile must be one of {', '.join(RUN_PROFILES)}.")
+            profile = payload.profile
+        if payload.skip_meridian is not None:
+            skip_meridian = bool(payload.skip_meridian)
+            cfg["skip_meridian"] = skip_meridian
+        if payload.seed is not None:
+            cfg["seed"] = int(payload.seed)
         if payload.role_config is not None:
-            _store_role_config(run, storage, payload.role_config, cfg)
+            role_config = payload.role_config
+    role_config = _validated(role_config, run)
 
-    if not skip_meridian:
-        active_meridian = count_active_queue_jobs("meridian")
-        if active_meridian >= settings.max_meridian_queued:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=(
-                    f"Meridian queue depth limit reached ({active_meridian}/{settings.max_meridian_queued} active/queued jobs). "
-                    "Please wait for a slot to free up or cancel a queued run."
-                ),
-            )
+    try:
+        if not skip_meridian:
+            active_meridian = count_active_queue_jobs("meridian") + _pending_meridian_runs(db, exclude=run_id)
+            if active_meridian >= settings.max_meridian_queued:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        f"Meridian queue depth limit reached ({active_meridian}/{settings.max_meridian_queued} active/queued fits). "
+                        "Please wait for a slot to free up or cancel a queued run."
+                    ),
+                )
+        leftovers = pending_queueing_locks([f"analysis:{run_id}", f"meridian:{run_id}"])
+    except QueueUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The job queue is unavailable; try again shortly.") from exc
+    if leftovers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A previous job of this run is still waiting in the queue; wait for it to finish or cancel the run first.",
+        )
 
     rerun = run.status != "draft"
     if rerun:
-        # A re-run starts from a clean slate: results of the previous run (sections, data, models, reports) and the
-        # example forecast built from them are removed; the uploaded workbook and its profile are kept.
-        for sub in ("sections", "data", "models", "reports"):
-            storage.delete_prefix(f"runs/{run_id}/{sub}")
-        for meta in ("summary.json", "meridian_metrics.json"):
-            storage.delete_prefix(f"runs/{run_id}/meta/{meta}")
-        default_fc = db.get(ForecastRun, f"default_{run_id}")
-        if default_fc is not None:
-            db.delete(default_fc)
+        _clear_results(db, storage, run_id)
+    run.profile = profile
+    _store_role_config(run, storage, role_config, cfg)
     run.config = cfg
     run.status = "queued"
     run.error = None
     run.summary = None
+    run.analysis_job_id = None
+    run.meridian_job_id = None
     run.heartbeat_at = utcnow()
     db.commit()
 
     ensure_stage_rows(run_id, skip_meridian=skip_meridian, reset=rerun)
 
-    analysis_job_id = defer_task(
-        run_analysis_job,
-        queue="analysis",
-        lock=f"analysis:{run_id}",
-        queueing_lock=f"analysis:{run_id}",
-        run_id=run_id,
-        skip_meridian=skip_meridian,
-    )
-    meridian_job_id: int | None = None
-    if not skip_meridian:
-        meridian_job_id = defer_task(
-            run_meridian_job,
-            queue="meridian",
-            lock="meridian_singleton",
-            queueing_lock=f"meridian:{run_id}",
+    try:
+        analysis_job_id = defer_task(
+            run_analysis_job,
+            queue="analysis",
+            lock=f"analysis:{run_id}",
+            queueing_lock=f"analysis:{run_id}",
             run_id=run_id,
+            skip_meridian=skip_meridian,
         )
+    except Exception as exc:
+        logger.exception("Could not queue the analysis job of run %s", run_id)
+        run.status = "failed"
+        run.error = "The run could not be queued; start it again."
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=run.error) from exc
 
     run.analysis_job_id = analysis_job_id
-    run.meridian_job_id = meridian_job_id
     db.commit()
     db.refresh(run)
     return serialize_run(run)
@@ -334,11 +404,12 @@ def get_settings_defaults() -> dict[str, Any]:
 @router.get("")
 def list_runs(db: Session = Depends(get_db)) -> dict[str, Any]:
     """List all runs ordered newest-first, sweeping any stale heartbeats."""
-    sweep_stale_runs()
+    sweep_stale_runs_throttled()
     runs = db.query(Run).order_by(Run.created_at.desc()).all()
     active_run = next((r for r in runs if r.is_active), runs[0] if runs else None)
+    positions = get_queue_positions([r.meridian_job_id for r in runs if r.meridian_job_id], "meridian")
     return {
-        "runs": [serialize_run(r) for r in runs],
+        "runs": [serialize_run(r, positions) for r in runs],
         "active_run_id": active_run.id if active_run else None,
     }
 
@@ -350,7 +421,7 @@ def get_run(
     storage: StorageBackend = Depends(get_app_storage),
 ) -> dict[str, Any]:
     """Fetch a single run's metadata, per-stage progress, and Meridian queue position."""
-    sweep_stale_runs()
+    sweep_stale_runs_throttled()
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
@@ -365,7 +436,7 @@ def get_run(
     return out
 
 
-@router.post("/{run_id}/cancel", dependencies=[Depends(require_access_code)])
+@router.post("/{run_id}/cancel")
 def cancel_run(run_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     """Cancel a queued or running Run and abort its Procrastinate jobs."""
     run = db.get(Run, run_id)
@@ -391,7 +462,7 @@ def cancel_run(run_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     return serialize_run(run)
 
 
-@router.post("/{run_id}/activate", dependencies=[Depends(require_access_code)])
+@router.post("/{run_id}/activate")
 def activate_run(run_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     """Set `run_id` as the active run across the workspace."""
     run = db.get(Run, run_id)
@@ -406,7 +477,7 @@ def activate_run(run_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     return serialize_run(run)
 
 
-@router.delete("/{run_id}", dependencies=[Depends(require_access_code)])
+@router.delete("/{run_id}")
 def delete_run(
     run_id: str,
     db: Session = Depends(get_db),
@@ -420,6 +491,8 @@ def delete_run(
     cancel_procrastinate_job(run.analysis_job_id, abort=True)
     cancel_procrastinate_job(run.meridian_job_id, abort=True)
     storage.delete_prefix(f"runs/{run_id}")
+    db.query(OptimisationRun).filter(OptimisationRun.run_id == run_id).delete(synchronize_session=False)
+    db.query(ForecastRun).filter(ForecastRun.run_id == run_id).delete(synchronize_session=False)
 
     was_active = run.is_active
     db.delete(run)

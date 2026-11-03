@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MIN_ACCESS_CODE_LENGTH = 16
+
 
 class Settings(BaseSettings):
     """Runtime settings for MMM Studio API and workers."""
@@ -38,6 +40,36 @@ class Settings(BaseSettings):
     app_access_code: str = Field(
         default="",
         validation_alias=AliasChoices("APP_ACCESS_CODE", "MMM_APP_ACCESS_CODE"),
+    )
+    # "production" refuses to start without an access code of at least MIN_ACCESS_CODE_LENGTH characters
+    environment: Literal["development", "production"] = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "MMM_ENV", "MMM_ENVIRONMENT"),
+    )
+    # Proxies in front of the API that append to X-Forwarded-For (Cloud Run front end + nginx sidecar = 2); 0 trusts
+    # only the socket's peer address
+    trusted_proxy_hops: int = Field(
+        default=0,
+        ge=0,
+        le=5,
+        validation_alias=AliasChoices("TRUSTED_PROXY_HOPS", "MMM_TRUSTED_PROXY_HOPS"),
+    )
+    session_ttl_hours: int = Field(
+        default=12,
+        ge=1,
+        le=24 * 30,
+        validation_alias=AliasChoices("SESSION_TTL_HOURS", "MMM_SESSION_TTL_HOURS"),
+    )
+    meridian_fit_timeout_seconds: int = Field(
+        default=3600,
+        ge=60,
+        validation_alias=AliasChoices("MERIDIAN_FIT_TIMEOUT_SECONDS", "MMM_MERIDIAN_FIT_TIMEOUT_SECONDS"),
+    )
+    # The stale-run sweep runs at most this often per API process (it was run on every poll)
+    sweep_interval_seconds: int = Field(
+        default=30,
+        ge=0,
+        validation_alias=AliasChoices("SWEEP_INTERVAL_SECONDS", "MMM_SWEEP_INTERVAL_SECONDS"),
     )
 
     gcp_project_id: str = Field(
@@ -100,6 +132,19 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return [str(x) for x in v]
         return ["http://localhost:5173"]
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.app_access_code.strip())
+
+    def production_problems(self) -> list[str]:
+        """Why this configuration must not serve production traffic (empty when it may)."""
+        if self.environment != "production":
+            return []
+        problems = []
+        if len(self.app_access_code.strip()) < MIN_ACCESS_CODE_LENGTH:
+            problems.append(f"MMM_APP_ACCESS_CODE must be set to at least {MIN_ACCESS_CODE_LENGTH} characters in production.")
+        return problems
 
     @property
     def sqlalchemy_url(self) -> str:

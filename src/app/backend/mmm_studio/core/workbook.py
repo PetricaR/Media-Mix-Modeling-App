@@ -5,9 +5,11 @@ from __future__ import annotations
 import io
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
+from mmm_studio.core.model_settings import MIN_TRAINING_DAYS
 from mmm_studio.core.schema import (
     DataProfile,
     DataRoleConfig,
@@ -43,11 +45,28 @@ def validate_upload_bytes(filename: str, data: bytes, max_upload_mb: int = 25) -
     if ext == ".xlsx":
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                total_uncompressed = sum(info.file_size for info in zf.infolist())
+                infos = zf.infolist()
+                if not infos:
+                    raise WorkbookValidationError("Empty .xlsx archive.")
+                if len(infos) > 256:
+                    raise WorkbookValidationError("XLSX archive contains too many entries.")
+                total_uncompressed = sum(info.file_size for info in infos)
                 if total_uncompressed > MAX_DECOMPRESSED_BYTES:
                     raise WorkbookValidationError(
                         "XLSX archive uncompressed size exceeds safety limit (150 MB)."
                     )
+                actual_bytes = 0
+                for info in infos:
+                    with zf.open(info) as member:
+                        while True:
+                            chunk = member.read(65536)
+                            if not chunk:
+                                break
+                            actual_bytes += len(chunk)
+                            if actual_bytes > MAX_DECOMPRESSED_BYTES:
+                                raise WorkbookValidationError(
+                                    "Decompressed .xlsx stream exceeds safety limit (150 MB)."
+                                )
         except zipfile.BadZipFile as exc:
             raise WorkbookValidationError("Corrupted or invalid .xlsx workbook.") from exc
 
@@ -99,6 +118,36 @@ def read_raw_dataframe(
     return df, sheets, selected_sheet
 
 
+def _check_rows(df: pd.DataFrame, dates: pd.Series, mapping: Any) -> tuple[pd.DataFrame, int]:
+    """Normalise dates to days, drop exact duplicate rows and reject what cannot be repaired without guessing.
+
+    Returns `(clean_df, exact_duplicates_removed)`. Rows that share a date and channel but differ elsewhere, and negative
+    costs, raise `WorkbookValidationError`: summing or picking one of them would silently change sales or spend.
+    """
+    out = df.copy()
+    out[mapping.date] = dates
+    exact = out.duplicated(keep="first")
+    out = out.loc[~exact].reset_index(drop=True)
+    key = [mapping.date, mapping.channel]
+    conflicts = out.duplicated(subset=key, keep=False)
+    if conflicts.any():
+        examples = out.loc[conflicts, key].drop_duplicates().head(3)
+        sample = "; ".join(f"{pd.Timestamp(d):%Y-%m-%d} · {c}" for d, c in examples.itertuples(index=False))
+        raise WorkbookValidationError(
+            f"{int(conflicts.sum())} rows share a date and channel but have different values (e.g. {sample}). "
+            "Combine or remove them so each channel has one row per day, then upload again."
+        )
+    costs = pd.to_numeric(out[mapping.costs], errors="coerce")
+    negative = costs < 0
+    if negative.any():
+        examples = out.loc[negative, key].head(3)
+        sample = "; ".join(f"{pd.Timestamp(d):%Y-%m-%d} · {c}" for d, c in examples.itertuples(index=False))
+        raise WorkbookValidationError(
+            f"{int(negative.sum())} rows have a negative cost (e.g. {sample}). Costs must be zero or positive."
+        )
+    return out, int(exact.sum())
+
+
 def profile_workbook(
     data: bytes | Path,
     filename: str = "case_study.xlsx",
@@ -109,35 +158,38 @@ def profile_workbook(
     df, sheets, selected_sheet = read_raw_dataframe(data, filename=filename, sheet_name=requested_sheet)
 
     available_columns = [str(c) for c in df.columns]
-    if role_config is None:
-        col_mapping = detect_column_mapping(available_columns)
-        for req_col in (col_mapping.date, col_mapping.channel, col_mapping.sales, col_mapping.costs):
-            if req_col not in df.columns:
-                raise WorkbookValidationError(f"Required column '{req_col}' not found in {available_columns}.")
-        channels = infer_channel_configs(df, col_mapping)
-        role_config = DataRoleConfig(
-            sheet_name=selected_sheet,
-            columns=col_mapping,
-            channels=channels,
-            drop_trailing_isolated_days=False,
-            holdout_days=93,
-        )
-    else:
-        col_mapping = role_config.columns
-        for req_col in (col_mapping.date, col_mapping.channel, col_mapping.sales, col_mapping.costs):
-            if req_col not in df.columns:
-                raise WorkbookValidationError(f"Mapped column '{req_col}' not found in {available_columns}.")
-        if not role_config.channels:
-            role_config.channels = infer_channel_configs(df, col_mapping)
+    col_mapping = role_config.columns if role_config is not None else detect_column_mapping(available_columns)
+    for req_col in (col_mapping.date, col_mapping.channel, col_mapping.sales, col_mapping.costs):
+        if req_col not in df.columns:
+            raise WorkbookValidationError(f"Required column '{req_col}' not found in {available_columns}.")
 
     dates = pd.to_datetime(df[col_mapping.date], errors="coerce")
     if dates.isna().any():
         raise WorkbookValidationError(f"Column '{col_mapping.date}' contains unparseable dates.")
+    df, duplicate_rows_count = _check_rows(df, dates.dt.normalize(), col_mapping)
+    dates = pd.to_datetime(df[col_mapping.date])
+
+    if role_config is None:
+        role_config = DataRoleConfig(
+            sheet_name=selected_sheet,
+            columns=col_mapping,
+            channels=infer_channel_configs(df, col_mapping),
+            drop_trailing_isolated_days=False,
+            holdout_days=93,
+        )
+    elif not role_config.channels:
+        role_config.channels = infer_channel_configs(df, col_mapping)
 
     min_date = dates.min()
     max_date = dates.max()
     full_idx = pd.date_range(min_date, max_date, freq="D")
     calendar_days = len(full_idx)
+    min_days = MIN_TRAINING_DAYS + 14
+    if calendar_days < min_days:
+        raise WorkbookValidationError(
+            f"The workbook covers {calendar_days} days ({min_date:%Y-%m-%d} .. {max_date:%Y-%m-%d}); a model needs at least "
+            f"{min_days} days: a full year of training plus a hold-out."
+        )
 
     # Identify trailing isolated partial year days (e.g. single 2025-01-01 day)
     year_counts = pd.Series(full_idx.year).value_counts()
@@ -191,12 +243,16 @@ def profile_workbook(
     total_sales_sum = float(pd.to_numeric(df_active[col_mapping.sales], errors="coerce").fillna(0.0).sum())
     total_cost_sum = float(pd.to_numeric(df_active[col_mapping.costs], errors="coerce").fillna(0.0).sum())
     years_present = sorted({int(y) for y in dates.dt.year.dropna().unique()})
-    duplicate_rows_count = int(df.duplicated(subset=[col_mapping.date, col_mapping.channel]).sum())
     raw_sales = pd.to_numeric(df[col_mapping.sales], errors="coerce").fillna(0.0)
-    raw_costs = pd.to_numeric(df[col_mapping.costs], errors="coerce").fillna(0.0)
-    negative_values_count = int((raw_sales < 0).sum() + (raw_costs < 0).sum())
+    negative_values_count = int((raw_sales < 0).sum())
 
     warnings: list[str] = []
+    if duplicate_rows_count > 0:
+        warnings.append(f"{duplicate_rows_count} exact duplicate rows (every column identical) were removed.")
+    if negative_values_count > 0:
+        warnings.append(
+            f"{negative_values_count} rows have negative sales (returns?); they lower the daily total sales the model fits."
+        )
     if missing_by_ch:
         miss_str = ", ".join(f"{k}: {v} days" for k, v in missing_by_ch.items())
         warnings.append(f"Missing channel-date rows detected ({miss_str}).")

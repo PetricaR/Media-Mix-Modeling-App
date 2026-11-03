@@ -1,0 +1,25 @@
+{
+  "after_meridian_job": {
+    "status": "succeeded",
+    "overview_kpi": "Q4 2024 hold-out MAE / mean = 8.5% (Target \u2264 15 % \u00b7 Meridian MMM)",
+    "benchmark_has_meridian": true
+  },
+  "after_analysis_job": {
+    "status": "succeeded",
+    "overview_kpi": "Q4 2024 hold-out MAE / mean = 9.6% (Target \u2264 15 % \u00b7 OLS-2 Meridian inputs (Meridian pending))",
+    "benchmark_has_meridian": false
+  },
+  "short_dataset": {
+    "days": 390,
+    "holdout_days_setting": 200,
+    "cfg_holdout": [
+      "2024-10-01",
+      "2025-01-01"
+    ],
+    "reported_holdout_days": 0,
+    "reported_holdout_label": "hold-out",
+    "holdout_mae_over_mean": 0.0809,
+    "train_mae_over_mean": 0.0809,
+    "first_kpi": "hold-out hold-out MAE / mean = 8.1% (Target \u2264 15 % \u00b7 met)"
+  }
+}

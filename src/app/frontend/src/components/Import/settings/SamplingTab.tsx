@@ -77,7 +77,7 @@ export const SamplingTab: React.FC<TabProps> = ({ draft, setDraft, defaults, loc
               checked={selectionOn}
               disabled={off}
               onChange={(on) => patchSettings(setDraft, { model_selection: on === profileDefault ? null : on })}
-              help={`${extraFits} extra fits: each catalog shift below × Affiliate as media or control, then the prior and SEA sensitivity variants. On by default for the full profile.`}
+              help={`${extraFits} extra fits on the validation window before the hold-out: each print shift below × commission channels as media or control, then the prior and demand-following sensitivity variants. On by default for the full profile.`}
             />
             {selectionOn && (
               <FormControl component="fieldset" disabled={off} sx={{ m: 0, mt: 1.5, p: 0, border: 0, minWidth: 0 }}>

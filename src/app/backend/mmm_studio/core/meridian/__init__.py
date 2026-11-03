@@ -33,20 +33,22 @@ from mmm_studio.core.meridian.optimise import (
     run_meridian_budget_optimizer,
 )
 from mmm_studio.core.meridian.spec import (
-    HOLDOUT_Q4_2024,
     MeridianSpecConfig,
     build_input_data,
     build_meridian_model,
     build_meridian_table,
+    channel_label,
+    holdout_range,
     load_meridian_model,
     meridian_roles,
     save_meridian_model,
 )
 
 __all__ = [
-    "HOLDOUT_Q4_2024",
     "MeridianSpecConfig",
     "build_meridian_table",
+    "channel_label",
+    "holdout_range",
     "meridian_roles",
     "build_input_data",
     "build_meridian_model",

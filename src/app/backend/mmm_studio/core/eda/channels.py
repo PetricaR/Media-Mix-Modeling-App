@@ -88,7 +88,7 @@ def build_explore_channels_section(
         r.pop("_share_val", None)
         r.pop("_yoy_val", None)
 
-    # 1. Channel Share & 2023->2024 YoY Growth
+    # 1. Channel share & year-on-year growth (last two complete years)
     fig_share_growth = small_multiples_figure(
         panels=[
             {
@@ -107,7 +107,7 @@ def build_explore_channels_section(
                 ],
             },
             {
-                "title": "2024 vs 2023 Sales Growth (%)",
+                "title": f"{y_last} vs {y_prev} Sales Growth (%)",
                 "xaxis_title": "YoY Sales Growth (%)",
                 "yaxis_title": "Channel",
                 "traces": [
@@ -246,7 +246,7 @@ def build_explore_channels_section(
             ),
             ChartBlock(
                 id="channel_share_growth",
-                title="Channel Share of Total Sales & 2024 YoY Growth",
+                title=f"Channel Share of Total Sales & {y_last} YoY Growth",
                 subtitle=(
                     f"{', '.join(top3)} carry {top3_share:.0f}% of attributed sales; channels with cost data {paid_share_pct:.1f}%. "
                     f"{fastest} grew {fastest_growth:+.0f}% in {y_last}."
@@ -277,8 +277,8 @@ def build_explore_channels_section(
                 columns=[
                     TableColumn(key="channel", label="Channel"),
                     TableColumn(key="role", label="Classification"),
-                    TableColumn(key="sales_2023", label="2023 Sales", align="right"),
-                    TableColumn(key="sales_2024", label="2024 Sales", align="right"),
+                    TableColumn(key="sales_2023", label=f"{y_prev} Sales", align="right"),
+                    TableColumn(key="sales_2024", label=f"{y_last} Sales", align="right"),
                     TableColumn(key="yoy_growth", label="YoY %", align="right"),
                     TableColumn(key="share_pct", label="Share %", align="right"),
                     TableColumn(key="daily_mean", label="Mean/Day", align="right"),

@@ -13,8 +13,40 @@ import pandas as pd
 from mmm_studio.core.features import complete_years
 from mmm_studio.core.schema import DataRoleConfig
 
-SOCIAL_BREAK = pd.Timestamp("2024-08-01")
-AFFILIATE_BREAK = pd.Timestamp("2024-02-01")
+# A month-start level shift counts as a regime change when the 90-day mean after it differs by this factor or more
+REGIME_RATIO = 1.5
+
+
+def detect_level_shift(series: pd.Series, window: int = 90, min_side: int = 60) -> tuple[pd.Timestamp, float] | None:
+    """The month start where the mean of `series` changes most (90 days after vs before), with the after/before ratio.
+
+    Returns None when no month start has at least `min_side` days on both sides or the largest change is below
+    `REGIME_RATIO`. Used to find spend regime changes and commission-rate changes in any workbook.
+    """
+    s = series.dropna()
+    if len(s) < 2 * min_side:
+        return None
+    idx = pd.DatetimeIndex(s.index)
+    best: tuple[pd.Timestamp, float] | None = None
+    best_score = 0.0
+    for c in pd.date_range(idx.min() + pd.Timedelta(days=min_side), idx.max() - pd.Timedelta(days=min_side), freq="MS"):
+        b = float(s.loc[c - pd.Timedelta(days=window) : c - pd.Timedelta(days=1)].mean())
+        a = float(s.loc[c : c + pd.Timedelta(days=window - 1)].mean())
+        if b > 0 and a > 0 and abs(np.log(a / b)) > best_score:
+            best, best_score = (c, a / b), abs(np.log(a / b))
+    return best if best is not None and np.exp(best_score) >= REGIME_RATIO else None
+
+
+def regime_windows(panel: pd.DataFrame, brk: pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Days before and after a regime change within its calendar year (as notebook 01b), or ±90 days when either side
+    of the year has fewer than 30 days."""
+    yr = brk.year
+    before = panel.loc[pd.Timestamp(f"{yr}-01-01") : brk - pd.Timedelta(days=1)]
+    after = panel.loc[brk : pd.Timestamp(f"{yr}-12-31")]
+    if len(before) < 30 or len(after) < 30:
+        before = panel.loc[brk - pd.Timedelta(days=90) : brk - pd.Timedelta(days=1)]
+        after = panel.loc[brk : brk + pd.Timedelta(days=89)]
+    return before, after
 
 
 def _corr(a: pd.Series, b: pd.Series) -> float:
@@ -112,28 +144,40 @@ def compute_case_facts(panel: pd.DataFrame, config: DataRoleConfig) -> dict[str,
             top25 = y.nlargest(25).index
             facts["top25_after_sendout"] = int(sum(1 for d in top25 if 0 <= (dss.get(d, np.nan) if hasattr(dss, "get") else np.nan) <= 7))
 
-    # Billing links and regime breaks
-    if "cost_sea" in panel and "clicks_sea" in panel:
+    # Billing links and regime breaks (dates detected from the data, never fixed)
+    facts["cost_clicks_r"] = {
+        ch: _corr(panel[f"cost_{slug_map[ch]}"], panel[f"clicks_{slug_map[ch]}"])
+        for ch in config.paid_channels
+        if f"cost_{slug_map[ch]}" in panel and f"clicks_{slug_map[ch]}" in panel
+    }
+    if "sea" in config.paid_slugs and "cost_sea" in panel and "clicks_sea" in panel:
         facts["sea_cost_clicks_r"] = _corr(panel["cost_sea"], panel["clicks_sea"])
-    if "cost_affiliate" in panel and "sales_affiliate" in panel:
-        facts["affiliate_cost_sales_r"] = _corr(panel["cost_affiliate"], panel["sales_affiliate"])
-        facts["affiliate_commission_pct"] = 100.0 * _sum_ratio(panel["cost_affiliate"], panel["sales_affiliate"])
-        if idx.min() < AFFILIATE_BREAK < idx.max():
-            pre, post = panel.loc[: AFFILIATE_BREAK - pd.Timedelta(days=1)], panel.loc[AFFILIATE_BREAK:]
-            facts["affiliate_commission_pre_pct"] = 100.0 * _sum_ratio(pre["cost_affiliate"], pre["sales_affiliate"])
-            facts["affiliate_commission_post_pct"] = 100.0 * _sum_ratio(post["cost_affiliate"], post["sales_affiliate"])
-            facts["affiliate_break"] = AFFILIATE_BREAK.strftime("%Y-%m-%d")
-    if "cost_social_media" in panel and idx.min() < SOCIAL_BREAK < idx.max():
-        yr = SOCIAL_BREAK.year
-        before = panel.loc[f"{yr}-01-01" : SOCIAL_BREAK - pd.Timedelta(days=1)]
-        after = panel.loc[SOCIAL_BREAK : f"{yr}-12-31"]
+    commission = next((c for c in config.channels if c.enabled and c.role == "commission"), None)
+    if commission is not None and f"cost_{commission.slug}" in panel and f"sales_{commission.slug}" in panel:
+        cost, sales = panel[f"cost_{commission.slug}"], panel[f"sales_{commission.slug}"]
+        facts["commission_channel"] = commission.name
+        facts["affiliate_cost_sales_r"] = _corr(cost, sales)
+        facts["affiliate_commission_pct"] = 100.0 * _sum_ratio(cost, sales)
+        shift = detect_level_shift(cost / sales.where(sales > 0))
+        if shift is not None:
+            brk = shift[0]
+            pre, post = panel.loc[: brk - pd.Timedelta(days=1)], panel.loc[brk:]
+            facts["affiliate_commission_pre_pct"] = 100.0 * _sum_ratio(pre[cost.name], pre[sales.name])
+            facts["affiliate_commission_post_pct"] = 100.0 * _sum_ratio(post[cost.name], post[sales.name])
+            facts["affiliate_break"] = brk.strftime("%Y-%m-%d")
+    social = next((c for c in config.channels if c.enabled and c.slug == "social_media" and f"cost_{c.slug}" in panel), None)
+    shift = detect_level_shift(panel[f"cost_{social.slug}"]) if social is not None else None
+    if social is not None and shift is not None:
+        brk = shift[0]
+        before, after = regime_windows(panel, brk)
 
         def _ratio(col: str) -> float:
             b = float(before[col].mean()) if col in before else 0.0
             return float(after[col].mean()) / b if b else float("nan")
 
         facts.update(
-            social_break=SOCIAL_BREAK.strftime("%Y-%m-%d"),
+            social_channel=social.name,
+            social_break=brk.strftime("%Y-%m-%d"),
             social_spend_ratio=_ratio("cost_social_media"),
             social_clicks_ratio=_ratio("clicks_social_media"),
             social_sales_ratio=_ratio("sales_social_media"),

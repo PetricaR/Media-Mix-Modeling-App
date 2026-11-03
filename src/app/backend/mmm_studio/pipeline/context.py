@@ -50,7 +50,10 @@ class RunContext:
     on_heartbeat: Callable[[], None] | None = None
     is_cancelled: Callable[[], bool] | None = None
     spawn_meridian_child: bool = False
+    # Wall-clock limit of one Meridian fit (spawned child only); a stuck fit fails the stage instead of the worker
+    fit_timeout_seconds: int = 3600
     cache: dict[str, Any] = field(default_factory=dict)
+    _tmp_root: Path | None = None
 
     @property
     def prefix(self) -> str:
@@ -123,12 +126,26 @@ class RunContext:
         return self.storage.read_json(self.key(rel_path))
 
     def local_work_dir(self, subdir: str = "work") -> Path:
-        """Return a local temporary working directory for Meridian binary/HTML file output."""
+        """Return a local working directory for Meridian binary/HTML file output.
+
+        With local storage it is the run's own folder; otherwise one temporary root per context, removed by `cleanup()`.
+        """
         if hasattr(self.storage, "_resolve"):
             p = self.storage._resolve(self.key(subdir))
             p.mkdir(parents=True, exist_ok=True)
             return p
         import tempfile
 
-        d = Path(tempfile.mkdtemp(prefix=f"mmm_studio_{self.run_id}_"))
+        if self._tmp_root is None:
+            self._tmp_root = Path(tempfile.mkdtemp(prefix=f"mmm_studio_{self.run_id}_"))
+        d = self._tmp_root / subdir
+        d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def cleanup(self) -> None:
+        """Remove the temporary working root (models and reports are already in storage)."""
+        import shutil
+
+        if self._tmp_root is not None:
+            shutil.rmtree(self._tmp_root, ignore_errors=True)
+            self._tmp_root = None

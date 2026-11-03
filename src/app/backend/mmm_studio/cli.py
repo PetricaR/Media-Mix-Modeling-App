@@ -54,12 +54,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_migrate(_args: argparse.Namespace) -> int:
-    from mmm_studio.db.session import init_db
+    """Apply the Alembic migrations and the Procrastinate schema, then register missing example forecasts."""
+    from mmm_studio.db.models import ForecastRun, Run
+    from mmm_studio.db.session import get_session_factory, init_db
     from mmm_studio.jobs.app import ensure_procrastinate_schema
+    from mmm_studio.jobs.registry import register_default_forecast
+    from mmm_studio.storage import get_storage
 
-    init_db()
+    init_db(force=True)
     ensure_procrastinate_schema()
-    print("[mmm-studio] Database & Procrastinate schemas initialized.")
+    # Runs finished before the Meridian job registered its example forecast got it from a GET request; do it here
+    registered = 0
+    with get_session_factory()() as db:
+        for run in db.query(Run).filter(Run.status == "succeeded").all():
+            if db.get(ForecastRun, f"default_{run.id}") is None and register_default_forecast(db, get_storage(), run.id):
+                registered += 1
+    print(f"Database migrated; registered {registered} example forecast(s).")
     return 0
 
 
@@ -108,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.set_defaults(func=_cmd_run)
 
     # migrate
-    p_mig = sub.add_parser("migrate", help="Create database tables and Procrastinate schema")
+    p_mig = sub.add_parser("migrate", help="Apply database migrations and the Procrastinate schema")
     p_mig.set_defaults(func=_cmd_migrate)
 
     # api

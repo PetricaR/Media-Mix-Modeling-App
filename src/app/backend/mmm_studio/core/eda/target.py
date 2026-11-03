@@ -36,7 +36,8 @@ def build_explore_target_section(wide_df: pd.DataFrame) -> Section:
     years = sorted(set(pd.DatetimeIndex(full.index).year))
 
     mean_sales, std_sales = float(y.mean()), float(y.std())
-    skew_raw, skew_log = float(y.skew()), float(np.log(y).skew())
+    y_pos = np.maximum(y, 1.0)
+    skew_raw, skew_log = float(y.skew()), float(np.log(y_pos).skew())
     cv = std_sales / mean_sales
     yoy_txt, yoy_pct = "—", float("nan")
     by_year = {yr: float(full.loc[full.index.year == yr, "total_sales"].sum()) for yr in years}
@@ -76,7 +77,7 @@ def build_explore_target_section(wide_df: pd.DataFrame) -> Section:
 
     # 2. Distribution: raw vs log, by year
     counts_raw, bins_raw = np.histogram(y / 1e3, bins=45)
-    counts_log, bins_log = np.histogram(np.log(y), bins=45)
+    counts_log, bins_log = np.histogram(np.log(y_pos), bins=45)
     fig_dist = small_multiples_figure(
         panels=[
             {

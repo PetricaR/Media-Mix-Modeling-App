@@ -1,0 +1,89 @@
+{
+  "synthetic": {
+    "fit_seconds": 40.6,
+    "true_roi": {
+      "sea": 3.0,
+      "display": 0.0,
+      "psm": 1.5
+    },
+    "posterior": {
+      "sea": {
+        "mean": 2.67,
+        "lo": 2.114,
+        "hi": 3.607,
+        "covered": true
+      },
+      "display": {
+        "mean": 0.514,
+        "lo": 0.12,
+        "hi": 1.343,
+        "covered": false
+      },
+      "psm": {
+        "mean": 1.235,
+        "lo": 0.258,
+        "hi": 2.86,
+        "covered": true
+      }
+    },
+    "true_media_share_pct": 23.56,
+    "app_media_share_pct": 22.14
+  },
+  "reproducibility": {
+    "seed7_run1": {
+      "sea": 1.61616,
+      "display": 0.3062,
+      "psm": 1.271852,
+      "All Channels": 1.290681
+    },
+    "seed7_run2": {
+      "sea": 1.61616,
+      "display": 0.3062,
+      "psm": 1.271852,
+      "All Channels": 1.290681
+    },
+    "max_abs_diff_same_seed": 0.0,
+    "seed8": {
+      "sea": 1.605004,
+      "display": 0.562772,
+      "psm": 0.908349,
+      "All Channels": 1.314535
+    }
+  },
+  "affiliate_leak": {
+    "default (Affiliate commission as control)": {
+      "holdout": [
+        "2024-10-01",
+        "2025-01-01"
+      ],
+      "holdout_mae_over_mean_pct": 8.56,
+      "seconds": 32.3,
+      "roi": {
+        "sea": 8.432,
+        "catalog": 0.967,
+        "display": 0.662,
+        "display_network": 1.311,
+        "social_media": 0.713,
+        "psm": 2.461,
+        "All Channels": 3.27
+      }
+    },
+    "Affiliate commission removed": {
+      "holdout": [
+        "2024-10-01",
+        "2025-01-01"
+      ],
+      "holdout_mae_over_mean_pct": 11.3,
+      "seconds": 25.5,
+      "roi": {
+        "sea": 9.706,
+        "catalog": 1.027,
+        "display": 2.943,
+        "display_network": 1.306,
+        "social_media": 0.645,
+        "psm": 2.209,
+        "All Channels": 4.241
+      }
+    }
+  }
+}

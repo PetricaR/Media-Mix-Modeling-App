@@ -12,24 +12,30 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db, require_access_code
+from mmm_studio.api.deps import get_app_settings, get_app_storage, get_db
 from mmm_studio.core.meridian.forecast import (
     PlanValidationError,
     build_example_plan,
     plan_arrays,
-    scenario_payload,
     validate_plan,
 )
-from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig
+from mmm_studio.core.meridian.spec import MeridianSpecConfig, channel_label
 from mmm_studio.core.schema import extract_role_config, slugify_channel
 from mmm_studio.db.models import ForecastRun, Run, ScenarioRun
-from mmm_studio.jobs.app import count_active_queue_jobs, defer_task, get_queue_position, sweep_stale_runs
-from mmm_studio.jobs.tasks import default_forecast_keys, run_forecast_job, run_scenario_job
+from mmm_studio.jobs.app import (
+    QueueUnavailable,
+    count_active_queue_jobs,
+    defer_task,
+    get_queue_position,
+    sweep_stale_runs_throttled,
+)
+from mmm_studio.jobs.tasks import run_forecast_job, run_scenario_job
 from mmm_studio.pipeline.context import model_panel_key
 from mmm_studio.settings import Settings
 from mmm_studio.storage import StorageBackend
 
 router = APIRouter(tags=["forecasts"])
+MAX_PLAN_BYTES = 1024 * 1024
 
 
 class ScenarioCreateRequest(BaseModel):
@@ -58,23 +64,28 @@ def _normalise_multipliers(run: Run | None, multipliers: dict[str, float]) -> di
             continue
         if not math.isfinite(value) or value < 0:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Multiplier for {key!r} must be a finite number ≥ 0 (got {value}).",
             )
         normalised[slug] = float(value)
     if unknown:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unknown channel(s) {', '.join(sorted(unknown))}; use one of: {', '.join(sorted(set(lookup.values())))}.",
         )
     return normalised
 
 
+def _spec_for_run(run: Run | None, wide_df: pd.DataFrame) -> MeridianSpecConfig:
+    cfg_obj = extract_role_config((run.config if run else None) or {})
+    try:
+        return MeridianSpecConfig.from_role_config(cfg_obj, wide=wide_df)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 def _paid_channels_for_run(run: Run | None, wide_df: pd.DataFrame) -> list[str]:
-    cfg_dict = (run.config if run else None) or {}
-    cfg_obj = extract_role_config(cfg_dict)
-    spec_cfg = MeridianSpecConfig.from_role_config(cfg_obj, index=wide_df.index)
-    return spec_cfg.paid_slugs
+    return _spec_for_run(run, wide_df).paid_slugs
 
 
 def _load_wide_df(storage: StorageBackend, run_id: str) -> pd.DataFrame:
@@ -85,50 +96,6 @@ def _load_wide_df(storage: StorageBackend, run_id: str) -> pd.DataFrame:
             detail=f"The daily modelling panel is not ready yet for run {run_id}. Wait for ingestion to complete.",
         )
     return pd.read_parquet(io.BytesIO(storage.read_bytes(wide_key)))
-
-
-def _ensure_default_forecast(db: Session, storage: StorageBackend, run_id: str) -> ForecastRun | None:
-    """Expose the run's example-plan forecast (stage s14) as the `default_{run_id}` ForecastRun once it exists.
-
-    Nothing is created before the Meridian forecast has run, so the page never shows a placeholder as a result.
-    A row created by an older version (without `source = pipeline`) is rebuilt from the real data.
-    """
-    default_id = f"default_{run_id}"
-    fc = db.get(ForecastRun, default_id)
-    if fc is not None and (fc.summary or {}).get("source") == "pipeline":
-        return fc
-
-    daily_keys, plan_keys = default_forecast_keys(run_id)
-    daily_key = next((k for k in daily_keys if storage.exists(k)), None)
-    plan_key = next((k for k in plan_keys if storage.exists(k)), None)
-    if daily_key is None or plan_key is None:
-        if fc is not None:
-            db.delete(fc)
-            db.commit()
-        return None
-
-    base_daily = pd.read_parquet(io.BytesIO(storage.read_bytes(daily_key)))
-    base_plan = pd.read_parquet(io.BytesIO(storage.read_bytes(plan_key)))
-    res_payload = scenario_payload(base_daily, base_plan, base_daily, base_plan, "Meridian refit (pipeline example plan)")
-    result_key = f"runs/{run_id}/forecasts/{default_id}/result.json"
-    storage.write_json(result_key, res_payload)
-    summary = {
-        "source": "pipeline",
-        "horizon_days": len(base_plan),
-        "start_date": base_plan.index[0].strftime("%Y-%m-%d"),
-        "end_date": base_plan.index[-1].strftime("%Y-%m-%d"),
-        "total_forecast_sales": float(base_daily["forecast"].sum()),
-        "total_planned_spend": float(base_plan.to_numpy().sum()),
-    }
-    name = f"Example plan {summary['start_date']} → {summary['end_date']} ({len(base_plan)} days)"
-    if fc is None:
-        fc = ForecastRun(id=default_id, run_id=run_id, name=name, status="succeeded", plan_path=plan_key, result_path=result_key, summary=summary)
-        db.add(fc)
-    else:
-        fc.name, fc.status, fc.plan_path, fc.result_path, fc.summary, fc.error = name, "succeeded", plan_key, result_key, summary, None
-    db.commit()
-    db.refresh(fc)
-    return fc
 
 
 def _serialize_forecast(fc: ForecastRun, storage: StorageBackend, include_result: bool = False) -> dict[str, Any]:
@@ -193,8 +160,8 @@ def get_plan_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
 
     wide_df = _load_wide_df(storage, run_id)
-    paid_channels = _paid_channels_for_run(run, wide_df)
-    plan_df = build_example_plan(wide_df, days=days, paid_channels=paid_channels)
+    spec = _spec_for_run(run, wide_df)
+    plan_df = build_example_plan(wide_df, days=days, paid_channels=spec.paid_slugs, print_slugs=spec.print_slugs)
     plan_df = plan_df.round(2)
     csv_bytes = plan_df.reset_index().to_csv(index=False).encode("utf-8")
     return Response(
@@ -226,7 +193,7 @@ def get_history(
         "dates": [d.strftime("%Y-%m-%d") for d in pd.DatetimeIndex(wide_df.index)],
         "sales": values("total_sales"),
         "spend": {s: values(f"cost_{s}") for s in slugs},
-        "channels": [{"slug": s, "channel": CHANNEL_DISPLAY_NAMES.get(s, s)} for s in slugs],
+        "channels": [{"slug": s, "channel": channel_label(s)} for s in slugs],
     }
 
 
@@ -237,12 +204,11 @@ def list_forecasts(
     storage: StorageBackend = Depends(get_app_storage),
 ) -> dict[str, Any]:
     """List all budget-plan forecasts for a Run (including the default 42-day plan if ready)."""
-    sweep_stale_runs()
+    sweep_stale_runs_throttled()
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
 
-    _ensure_default_forecast(db, storage, run_id)
     items = (
         db.query(ForecastRun)
         .filter(ForecastRun.run_id == run_id)
@@ -255,12 +221,8 @@ def list_forecasts(
     }
 
 
-@router.post(
-    "/runs/{run_id}/forecasts",
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_access_code)],
-)
-async def create_forecast(
+@router.post("/runs/{run_id}/forecasts", status_code=status.HTTP_202_ACCEPTED)
+def create_forecast(
     run_id: str,
     file: UploadFile = File(...),
     name: str = Form("Custom Budget Plan Forecast"),
@@ -272,12 +234,19 @@ async def create_forecast(
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")
+    if run.status != "succeeded":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run {run_id} is {run.status}; forecast a plan once the run has finished.",
+        )
 
     wide_df = _load_wide_df(storage, run_id)
     last_history_date = pd.Timestamp(wide_df.index.max())
     paid_channels = _paid_channels_for_run(run, wide_df)
 
-    raw_bytes = await file.read()
+    raw_bytes = file.file.read(MAX_PLAN_BYTES + 1)
+    if len(raw_bytes) > MAX_PLAN_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="The plan file is larger than 1 MB.")
     try:
         raw_df = pd.read_csv(io.BytesIO(raw_bytes))
         clean_df = validate_plan(
@@ -286,11 +255,17 @@ async def create_forecast(
             paid_channels=paid_channels,
         )
     except PlanValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV file: {exc}") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The plan could not be read as a CSV file with a date column and one cost column per paid channel.",
+        ) from exc
 
-    active_meridian = count_active_queue_jobs("meridian")
+    try:
+        active_meridian = count_active_queue_jobs("meridian")
+    except QueueUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The job queue is unavailable; try again shortly.") from exc
     if active_meridian >= settings.max_meridian_queued:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -332,22 +307,14 @@ def get_forecast(
     storage: StorageBackend = Depends(get_app_storage),
 ) -> dict[str, Any]:
     """Fetch a budget-plan forecast's status and full result payload."""
-    sweep_stale_runs()
-    if forecast_id.startswith("default_"):
-        run_id = forecast_id[len("default_") :]
-        _ensure_default_forecast(db, storage, run_id)
-
+    sweep_stale_runs_throttled()
     fc = db.get(ForecastRun, forecast_id)
     if not fc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Forecast {forecast_id} not found.")
     return _serialize_forecast(fc, storage, include_result=True)
 
 
-@router.post(
-    "/forecasts/{forecast_id}/scenarios",
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_access_code)],
-)
+@router.post("/forecasts/{forecast_id}/scenarios", status_code=status.HTTP_202_ACCEPTED)
 def create_scenario(
     forecast_id: str,
     payload: ScenarioCreateRequest,
@@ -355,10 +322,6 @@ def create_scenario(
     storage: StorageBackend = Depends(get_app_storage),
 ) -> dict[str, Any]:
     """Enqueue an interactive what-if multiplier scenario on the `interactive` queue."""
-    if forecast_id.startswith("default_"):
-        run_id = forecast_id[len("default_") :]
-        _ensure_default_forecast(db, storage, run_id)
-
     fc = db.get(ForecastRun, forecast_id)
     if not fc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Forecast {forecast_id} not found.")

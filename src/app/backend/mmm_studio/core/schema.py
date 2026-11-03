@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, model_validator
 from mmm_studio.core.model_settings import DEFAULT_HOLDOUT_DAYS, DEFAULT_IN_HOME_SHIFT, ModelSettings
 
 ChannelRole = Literal["paid", "print_event", "commission", "unpaid", "ignored", "digital_paid", "control"]
+# Channel names that mark a print/event channel (send-out date ≠ in-home date)
+PRINT_EVENT_KEYWORDS: tuple[str, ...] = ("catalog", "catalogue", "katalog", "print", "mailing", "flyer", "direct_mail", "beilage")
 
 
 def slugify_channel(name: str) -> str:
@@ -54,14 +56,19 @@ class ChannelConfig(BaseModel):
     saturation: Literal["hill", "none"] = "hill"
     # The role the app inferred from the workbook, so a user's change can be told apart from the inference
     inferred_role: ChannelRole | None = None
+    # Cost billed per click that follows demand (daily r(cost, clicks) ≥ 0.9): its ROI is an upper bound and the
+    # optimiser reports it apart. None means "infer from the data".
+    demand_following: bool | None = None
+    inferred_demand_following: bool | None = None
 
     @model_validator(mode="after")
     def _populate_channel_defaults(self) -> ChannelConfig:
         if not self.slug:
             self.slug = slugify_channel(self.name)
-        # Affiliate's cost is a commission on its own sales, so the model always uses it as a control (as notebook 03
-        # does). Older configs stored it as "paid"; show the role the model actually uses instead of "gets an ROI".
-        if self.slug == "affiliate" and self.role == "paid":
+        # Affiliate's cost is a commission on its own sales, so the model defaults to using it as a control (as
+        # notebook 03 does). Older configs stored it as "paid" with inferred_role unset; preserve explicit user
+        # overrides when inferred_role is already recorded as "commission".
+        if self.slug == "affiliate" and self.role == "paid" and self.inferred_role != "commission":
             self.role = "commission"
         # The role is the only switch the UI offers, so a channel moved out of "ignored" is modelled again
         self.enabled = self.role != "ignored"
@@ -79,13 +86,24 @@ class ChannelConfig(BaseModel):
             elif self.has_clicks:
                 self.exposure_column = f"clicks_{self.slug}"
                 self.exposure_type = self.exposure_type or "clicks"
-        if self.rationale is None:
+        if self.demand_following is None and self.inferred_demand_following is not None:
+            self.demand_following = self.inferred_demand_following
+        if self.rationale and self.rationale.startswith("Changed from the inferred role"):
+            self.rationale = None  # recomputed below for the current role
+        if self.inferred_role is not None and self.role != self.inferred_role:
+            # The stored rationale explained the inferred role; say what the user's choice means instead
+            self.rationale = f"Changed from the inferred role ({self.inferred_role.replace('_', ' ')})"
+            if self.inferred_role == "commission" and self.role in ("paid", "digital_paid"):
+                self.rationale += "; its cost is a commission on its own sales, so its ROI is biased upwards"
+        elif self.rationale is None:
             if self.role == "print_event":
                 self.rationale = f"Episodic print drop ({self.cost_days} send-out days); in-home shift + slow adstock"
-            elif self.role in ("commission", "control") or (self.role == "paid" and self.slug == "affiliate"):
+            elif self.role in ("commission", "control"):
                 self.rationale = "Commission on its own sales (cost follows demand); Meridian control, no ROI"
             elif self.role in ("paid", "digital_paid"):
                 self.rationale = f"Continuous paid media ({self.cost_days} active spend days)"
+                if self.demand_following:
+                    self.rationale += "; cost follows its clicks, so its ROI is an upper bound"
             elif self.role == "unpaid":
                 self.rationale = "Organic / baseline demand channel (€0 media spend)"
             else:
@@ -113,10 +131,8 @@ class DataRoleConfig(BaseModel):
     # and monthly comparisons. The default hold-out (93 days) is Q4 2024 through 2025-01-01, as in notebook 03.
     drop_trailing_isolated_days: bool = False
     holdout_days: int = Field(DEFAULT_HOLDOUT_DAYS, ge=14, le=365)
-    structural_break_year: int = 2023
     target_column: str = "total_sales"
     date_column: str = "date"
-    allow_single_year: bool = False
     model_settings: ModelSettings = Field(default_factory=ModelSettings)
 
     @property
@@ -140,11 +156,7 @@ class DataRoleConfig(BaseModel):
     @property
     def commission_channels(self) -> list[str]:
         """Slugs of commission/control channels (e.g. affiliate) treated as non-media controls."""
-        return [
-            c.slug
-            for c in self.channels
-            if c.enabled and (c.role in ("commission", "control") or c.slug == "affiliate")
-        ]
+        return [c.slug for c in self.channels if c.enabled and c.role in ("commission", "control")]
 
     @property
     def digital_paid_channels(self) -> list[str]:
@@ -321,12 +333,26 @@ def infer_channel_configs(df: pd.DataFrame, mapping: ColumnMapping) -> list[Chan
             and (pd.to_numeric(grp[clicks_col], errors="coerce").fillna(0.0) > 0).any()
         )
 
+        demand_following = False
+        if clicks_col and clicks_col in grp and cost_days > 0:
+            clicks = pd.to_numeric(grp[clicks_col], errors="coerce").fillna(0.0)
+            if costs.std() > 0 and clicks.std() > 0:
+                demand_following = bool(costs.corr(clicks) >= 0.9)
+
+        # Print events are recognised by name only: a digital channel that is active on few days (a late launch, a
+        # paused campaign) must not get a send-out shift. Sparse spend is pointed out in the rationale instead.
         if total_cost <= 0 or cost_days == 0:
             role: ChannelRole = "unpaid"
-        elif "catalog" in slug or "print" in slug or (cost_days / total_days <= 0.15):
+        elif any(k in slug for k in PRINT_EVENT_KEYWORDS):
             role = "print_event"
         else:
             role = "paid"
+        sparse_note = None
+        if role == "paid" and cost_days / total_days <= 0.15:
+            sparse_note = (
+                f"Spend on only {cost_days} of {total_days} days: if this is a print or event channel, set its role to "
+                "Print event"
+            )
 
         configs.append(
             ChannelConfig(
@@ -339,6 +365,8 @@ def infer_channel_configs(df: pd.DataFrame, mapping: ColumnMapping) -> list[Chan
                 total_cost=round(total_cost, 2),
                 has_impressions=has_impr,
                 has_clicks=has_clicks,
+                rationale=sparse_note,
+                inferred_demand_following=demand_following if role == "paid" else False,
             )
         )
 

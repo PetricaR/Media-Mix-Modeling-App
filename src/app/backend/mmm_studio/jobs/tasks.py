@@ -13,9 +13,11 @@ from typing import Any
 import pandas as pd
 from procrastinate import JobContext
 
-from mmm_studio.core.schema import DataProfile, DataRoleConfig, default_role_config, extract_role_config
+from mmm_studio.core.schema import DataProfile, DataRoleConfig, extract_role_config
 from mmm_studio.db.models import ForecastRun, OptimisationRun, Run, ScenarioRun, StageProgress, utcnow
 from mmm_studio.db.session import get_session_factory
+from mmm_studio.errors import public_error
+from mmm_studio.jobs.registry import default_forecast_keys, register_default_forecast
 from mmm_studio.pipeline.context import RunContext, model_panel_key
 from mmm_studio.pipeline.stages import (
     STAGE_DEFINITIONS,
@@ -203,10 +205,8 @@ def _build_run_context(
                 st.error = reason
                 sdb.commit()
 
-    spawn_child = (
-        hb.job_context is not None
-        and os.environ.get("MMM_SPAWN_MERIDIAN_CHILD", "true").lower() in ("1", "true", "yes")
-    )
+    from mmm_studio.settings import get_settings
+
     return RunContext(
         run_id=run_id,
         storage=storage,
@@ -220,8 +220,14 @@ def _build_run_context(
         on_stage_skipped=on_stage_skipped,
         on_heartbeat=hb.touch,
         is_cancelled=lambda: hb.cancelled,
-        spawn_meridian_child=spawn_child,
+        spawn_meridian_child=_spawn_child(hb.job_context),
+        fit_timeout_seconds=get_settings().meridian_fit_timeout_seconds,
     )
+
+
+def _spawn_child(job_context: JobContext | None) -> bool:
+    """Meridian fits run in a spawned child inside workers (memory isolation, cancellation, timeout)."""
+    return job_context is not None and os.environ.get("MMM_SPAWN_MERIDIAN_CHILD", "true").lower() in ("1", "true", "yes")
 
 
 def execute_analysis_job(
@@ -261,28 +267,21 @@ def execute_analysis_job(
             "sections": [s["id"] for s in sections],
         }
 
+        ctx.save_json("meta/summary.json", summary)
         with SessionLocal() as db:
             run_rec = db.get(Run, run_id)
-            meridian_stages = (
-                db.query(StageProgress)
-                .filter(StageProgress.run_id == run_id, StageProgress.queue == "meridian")
-                .all()
-            )
-            meridian_done = bool(meridian_stages) and all(
-                st.status in ("succeeded", "failed", "skipped") for st in meridian_stages
-            ) and any(st.status == "succeeded" for st in meridian_stages)
-            if not meridian_done:
-                ctx.save_json("meta/summary.json", summary)
             if run_rec and run_rec.status != "cancelled":
-                if not meridian_done:
-                    run_rec.summary = summary
+                run_rec.summary = summary
                 run_rec.heartbeat_at = utcnow()
-                if skip_meridian or meridian_done:
+                if skip_meridian:
                     run_rec.status = "succeeded"
                     has_active = db.query(Run).filter(Run.is_active.is_(True)).first() is not None
                     if not has_active:
                         run_rec.is_active = True
                 db.commit()
+                if not skip_meridian:
+                    # The Meridian job starts only now, so it never runs before (or alongside) the analysis stages
+                    _defer_meridian_job(run_id, sqlalchemy_url=sqlalchemy_url)
     except InterruptedError:
         with SessionLocal() as db:
             run_rec = db.get(Run, run_id)
@@ -295,11 +294,40 @@ def execute_analysis_job(
             run_rec = db.get(Run, run_id)
             if run_rec:
                 run_rec.status = "failed"
-                run_rec.error = str(exc)
+                run_rec.error = public_error(exc)
                 db.commit()
         raise
     finally:
         hb.stop()
+
+
+def _defer_meridian_job(run_id: str, sqlalchemy_url: str | None = None) -> None:
+    """Queue the run's Meridian job after its analysis job and record its id (a failure marks the run failed)."""
+    from mmm_studio.jobs.app import defer_task
+
+    SessionLocal = get_session_factory(sqlalchemy_url)
+    try:
+        job_id = defer_task(
+            run_meridian_job,
+            queue="meridian",
+            lock="meridian_singleton",
+            queueing_lock=f"meridian:{run_id}",
+            run_id=run_id,
+        )
+    except Exception as exc:
+        logger.exception("Could not queue the Meridian job of run %s", run_id)
+        with SessionLocal() as db:
+            run_rec = db.get(Run, run_id)
+            if run_rec and run_rec.status != "cancelled":
+                run_rec.status = "failed"
+                run_rec.error = f"The Meridian fit could not be queued ({public_error(exc)})."
+                db.commit()
+        return
+    with SessionLocal() as db:
+        run_rec = db.get(Run, run_id)
+        if run_rec:
+            run_rec.meridian_job_id = job_id
+            db.commit()
 
 
 def execute_meridian_job(
@@ -322,37 +350,13 @@ def execute_meridian_job(
     t0 = time.monotonic()
     try:
         ctx = _build_run_context(run_id, hb, sqlalchemy_url=sqlalchemy_url)
-        # The Meridian stages need the modelling panel written by `s01_ingest`. When both jobs run on separate workers,
-        # wait for an active analysis job to produce it before falling back to running the analysis stages here.
+        # The job is queued by the analysis job when it finishes, so the modelling panel must exist
         if model_panel_key(ctx.storage, run_id) is None:
-            wait_deadline = time.monotonic() + 60.0
-            while model_panel_key(ctx.storage, run_id) is None:
-                with SessionLocal() as db:
-                    prep_stage = (
-                        db.query(StageProgress)
-                        .filter(StageProgress.run_id == run_id, StageProgress.key == "s10_preparation")
-                        .first()
-                    )
-                    any_running_analysis = (
-                        db.query(StageProgress)
-                        .filter(
-                            StageProgress.run_id == run_id,
-                            StageProgress.queue == "analysis",
-                            StageProgress.status == "running",
-                        )
-                        .first()
-                        is not None
-                    )
-                if not any_running_analysis and (prep_stage is None or prep_stage.status in ("pending", "failed")):
-                    break
-                if time.monotonic() >= wait_deadline:
-                    break
-                hb.touch()
-                time.sleep(0.5)
-            if model_panel_key(ctx.storage, run_id) is None:
-                run_analysis_stages(ctx)
-
-        run_meridian_stages(ctx)
+            raise RuntimeError("The modelling panel is missing; the analysis stages must finish before the Meridian fit.")
+        try:
+            run_meridian_stages(ctx)
+        finally:
+            ctx.cleanup()
         elapsed = round(time.monotonic() - t0, 2)
         idx_key = ctx.key("sections/_index.json")
         sections = ctx.storage.read_json(idx_key) if ctx.storage.exists(idx_key) else []
@@ -386,6 +390,7 @@ def execute_meridian_job(
                 if not has_active:
                     run_rec.is_active = True
                 db.commit()
+            register_default_forecast(db, ctx.storage, run_id)
     except InterruptedError:
         with SessionLocal() as db:
             run_rec = db.get(Run, run_id)
@@ -398,7 +403,7 @@ def execute_meridian_job(
             run_rec = db.get(Run, run_id)
             if run_rec:
                 run_rec.status = "failed"
-                run_rec.error = str(exc)
+                run_rec.error = public_error(exc)
                 db.commit()
         raise
     finally:
@@ -413,16 +418,29 @@ def _first_existing(storage: Any, keys: list[str]) -> str | None:
     return next((k for k in keys if storage.exists(k)), None)
 
 
-def default_forecast_keys(run_id: str) -> tuple[list[str], list[str]]:
-    """Daily-forecast and plan keys of the run's example forecast (current names first, then pre-rename names)."""
-    return (
-        [f"runs/{run_id}/data/forecast_daily.parquet", f"runs/{run_id}/data/forecast_2025_01_daily.parquet"],
-        [f"runs/{run_id}/data/forecast_plan.parquet", f"runs/{run_id}/data/forecast_2025_01_plan.parquet"],
-    )
+def _run_config(run_id: str, sqlalchemy_url: str | None = None) -> DataRoleConfig:
+    """The run's configuration from the database: the single source every job reads (it is frozen once a run starts)."""
+    SessionLocal = get_session_factory(sqlalchemy_url)
+    with SessionLocal() as db:
+        run_rec = db.get(Run, run_id)
+        if run_rec is None:
+            raise RuntimeError(f"Run {run_id} no longer exists.")
+        return extract_role_config(run_rec.config or {})
 
 
-def _load_forecast_context(storage: Any, run_id: str, forecast_id: str) -> dict[str, Any]:
+def _backtest_coverage(storage: Any, run_id: str) -> float | None:
+    key = f"runs/{run_id}/data/forecast_summary.json"
+    if not storage.exists(key):
+        return None
+    value = storage.read_json(key).get("backtest_coverage")
+    return float(value) if value is not None else None
+
+
+def _load_forecast_context(storage: Any, run_id: str, forecast_id: str, sqlalchemy_url: str | None = None) -> dict[str, Any]:
     """Load base daily forecast, plan, history, spec and (when available) the fitted forecast model of a forecast."""
+    import tempfile
+    from pathlib import Path
+
     from mmm_studio.core.meridian.spec import MeridianSpecConfig, load_meridian_model
 
     if forecast_id.startswith("default_"):
@@ -436,9 +454,10 @@ def _load_forecast_context(storage: Any, run_id: str, forecast_id: str) -> dict[
     if daily_key is None or plan_key is None:
         raise RuntimeError("The forecast has no results yet; wait for it to finish before running scenarios.")
     panel_key = model_panel_key(storage, run_id)
-    cfg_key = f"runs/{run_id}/meta/config.json"
-    config_obj = extract_role_config(storage.read_json(cfg_key)) if storage.exists(cfg_key) else default_role_config()
-    history = _read_parquet(storage, panel_key) if panel_key else None
+    if panel_key is None:
+        raise RuntimeError("The run's modelling panel is missing; re-run the analysis first.")
+    config_obj = _run_config(run_id, sqlalchemy_url)
+    history = _read_parquet(storage, panel_key)
     spec_cfg = MeridianSpecConfig.from_role_config(config_obj, wide=history)
     out: dict[str, Any] = {
         "base_daily": _read_parquet(storage, daily_key),
@@ -446,15 +465,15 @@ def _load_forecast_context(storage: Any, run_id: str, forecast_id: str) -> dict[
         "history": history,
         "spec_cfg": spec_cfg,
         "config": config_obj,
+        "coverage": _backtest_coverage(storage, run_id),
         "mmm": None,
     }
-    if history is not None and storage.exists(model_key):
-        import tempfile
-        from pathlib import Path
-
-        tmp = Path(tempfile.mkdtemp(prefix=f"sc_{run_id}_")) / "meridian_forecast.binpb"
-        tmp.write_bytes(storage.read_bytes(model_key))
-        out["mmm"] = load_meridian_model(tmp)
+    if storage.exists(model_key):
+        # Meridian loads the whole model into memory, so the temporary file can go right away
+        with tempfile.TemporaryDirectory(prefix=f"sc_{run_id}_") as tmp:
+            path = Path(tmp) / "meridian_forecast.binpb"
+            path.write_bytes(storage.read_bytes(model_key))
+            out["mmm"] = load_meridian_model(path)
     roi_key = f"runs/{run_id}/data/meridian_roi.parquet"
     if storage.exists(roi_key):
         roi = _read_parquet(storage, roi_key).drop(index="All Channels", errors="ignore")
@@ -468,9 +487,13 @@ def execute_forecast_job(
     sqlalchemy_url: str | None = None,
 ) -> None:
     """Refit Meridian on history + the uploaded plan window (`meridian` queue), as in notebook 05."""
+    import tempfile
+    from pathlib import Path
+
     from mmm_studio.core.meridian.forecast import forecast_budget_plan, scenario_payload, validate_plan
     from mmm_studio.core.meridian.spec import MeridianSpecConfig, save_meridian_model
     from mmm_studio.pipeline.stages import _sampling_for, _sampling_label
+    from mmm_studio.settings import get_settings
 
     SessionLocal = get_session_factory(sqlalchemy_url)
     storage = get_storage()
@@ -502,7 +525,18 @@ def execute_forecast_job(
         plan_clean = validate_plan(plan_df, last_history_date=pd.Timestamp(history.index.max()), paid_channels=spec_cfg.paid_slugs)
 
         sampling = _sampling_for(run_profile, "main", config_obj.model_settings)
-        fc_daily, fc_mmm, _ = forecast_budget_plan(history, plan_clean, cfg=spec_cfg, sampling=sampling, seed=seed)
+        result = forecast_budget_plan(
+            history,
+            plan_clean,
+            cfg=spec_cfg,
+            sampling=sampling,
+            seed=seed,
+            spawn_child=_spawn_child(job_context),
+            should_cancel=lambda: hb.cancelled,
+            on_heartbeat=hb.touch,
+            timeout_seconds=get_settings().meridian_fit_timeout_seconds,
+        )
+        fc_daily = result.daily
         if hb.cancelled:
             raise InterruptedError("Forecast cancelled.")
 
@@ -513,13 +547,19 @@ def execute_forecast_job(
             storage.write_bytes(f"{base}/{name}.parquet", buf.getvalue())
         storage.write_bytes(f"{base}/forecast.csv", fc_daily.round(0).to_csv().encode("utf-8"), content_type="text/csv; charset=utf-8")
 
-        import tempfile
-        from pathlib import Path
+        with tempfile.TemporaryDirectory(prefix=f"fc_{forecast_id}_") as tmp:
+            bin_path = save_meridian_model(result.mmm, Path(tmp) / "meridian_forecast.binpb")
+            storage.write_bytes(f"{base}/meridian_forecast.binpb", bin_path.read_bytes())
 
-        bin_path = save_meridian_model(fc_mmm, Path(tempfile.mkdtemp(prefix=f"fc_{forecast_id}_")) / "meridian_forecast.binpb")
-        storage.write_bytes(f"{base}/meridian_forecast.binpb", bin_path.read_bytes())
-
-        res_payload = scenario_payload(fc_daily, plan_clean, fc_daily, plan_clean, f"Meridian refit ({_sampling_label(sampling)})")
+        res_payload = scenario_payload(
+            fc_daily,
+            plan_clean,
+            fc_daily,
+            plan_clean,
+            f"Meridian refit ({_sampling_label(sampling)})",
+            total_pi=(result.total_lo, result.total_hi),
+            coverage=_backtest_coverage(storage, run_id),
+        )
         result_key = f"{base}/result.json"
         storage.write_json(result_key, res_payload)
 
@@ -534,8 +574,9 @@ def execute_forecast_job(
                     "end_date": plan_clean.index[-1].strftime("%Y-%m-%d"),
                     "total_forecast_sales": float(fc_daily["forecast"].sum()),
                     "total_planned_spend": float(fc_daily["planned_spend"].sum()),
-                    "prediction_90_lo": float(fc_daily["prediction_lo"].sum()),
-                    "prediction_90_hi": float(fc_daily["prediction_hi"].sum()),
+                    # 90 % prediction interval of the total (quantiles of the draws' sums)
+                    "prediction_total_lo": result.total_lo,
+                    "prediction_total_hi": result.total_hi,
                 }
                 db.commit()
     except InterruptedError:
@@ -550,7 +591,7 @@ def execute_forecast_job(
             fc = db.get(ForecastRun, forecast_id)
             if fc:
                 fc.status = "failed"
-                fc.error = str(exc)
+                fc.error = public_error(exc)
                 db.commit()
         raise
     finally:
@@ -585,7 +626,7 @@ def execute_scenario_job(
         cache_key = f"{run_id}:{forecast_id}:{inputs.get('cache_version', '')}"
         cached = _cache_get(cache_key)
         if cached is None:
-            cached = _load_forecast_context(storage, run_id, forecast_id)
+            cached = _load_forecast_context(storage, run_id, forecast_id, sqlalchemy_url)
             _cache_put(cache_key, cached)
 
         multipliers = {str(k): float(v) for k, v in (inputs.get("multipliers") or {}).items()}
@@ -608,6 +649,7 @@ def execute_scenario_job(
                 multipliers=multipliers,
                 horizon_days=horizon_days,
                 base_effects=cached["base_effects"],
+                coverage=cached.get("coverage"),
             )
         elif cached.get("mroi"):
             res = fast_forecast_from_multipliers(
@@ -617,6 +659,7 @@ def execute_scenario_job(
                 horizon_days=horizon_days,
                 mroi_map=cached["mroi"],
                 catalog_shift=cached["spec_cfg"].catalog_shift,
+                print_slugs=cached["spec_cfg"].print_slugs,
             )
         else:
             raise RuntimeError("Neither the fitted forecast model nor the run's marginal ROIs are available.")
@@ -643,7 +686,7 @@ def execute_scenario_job(
             sc = db.get(ScenarioRun, scenario_id)
             if sc:
                 sc.status = "failed"
-                sc.error = str(exc)
+                sc.error = public_error(exc)
                 db.commit()
         raise
 
@@ -652,8 +695,12 @@ def execute_optimiser_job(
     optimisation_id: str,
     sqlalchemy_url: str | None = None,
 ) -> None:
-    """Constrained budget optimisation along the run's posterior response curves (`interactive` queue)."""
-    from mmm_studio.core.meridian.optimise import solve_constrained_optimisation
+    """Constrained budget optimisation along the run's posterior response curves (`interactive` queue).
+
+    The API has already validated the request (channels, bounds, feasibility); an `OptimisationError` here still fails
+    the optimisation with its reason instead of returning a relaxed allocation.
+    """
+    from mmm_studio.core.meridian.optimise import OptimisationError, solve_constrained_optimisation
 
     SessionLocal = get_session_factory(sqlalchemy_url)
     storage = get_storage()
@@ -671,24 +718,13 @@ def execute_optimiser_job(
         cache_key = f"opt:{run_id}:{inputs.get('cache_version', '')}"
         cached = _cache_get(cache_key)
         if cached is None:
-            roi_key = f"runs/{run_id}/data/meridian_roi.parquet"
-            rc_key = f"runs/{run_id}/data/response_curves.json"
-            if not (storage.exists(roi_key) and storage.exists(rc_key)):
-                raise RuntimeError("The optimiser needs the Meridian response curves; wait for the Meridian fit to finish.")
-            roi_df = _read_parquet(storage, roi_key)
-            response_curves = {ch: pd.DataFrame(rows) for ch, rows in storage.read_json(rc_key).items()}
-            cached = {"roi_df": roi_df, "response_curves": response_curves}
+            cached = load_optimiser_inputs(storage, run_id)
             _cache_put(cache_key, cached)
 
         roi_df = cached["roi_df"]
         ch_rows = roi_df.drop(index="All Channels", errors="ignore")
         total_budget = float(inputs.get("total_budget") or float(ch_rows["spend"].sum()))
-        bounds_raw = inputs.get("channel_bounds") or {}
-        channel_bounds = {
-            str(ch): (float(b[0]), float(b[1]))
-            for ch, b in bounds_raw.items()
-            if isinstance(b, (list, tuple)) and len(b) == 2
-        }
+        channel_bounds = {str(ch): (float(b[0]), float(b[1])) for ch, b in (inputs.get("channel_bounds") or {}).items()}
         default_bounds = (float(inputs.get("min_multiplier", 0.7)), float(inputs.get("max_multiplier", 1.3)))
         res = solve_constrained_optimisation(
             roi_df=roi_df,
@@ -697,6 +733,7 @@ def execute_optimiser_job(
             channel_bounds=channel_bounds or None,
             default_bounds=default_bounds,
             include_catalog=bool(inputs.get("include_catalog", True)),
+            print_slugs=tuple(inputs.get("print_slugs") or ("catalog",)),
         )
         result_key = f"runs/{run_id}/optimisations/{optimisation_id}/result.json"
         storage.write_json(result_key, res)
@@ -714,15 +751,33 @@ def execute_optimiser_job(
                     "uplift_pct": res["uplift_pct"],
                 }
                 db.commit()
-    except Exception as exc:
-        logger.exception("Optimiser job %s failed", optimisation_id)
+    except OptimisationError as exc:
         with SessionLocal() as db:
             opt = db.get(OptimisationRun, optimisation_id)
             if opt:
                 opt.status = "failed"
                 opt.error = str(exc)
                 db.commit()
+    except Exception as exc:
+        logger.exception("Optimiser job %s failed", optimisation_id)
+        with SessionLocal() as db:
+            opt = db.get(OptimisationRun, optimisation_id)
+            if opt:
+                opt.status = "failed"
+                opt.error = public_error(exc)
+                db.commit()
         raise
+
+
+def load_optimiser_inputs(storage: Any, run_id: str) -> dict[str, Any]:
+    """The run's ROI table and response curves (raises when the Meridian stages have not produced them)."""
+    roi_key = f"runs/{run_id}/data/meridian_roi.parquet"
+    rc_key = f"runs/{run_id}/data/response_curves.json"
+    if not (storage.exists(roi_key) and storage.exists(rc_key)):
+        raise RuntimeError("The optimiser needs the Meridian response curves; wait for the Meridian fit to finish.")
+    roi_df = _read_parquet(storage, roi_key)
+    response_curves = {ch: pd.DataFrame(rows) for ch, rows in storage.read_json(rc_key).items()}
+    return {"roi_df": roi_df, "response_curves": response_curves}
 
 
 def run_analysis_job(context: JobContext, run_id: str, skip_meridian: bool = False) -> None:

@@ -37,14 +37,16 @@ export const RunSetupPage: React.FC<{ runId: string | null }> = ({ runId }) => {
     setFormError(null);
     setSubmitting(true);
     try {
-      await api.updateRunConfig(r.id, {
-        name: r.status === "draft" ? values.name || r.name : undefined,
+      const name = values.name.trim();
+      if (r.status === "draft" && name && name !== r.name) await api.updateRunConfig(r.id, { name });
+      // One request: the server checks everything first, so a refused start (queue full, invalid settings) leaves the
+      // run's settings and results exactly as they were
+      await api.startRun(r.id, {
         profile: values.profile,
         role_config: values.roleConfig,
         skip_meridian: values.skipMeridian,
         seed: values.seed,
       });
-      await api.startRun(r.id, { profile: values.profile, skip_meridian: values.skipMeridian, seed: values.seed });
       queryClient.removeQueries({ queryKey: ["section", r.id] });
       await Promise.all([queryClient.invalidateQueries({ queryKey: ["run", r.id] }), queryClient.invalidateQueries({ queryKey: ["runs"] })]);
       navigate("/status", { state: { focusHeading: true } });

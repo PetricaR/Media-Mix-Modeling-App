@@ -154,7 +154,7 @@ def stationarity_table(y: pd.Series) -> list[dict[str, Any]]:
     from statsmodels.tsa.stattools import adfuller, kpss
 
     rows = []
-    log_y = np.log(y)
+    log_y = np.log(np.maximum(y, 1.0))
     for name, s in (("total sales", y), ("log total sales", log_y), ("weekly difference of log sales", log_y.diff(7))):
         s = s.dropna()
         adf_stat, adf_p, *_ = adfuller(s, autolag="AIC")

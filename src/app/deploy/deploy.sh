@@ -8,7 +8,8 @@
 # One Cloud Run service (mmm-studio) runs two containers: nginx serves the SPA and proxies /api/ to the
 # FastAPI sidecar on localhost:8000, which is never exposed on its own. Three Cloud Run Jobs run the
 # Procrastinate workers (analysis, meridian, interactive); the API starts an execution of a queue's job
-# each time it defers work on that queue, so nothing runs while the app is idle except Cloud SQL.
+# when it defers work on that queue and no execution is running, so nothing runs while the app is idle except
+# Cloud SQL. Every route except /api/v1/health needs the studio access code (signed session cookie).
 #
 # Usage (from any directory):
 #   GCP_PROJECT_ID=formare-dev ./src/app/deploy/deploy.sh          Everything, then seed one run if none exists
@@ -18,8 +19,9 @@
 # Environment variables:
 #   GCP_PROJECT_ID     GCP project (required; never taken from the active gcloud configuration)
 #   GCP_REGION         Region for Cloud Run, Cloud SQL, the bucket and Artifact Registry (default: europe-west3)
-#   APP_ACCESS_CODE    Require this code for uploads, runs, forecasts, optimiser runs and deletes. Stored in
-#                      Secret Manager (mmm-studio-access-code); without it or that secret, the app is open
+#   APP_ACCESS_CODE    The studio access code (at least 16 characters) every visitor needs to sign in. Stored in
+#                      Secret Manager (mmm-studio-access-code). Without it, an existing secret is kept, or a random
+#                      code is generated and stored there: the app never runs without one.
 #   SEED_PROFILE       Sampling profile of the seeded run: full (default) | quick | smoke
 #   SEED_WORKBOOK      Workbook to seed with (default: data/DataScienceMarketingUseCase.xlsx in the repo)
 #   ASSUME_YES         Set to "1" to skip the confirmation prompt
@@ -246,12 +248,10 @@ setup_database() {
     users=$(gcloud sql users list --instance="$SQL_INSTANCE" --project="$PROJECT_ID" --format='value(name)')
     if echo "$users" | grep -qx "$DB_USER"; then
         if [ "$generated" == 1 ]; then
-            gcloud sql users set-password "$DB_USER" --instance="$SQL_INSTANCE" \
-                --password="$password" --project="$PROJECT_ID"
+            sql_user_password PUT "$password"
         fi
     else
-        gcloud sql users create "$DB_USER" --instance="$SQL_INSTANCE" \
-            --password="$password" --project="$PROJECT_ID"
+        sql_user_password POST "$password"
     fi
     url="postgresql://${DB_USER}:${password}@/${DB_NAME}?host=/cloudsql/${SQL_CONNECTION}"
     if [ "$url" != "$stored_url" ]; then
@@ -259,11 +259,43 @@ setup_database() {
         print_info "Stored the database URL in Secret Manager ($DB_URL_SECRET)"
     fi
 
-    if [ -n "${APP_ACCESS_CODE:-}" ] && [ "$APP_ACCESS_CODE" != "$(read_secret "$ACCESS_CODE_SECRET")" ]; then
-        printf '%s' "$APP_ACCESS_CODE" | write_secret "$ACCESS_CODE_SECRET"
-        print_info "Stored the access code in Secret Manager ($ACCESS_CODE_SECRET)"
-    fi
+    ensure_access_code
     print_success "Database $DB_NAME ready on $SQL_CONNECTION"
+}
+
+# Creates or updates the Cloud SQL user with the password sent on stdin (never on a command line, where other
+# processes could read it). $1: POST creates the user, PUT changes its password.
+sql_user_password() {
+    local method="$1" password="$2" headers url
+    headers=$(mktemp "${TMPDIR:-/tmp}/mmm-studio-hdr-XXXXXX")
+    chmod 600 "$headers"
+    printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$(gcloud auth print-access-token)" > "$headers"
+    url="https://sqladmin.googleapis.com/v1/projects/${PROJECT_ID}/instances/${SQL_INSTANCE}/users"
+    [ "$method" == "PUT" ] && url="${url}?name=${DB_USER}"
+    python3 -c 'import json, sys; print(json.dumps({"name": sys.argv[1], "password": sys.stdin.read().rstrip("\n")}))' "$DB_USER" <<< "$password" \
+        | curl -fsS -X "$method" -H @"$headers" --data @- "$url" >/dev/null
+    rm -f "$headers"
+}
+
+# The app refuses to start in production without an access code of at least 16 characters, so one always exists:
+# APP_ACCESS_CODE if given, else the stored secret, else a new random code (read it with the command printed below).
+ensure_access_code() {
+    local stored
+    stored=$(read_secret "$ACCESS_CODE_SECRET")
+    if [ -n "${APP_ACCESS_CODE:-}" ]; then
+        if [ "${#APP_ACCESS_CODE}" -lt 16 ]; then
+            print_error "APP_ACCESS_CODE must have at least 16 characters"
+            exit 1
+        fi
+        if [ "$APP_ACCESS_CODE" != "$stored" ]; then
+            printf '%s' "$APP_ACCESS_CODE" | write_secret "$ACCESS_CODE_SECRET"
+            print_info "Stored the access code in Secret Manager ($ACCESS_CODE_SECRET)"
+        fi
+    elif [ "${#stored}" -lt 16 ]; then
+        openssl rand -base64 24 | tr -d '\n/+=' | write_secret "$ACCESS_CODE_SECRET"
+        print_info "Generated a random access code in Secret Manager. Read it with:"
+        echo "  gcloud secrets versions access latest --secret=$ACCESS_CODE_SECRET --project=$PROJECT_ID"
+    fi
 }
 
 # ── Step 6: Images (Cloud Build) ──────────────────────────────────────────────
@@ -337,10 +369,14 @@ deploy_jobs() {
             --cpu="$cpu" --memory="$memory" \
             --task-timeout="$timeout" \
             --tasks=1 --max-retries=0
-        # The API starts executions of this job (run.jobs.run) when it defers work on its queue
+        # The API starts executions of this job (run.jobs.run) when it defers work on its queue, after checking that
+        # none is running (run.executions.list)
         gcloud run jobs add-iam-policy-binding "$name" \
             --project="$PROJECT_ID" --region="$REGION" \
             --member="serviceAccount:${API_SA_EMAIL}" --role=roles/run.invoker >/dev/null
+        gcloud run jobs add-iam-policy-binding "$name" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --member="serviceAccount:${API_SA_EMAIL}" --role=roles/run.viewer >/dev/null
         print_success "$name ($queue: $cpu vCPU / $memory, timeout $timeout)"
     done
 }
@@ -349,18 +385,12 @@ deploy_jobs() {
 deploy_service() {
     print_step 8 "Deploying the Cloud Run service ($SERVICE_NAME)"
 
-    local access_code_env="" manifest
-    if secret_exists "$ACCESS_CODE_SECRET"; then
-        access_code_env="
-            - name: MMM_APP_ACCESS_CODE
-              valueFrom:
-                secretKeyRef:
-                  name: ${ACCESS_CODE_SECRET}
-                  key: latest"
-        print_info "Actions that cost money need the access code ($ACCESS_CODE_SECRET)"
-    else
-        print_warning "No access code: anyone with the URL can upload workbooks and start Meridian fits"
+    local manifest
+    if ! secret_exists "$ACCESS_CODE_SECRET"; then
+        print_error "No access code in Secret Manager ($ACCESS_CODE_SECRET); run the full deploy (it creates one)"
+        exit 1
     fi
+    print_info "Every visitor signs in with the access code ($ACCESS_CODE_SECRET)"
 
     manifest=$(mktemp "${TMPDIR:-/tmp}/mmm-studio-service-XXXXXX")
     cat > "$manifest" <<EOF
@@ -418,11 +448,22 @@ spec:
               value: cloudrun
             - name: MMM_GIT_SHA
               value: '${GIT_SHA}'
+            # Refuses to start without a strong access code; Cloud Run's front end and nginx each append to
+            # X-Forwarded-For, so the client address is the second entry from the right
+            - name: MMM_ENV
+              value: production
+            - name: MMM_TRUSTED_PROXY_HOPS
+              value: '2'
             - name: MMM_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: ${DB_URL_SECRET}
-                  key: latest${access_code_env}
+                  key: latest
+            - name: MMM_APP_ACCESS_CODE
+              valueFrom:
+                secretKeyRef:
+                  name: ${ACCESS_CODE_SECRET}
+                  key: latest
           resources:
             limits:
               cpu: '1'
@@ -467,7 +508,7 @@ seed_run() {
     print_step 9 "Seeding a $SEED_PROFILE run"
     local url count run_id
     url=$(service_url)
-    count=$(curl -fsS "$url/api/v1/runs" | python3 -c 'import json, sys; print(len(json.load(sys.stdin)["runs"]))')
+    count=$(api_curl "$url/api/v1/runs" | python3 -c 'import json, sys; print(len(json.load(sys.stdin)["runs"]))')
     if [ "$count" != "0" ]; then
         print_info "The app already has $count run(s) — skipping the seed"
         return 0
@@ -539,6 +580,7 @@ main() {
             ;;
         update)
             SQL_CONNECTION=$(sql_connection)
+            ensure_access_code
             build_images
             deploy_jobs
             deploy_service

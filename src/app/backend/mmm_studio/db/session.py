@@ -33,15 +33,39 @@ def get_session_factory(sqlalchemy_url: str | None = None) -> sessionmaker[Sessi
 
 
 _INITIALISED: set[str] = set()
+BASELINE_REVISION = "0001_baseline"
+
+
+def run_migrations(sqlalchemy_url: str | None = None) -> None:
+    """Bring the schema to the latest Alembic revision.
+
+    A database created before migrations existed (tables present, no `alembic_version`) is stamped at the baseline
+    first, so its existing tables are kept and only later revisions run.
+    """
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect
+
+    engine = get_engine(sqlalchemy_url)
+    cfg = Config()
+    cfg.set_main_option("script_location", "mmm_studio.db:migrations")
+    with engine.begin() as conn:
+        cfg.attributes["connection"] = conn
+        tables = set(inspect(conn).get_table_names())
+        if "alembic_version" not in tables and "runs" in tables:
+            command.stamp(cfg, BASELINE_REVISION)
+        command.upgrade(cfg, "head")
 
 
 def init_db(sqlalchemy_url: str | None = None, force: bool = False) -> None:
-    """Create all application ORM tables if they do not exist (once per database URL and process)."""
+    """Migrate the application schema to the latest revision (once per database URL and process)."""
     url = sqlalchemy_url or get_settings().sqlalchemy_url
     if url in _INITIALISED and not force:
         return
-    engine = get_engine(sqlalchemy_url)
-    Base.metadata.create_all(bind=engine)
+    if url.startswith("sqlite"):
+        Base.metadata.create_all(bind=get_engine(sqlalchemy_url))
+    else:
+        run_migrations(sqlalchemy_url)
     _INITIALISED.add(url)
 
 

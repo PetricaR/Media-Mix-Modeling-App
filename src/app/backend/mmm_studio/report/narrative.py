@@ -7,11 +7,15 @@ from typing import Any
 
 def fmt_eur(val: float, decimals: int = 0) -> str:
     """Format a euro value with thousands separators or compact k/M units."""
+    import math
+
+    if not math.isfinite(val):
+        return "—"
     if abs(val) < 0.5:
         val = 0.0
     sign = "−" if val < 0 else ""
     abs_v = abs(val)
-    if abs_v >= 1_000_000:
+    if abs_v >= 999_950:
         return f"{sign}€{abs_v / 1_000_000:,.2f}M"
     if abs_v >= 10_000 and decimals == 0:
         return f"{sign}€{abs_v / 1_000:,.1f}k"

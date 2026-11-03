@@ -19,7 +19,7 @@ from mmm_studio.charts.theme import (
     TEAL,
     channel_color,
 )
-from mmm_studio.core.meridian.spec import CHANNEL_DISPLAY_NAMES, MeridianSpecConfig, meridian_table
+from mmm_studio.core.meridian.spec import MeridianSpecConfig, channel_label, meridian_table
 from mmm_studio.core.metrics import regression_metrics
 from mmm_studio.report.narrative import fmt_eur
 from mmm_studio.report.sections import (
@@ -63,11 +63,17 @@ def extract_fit_table(mmm: Any, cfg: MeridianSpecConfig) -> pd.DataFrame:
 
 
 def extract_roi_table(mmm: Any) -> pd.DataFrame:
-    """Per-channel spend, incremental sales, contribution %, ROI, and marginal ROI with 90% CIs."""
+    """Per-channel spend, incremental sales, contribution %, ROI and marginal ROI with 90% CIs.
+
+    Also how well the data identifies each ROI: `roi_prior_lo/hi` (the prior's 90 % interval), `ci_width_ratio`
+    (posterior / prior 90 % interval width on the log scale; near 1 means the ROI is mostly the prior) and `p_roi_below_1`
+    (posterior probability that the channel returns less than it costs).
+    """
     from meridian import constants
     from meridian.analysis import analyzer
 
-    ds = analyzer.Analyzer(mmm).summary_metrics()
+    an = analyzer.Analyzer(mmm)
+    ds = an.summary_metrics()
     cols: dict[str, pd.Series] = {}
     for var in [
         "spend",
@@ -78,17 +84,46 @@ def extract_roi_table(mmm: Any) -> pd.DataFrame:
         "mroi",
     ]:
         da = ds[var]
+        prior = None
         if "distribution" in da.dims:
+            if constants.PRIOR in list(da["distribution"].values):
+                prior = da.sel(distribution=constants.PRIOR)
             da = da.sel(distribution=constants.POSTERIOR)
         if "metric" in da.dims:
             cols[var] = da.sel(metric="mean").to_series()
             cols[f"{var}_lo"] = da.sel(metric="ci_lo").to_series()
             cols[f"{var}_hi"] = da.sel(metric="ci_hi").to_series()
+            if var == "roi" and prior is not None:
+                cols["roi_prior_lo"] = prior.sel(metric="ci_lo").to_series()
+                cols["roi_prior_hi"] = prior.sel(metric="ci_hi").to_series()
         else:
             cols[var] = da.to_series()
     df = pd.DataFrame(cols)
     df.index.name = "channel"
+    if "roi_prior_lo" in df:
+        # ROIs are positive and LogNormal a priori, so interval widths are compared on the log scale: a posterior that
+        # moved far into the prior's tail (SEA) is informed by the data even if its interval is not narrower in euros
+        def log_width(lo: pd.Series, hi: pd.Series) -> pd.Series:
+            ok = (lo > 0) & (hi > lo)
+            return np.log(hi.where(ok) / lo.where(ok))
+
+        df["ci_width_ratio"] = log_width(df["roi_lo"], df["roi_hi"]) / log_width(df["roi_prior_lo"], df["roi_prior_hi"])
+    roi_draws = _flatten_draws(an.roi())
+    channels = list(mmm.input_data.media_channel.values)
+    df["p_roi_below_1"] = pd.Series({ch: float((roi_draws[:, i] < 1.0).mean()) for i, ch in enumerate(channels)})
     return df
+
+
+# A posterior 90 % interval at least this wide relative to the prior's means the data barely informed the ROI
+WEAK_IDENTIFICATION_RATIO = 0.7
+
+
+def weakly_identified(roi_df: pd.DataFrame) -> list[str]:
+    """Media channels whose ROI interval is still ≥ 70 % as wide as the prior's: their ROI is mostly the prior."""
+    if "ci_width_ratio" not in roi_df:
+        return []
+    media = roi_df.drop(index="All Channels", errors="ignore")
+    return [str(c) for c, r in media["ci_width_ratio"].items() if pd.notna(r) and float(r) >= WEAK_IDENTIFICATION_RATIO]
 
 
 def extract_rhat_summary(mmm: Any) -> pd.DataFrame:
@@ -170,9 +205,10 @@ def compute_catalog_whatif(
     cfg: MeridianSpecConfig,
     skip_date: str | None = None,
 ) -> dict[str, Any]:
-    """Simulate skipping one catalog send-out in the hold-out (planning) window, as in notebook 03 §9.
+    """Simulate skipping one send-out of the first print-event channel in the hold-out window, as in notebook 03 §9.
 
-    By default the middle send-out of the hold-out window is skipped (14 Nov 2024 in the case study).
+    By default the middle send-out of the hold-out window is skipped (14 Nov 2024 in the case study). Without a
+    print-event media channel the result is empty.
     """
     from meridian.analysis import analyzer
     from meridian.analysis.tensors import DataTensors
@@ -181,11 +217,13 @@ def compute_catalog_whatif(
     media = np.asarray(mmm.input_data.media.values, dtype=float)
     times = pd.to_datetime(mmm.input_data.media_time.values)
     channels = list(mmm.input_data.media_channel.values)
-    if "catalog" not in channels:
-        return {"skip_date": skip_date, "cost_saved": 0.0, "sales_lost": 0.0, "ratio": 0.0, "df": pd.DataFrame()}
+    slug = next((s for s in cfg.print_slugs if s in channels and f"cost_{s}" in wide_df.columns), None)
+    if slug is None:
+        return {"skip_date": None, "channel": None, "cost_saved": 0.0, "sales_lost": 0.0, "ratio": 0.0, "df": pd.DataFrame()}
 
-    cat_idx = channels.index("catalog")
-    cat_days = wide_df.index[wide_df.get("cost_catalog", pd.Series(0.0, index=wide_df.index)) > 0]
+    cat_idx = channels.index(slug)
+    cost_col = f"cost_{slug}"
+    cat_days = wide_df.index[wide_df[cost_col] > 0]
     if skip_date is None and len(cat_days) > 0:
         in_window = cat_days
         if cfg.holdout:
@@ -193,10 +231,10 @@ def compute_catalog_whatif(
         pool = in_window if len(in_window) else cat_days[-3:]
         skip_date = pool[len(pool) // 2].strftime("%Y-%m-%d")
     if skip_date is None:
-        return {"skip_date": None, "cost_saved": 0.0, "sales_lost": 0.0, "ratio": 0.0, "df": pd.DataFrame()}
+        return {"skip_date": None, "channel": slug, "cost_saved": 0.0, "sales_lost": 0.0, "ratio": 0.0, "df": pd.DataFrame()}
     skip_ts = pd.Timestamp(skip_date)
 
-    in_home_ts = skip_ts + pd.Timedelta(days=cfg.catalog_shift)
+    in_home_ts = skip_ts + pd.Timedelta(days=cfg.shift_for(slug))
     scenario = media.copy()
     scenario[:, times == in_home_ts, cat_idx] = 0.0
 
@@ -213,10 +251,11 @@ def compute_catalog_whatif(
     win_df = whatif_df.loc[win_start:win_end].copy()
 
     sales_lost = float((whatif_df["forecast"] - whatif_df["without_sendout"]).loc[skip_date:].sum())
-    cost_saved = float(wide_df.loc[skip_ts, "cost_catalog"]) if skip_ts in wide_df.index else 0.0
+    cost_saved = float(wide_df.loc[skip_ts, cost_col]) if skip_ts in wide_df.index else 0.0
     ratio = sales_lost / max(cost_saved, 1.0)
     return {
         "skip_date": skip_date,
+        "channel": slug,
         "cost_saved": cost_saved,
         "sales_lost": sales_lost,
         "ratio": ratio,
@@ -293,15 +332,15 @@ def build_meridian_model_section(
 
     train_df = fit_df[~fit_df["holdout"]]
     test_df = fit_df[fit_df["holdout"]]
+    if len(test_df) == 0 or len(train_df) == 0:
+        # Training metrics are never reported as hold-out metrics
+        raise ValueError("The Meridian model has no hold-out days, so its forecast accuracy cannot be measured.")
     m_train = regression_metrics(train_df["actual"].to_numpy(), train_df["expected"].to_numpy())
-    m_test = (
-        regression_metrics(test_df["actual"].to_numpy(), test_df["expected"].to_numpy())
-        if len(test_df) > 0
-        else m_train
-    )
-    q4_label = quarter_label(test_df.index[0], test_df.index[-1]) if len(test_df) else "hold-out"
-    train_span = f"{train_df.index[0]:%Y-%m-%d} .. {train_df.index[-1]:%Y-%m-%d}" if len(train_df) else ""
-    test_span = f"{test_df.index[0]:%Y-%m-%d} .. {test_df.index[-1]:%Y-%m-%d}" if len(test_df) else ""
+    m_test = regression_metrics(test_df["actual"].to_numpy(), test_df["expected"].to_numpy())
+    q4_label = quarter_label(test_df.index[0], test_df.index[-1])
+    train_span = f"{train_df.index[0]:%Y-%m-%d} .. {train_df.index[-1]:%Y-%m-%d}"
+    test_span = f"{test_df.index[0]:%Y-%m-%d} .. {test_df.index[-1]:%Y-%m-%d}"
+    realised_controls = [channel_label(c) for c in cfg.as_controls]
 
     metrics_summary: dict[str, Any] = {
         "train": m_train,
@@ -349,7 +388,7 @@ def build_meridian_model_section(
         vrects=vrects,
     )
 
-    q4_df = test_df if len(test_df) > 0 else fit_df.iloc[-92:]
+    q4_df = test_df
     cat_vlines = []
     if "catalog_sendout" in wide_df.columns:
         q4_cat = wide_df.loc[q4_df.index[0] : q4_df.index[-1]]
@@ -411,7 +450,8 @@ def build_meridian_model_section(
             "passes_15pct": "Yes" if m["MAE_over_mean"] <= 0.15 else "No",
         }
 
-    acc_rows = [_acc_row(f"Train ({train_span})", m_train), _acc_row(f"Hold-out {q4_label} ({test_span}, forecast)", m_test)]
+    ho_note = "forecast, realised control costs" if realised_controls else "forecast"
+    acc_rows = [_acc_row(f"Train ({train_span})", m_train), _acc_row(f"Hold-out {q4_label} ({test_span}, {ho_note})", m_test)]
     if forward_metrics:
         acc_rows.append(_acc_row(f"Forward hold-out {forward_label} (trained only on earlier data)", forward_metrics))
     # Meridian's predictive_accuracy "All Data" row (notebook 03): every day, training and hold-out together
@@ -431,7 +471,7 @@ def build_meridian_model_section(
 
     table = meridian_table(wide_df, cfg)
     _, media, controls = meridian_roles(table, cfg)
-    media_names = [CHANNEL_DISPLAY_NAMES.get(c, c) for c in media]
+    media_names = [channel_label(c) for c in media]
     control_names = [c.replace("_spend", " cost") for c in controls]
     # The specification text follows the run's settings (defaults: notebook 03)
     if cfg.enable_aks:
@@ -447,7 +487,7 @@ def build_meridian_model_section(
     media_term = "Adstock_c( Hill_c(spend_c) )" if cfg.hill_before_adstock else "Hill_c( Adstock_c(spend_c) )"
     media_notes = []
     for slug in media:
-        name = CHANNEL_DISPLAY_NAMES.get(slug, slug)
+        name = channel_label(slug)
         bits = []
         if slug in cfg.print_slugs and cfg.catalog_shift > 0:
             bits.append(f"shifted {cfg.catalog_shift} days to its in-home date")
@@ -457,7 +497,7 @@ def build_meridian_model_section(
             bits.append("no saturation")
         if bits:
             media_notes.append(f"{name}: {', '.join(bits)}")
-    no_hill = [CHANNEL_DISPLAY_NAMES.get(c, c) for c in media if cfg.saturation.get(c) == "none"]
+    no_hill = [channel_label(c) for c in media if cfg.saturation.get(c) == "none"]
     saturation_text = "**Hill** models diminishing returns" + (f" (not for {', '.join(no_hill)})" if no_hill else "")
     prior_text = {
         "roi": "**ROI priors** regularise correlated channels"
@@ -512,8 +552,14 @@ def build_meridian_model_section(
                 f"- **Controls ({len(controls)}):** {', '.join(control_names) or 'none'}.\n"
                 "- **Adstock** carries spend over to later days (up to "
                 f"{cfg.max_lag} days), {saturation_text}, and {prior_text}.\n"
-                f"- **Validation:** the {q4_label} hold-out ({len(test_df)} days) is hidden from the likelihood, so its predictions "
-                "are genuine forecasts from the budget and the calendar."
+                f"- **Validation:** the {q4_label} hold-out ({len(test_df)} days) is hidden from the likelihood: its sales are "
+                "predicted from the channel spend and the calendar of those days."
+                + (
+                    f" The controls {', '.join(realised_controls)} enter with their realised daily cost; a budget plan only "
+                    "knows planned amounts, so the plan-time back-test on the Forecast page is the stricter test."
+                    if realised_controls
+                    else ""
+                )
                 + (" Automatic knot selection reads the whole sales series, hold-out included, to place the baseline's knots." if cfg.enable_aks else "")
             ),
         ),
@@ -563,28 +609,27 @@ def build_meridian_model_section(
     ]
 
     if selection and selection.get("selection"):
-        sel_rows = selection_table_rows(selection, final_shift=cfg.catalog_shift)
+        sel_rows, sel_channels = selection_table_rows(selection, final_shift=cfg.catalog_shift)
         best = min(selection["selection"], key=lambda r: r["test_mae_over_mean"])
         blocks.append(
             TableBlock(
                 id="meridian_selection_table",
-                title="Model selection: catalog shift k × Affiliate as media or control",
+                title="Model selection: catalog shift k × commission channels as media or control",
                 subtitle=(
-                    f"Fast fits ({selection['sampling']['n_chains']} chains × {selection['sampling']['n_keep']} draws), scored on the "
-                    f"{q4_label} hold-out. Lowest error: k = {best['catalog_shift']}, Affiliate as {best['affiliate']}."
+                    f"Fast fits ({selection['sampling']['n_chains']} chains × {selection['sampling']['n_keep']} draws) trained before and "
+                    f"scored on the {selection.get('validation_label', 'validation')} window, so the {q4_label} hold-out stays unseen. "
+                    f"Lowest error: k = {best['catalog_shift']}, commission channels as {best['affiliate']}."
                 ),
                 columns=[
-                    TableColumn(key="catalog_shift", label="Catalog shift k", align="right"),
-                    TableColumn(key="affiliate", label="Affiliate"),
-                    TableColumn(key="test_mae_pct", label="Test MAE / mean", align="right"),
+                    TableColumn(key="catalog_shift", label="Print shift k", align="right"),
+                    TableColumn(key="affiliate", label="Commission channels"),
+                    TableColumn(key="test_mae_pct", label="Validation MAE / mean", align="right"),
                     TableColumn(key="train_mae_pct", label="Train MAE / mean", align="right"),
-                    TableColumn(key="test_r2", label="Test R²", align="right"),
-                    TableColumn(key="roi_sea", label="ROI SEA", align="right"),
-                    TableColumn(key="roi_catalog", label="ROI Catalog", align="right"),
-                    TableColumn(key="roi_affiliate", label="ROI Affiliate", align="right"),
+                    TableColumn(key="test_r2", label="Validation R²", align="right"),
+                    *[TableColumn(key=f"roi_{c}", label=f"ROI {channel_label(c)}", align="right") for c in sel_channels],
                 ],
                 rows=sel_rows,
-                caption="Affiliate as media gets an implausible ROI: its cost is a commission paid on sales (reverse causality).",
+                caption="A commission channel as media gets an implausible ROI: its cost is paid on its own sales (reverse causality).",
             )
         )
         sens_rows, sens_channels = sensitivity_table_rows(selection)
@@ -592,18 +637,21 @@ def build_meridian_model_section(
             blocks.append(
                 TableBlock(
                     id="meridian_sensitivity_table",
-                    title="Sensitivity: ROI priors and the role of SEA",
-                    subtitle="Informative priors centred on attributed ROAS, LogNormal(log ROAS, 0.5), and SEA entered as a control.",
+                    title="Sensitivity: ROI priors and the demand-following channels",
+                    subtitle=(
+                        "Informative priors centred on attributed ROAS, LogNormal(log ROAS, 0.5), and the channels whose cost "
+                        f"follows demand entered as controls; scored on the {selection.get('validation_label', 'validation')} window."
+                    ),
                     columns=[
                         TableColumn(key="variant", label="Variant"),
-                        TableColumn(key="test_mae_pct", label="Test MAE / mean", align="right"),
-                        *[TableColumn(key=f"roi_{c}", label=f"ROI {CHANNEL_DISPLAY_NAMES.get(c, c)}", align="right") for c in sens_channels],
+                        TableColumn(key="test_mae_pct", label="Validation MAE / mean", align="right"),
+                        *[TableColumn(key=f"roi_{c}", label=f"ROI {channel_label(c)}", align="right") for c in sens_channels],
                         TableColumn(key="media_share", label="Media share of sales", align="right"),
                     ],
                     rows=sens_rows,
                     caption=(
                         "If priors leave the big budget lines unchanged, the data dominates them; channels that move toward their "
-                        "priors are only weakly identified. SEA's ROI stays an upper bound until an experiment checks it."
+                        "priors are only weakly identified. Demand-following ROIs stay upper bounds until an experiment checks them."
                     ),
                 )
             )
@@ -614,7 +662,7 @@ def build_meridian_model_section(
                 title="Model selection grid and prior sensitivity",
                 body=selection_note
                 or (
-                    "The selection grid (catalog shift k × Affiliate as media or control) and the prior / SEA "
+                    "The selection grid (print shift k × commission channels as media or control) and the prior / demand-following "
                     "sensitivity fits run after the main results on the **full** profile. They appear here when they finish."
                 ),
             )
@@ -663,7 +711,7 @@ def build_drivers_roi_section(
     media_share_pct = float(all_ch_row["pct_of_contribution"]) if all_ch_row is not None else float("nan")
 
     # 1. Revenue ROI chart (`03_roi`)
-    ch_labels = [CHANNEL_DISPLAY_NAMES.get(c, c) for c in media_rt.index]
+    ch_labels = [channel_label(c) for c in media_rt.index]
     roi_means = [round(float(v), 2) for v in media_rt["roi"]]
     roi_lo = [round(float(v), 2) for v in media_rt["roi_lo"]]
     roi_hi = [round(float(v), 2) for v in media_rt["roi_hi"]]
@@ -676,7 +724,7 @@ def build_drivers_roi_section(
             {
                 "name": "Revenue ROI (90% CI)",
                 "values": roi_means,
-                "colors": [channel_color(CHANNEL_DISPLAY_NAMES.get(c, c)) for c in media_rt.index],
+                "colors": [channel_color(channel_label(c)) for c in media_rt.index],
                 "error_y": {"type": "data", "symmetric": False, "array": err_plus, "arrayminus": err_minus},
             }
         ],
@@ -700,7 +748,7 @@ def build_drivers_roi_section(
     ]
     for c in order_ch:
         if c in weekly_contrib.columns:
-            label = CHANNEL_DISPLAY_NAMES.get(c, c)
+            label = channel_label(c)
             decomp_series.append(
                 {
                     "name": label,
@@ -721,7 +769,12 @@ def build_drivers_roi_section(
         x=wk_dates,
         series=decomp_series,
         title="Weekly Sales Decomposition: Baseline & Controls vs Incremental Media Contributions (€M)",
-        subtitle="Stacked posterior mean contributions across full weeks of 2023–2024 vs observed weekly total sales",
+        subtitle=(
+            f"Stacked posterior mean contributions across full weeks of {weekly_contrib.index[0]:%b %Y}–"
+            f"{weekly_contrib.index[-1]:%b %Y} vs observed weekly total sales"
+            if len(weekly_contrib)
+            else "Stacked posterior mean contributions vs observed weekly total sales"
+        ),
         yaxis_title="Weekly Sales (€ Millions)",
     )
 
@@ -729,7 +782,7 @@ def build_drivers_roi_section(
     ad_panels = []
     for c in media_rt.sort_values("spend", ascending=False).index:
         sub = adstock_df[adstock_df["channel"] == c]
-        label = CHANNEL_DISPLAY_NAMES.get(c, c)
+        label = channel_label(c)
         if len(sub) > 0:
             ad_panels.append(
                 {
@@ -758,7 +811,7 @@ def build_drivers_roi_section(
     for c in media_rt.sort_values("spend", ascending=False).index:
         if c in response_curves:
             rc_df = response_curves[c]
-            label = CHANNEL_DISPLAY_NAMES.get(c, c)
+            label = channel_label(c)
             rc_panels.append(
                 {
                     "title": f"{label} (0–200% Spend)",
@@ -795,8 +848,8 @@ def build_drivers_roi_section(
         height_per_row=250,
     )
 
-    # 5. Catalog skip what-if (`03_whatif_catalog`)
-    win_df = whatif_res["df"]
+    # 5. Print-event skip what-if (`03_whatif_catalog`); only charted when the run has a print-event channel
+    win_df = whatif_res["df"] if len(whatif_res["df"]) else pd.DataFrame({"forecast": [], "without_sendout": []})
     fig_whatif = line_figure(
         x=[d.strftime("%Y-%m-%d") for d in win_df.index],
         series=[
@@ -807,7 +860,7 @@ def build_drivers_roi_section(
                 "width": 2.2,
             },
             {
-                "name": f"Forecast Skipping {whatif_res['skip_date']} Catalog",
+                "name": f"Forecast Skipping the {whatif_res['skip_date']} Send-Out",
                 "y": win_df["without_sendout"].round(0).tolist(),
                 "color": COPPER,
                 "dash": "dash",
@@ -815,85 +868,131 @@ def build_drivers_roi_section(
             },
         ],
         title=(
-            f"Budget What-If Simulation: Skipping the {whatif_res['skip_date']} Catalog Send-Out "
+            f"Budget What-If Simulation: Skipping the {whatif_res['skip_date']} {channel_label(whatif_res['channel'] or '')} Send-Out "
             f"Costs {fmt_eur(whatif_res['sales_lost'])} in Sales"
         ),
         subtitle=(
-            f"Catalog production cost saved: {fmt_eur(whatif_res['cost_saved'])} | "
+            f"Production cost saved: {fmt_eur(whatif_res['cost_saved'])} | "
             f"Forecast sales lost over following weeks: {fmt_eur(whatif_res['sales_lost'])} "
             f"(revenue payback ratio = {whatif_res['ratio']:.2f}x)"
         ),
         yaxis_title="Daily Sales Forecast (€)",
     )
 
+    weak = set(weakly_identified(roi_df))
+    upper = [c for c in cfg.upper_bound_slugs if c in media_rt.index]
     roi_rows = []
     for c, r in media_rt.sort_values("spend", ascending=False).iterrows():
+        notes = []
+        if c in upper:
+            notes.append("upper bound")
+        if c in weak:
+            notes.append("mostly prior")
         roi_rows.append(
             {
-                "channel": CHANNEL_DISPLAY_NAMES.get(c, c),
+                "channel": channel_label(c),
                 "spend": fmt_eur(float(r["spend"])),
                 "pct_spend": f"{float(r['pct_of_spend']):.1f}%",
                 "inc_sales": fmt_eur(float(r["incremental_outcome"])),
                 "pct_contrib": f"{float(r['pct_of_contribution']):.1f}%",
                 "roi": round(float(r["roi"]), 2),
                 "roi_ci": f"[{float(r['roi_lo']):.2f}, {float(r['roi_hi']):.2f}]",
+                "p_loss": f"{100.0 * float(r['p_roi_below_1']):.0f}%" if pd.notna(r.get("p_roi_below_1")) else "–",
                 "mroi": round(float(r["mroi"]), 2),
+                "evidence": ", ".join(notes) or "data",
             }
         )
 
-    sea_roi = float(media_rt.loc["sea", "roi"]) if "sea" in media_rt.index else float("nan")
-    cat_roi = float(media_rt.loc["catalog", "roi"]) if "catalog" in media_rt.index else float("nan")
-    cat_mroi = float(media_rt.loc["catalog", "mroi"]) if "catalog" in media_rt.index else float("nan")
-    sea_share = float(media_rt.loc["sea", "pct_of_contribution"]) if "sea" in media_rt.index else float("nan")
+    by_roi = media_rt.sort_values("roi", ascending=False)
+    top = next((c for c in by_roi.index if c not in weak), by_roi.index[0])
+    top_upper = top in upper
+    print_slug = whatif_res.get("channel")
     flattest = media_rt["mroi"].idxmin() if len(media_rt) else None
-    skip_label = (
-        pd.Timestamp(whatif_res["skip_date"]).strftime("%d %b %Y") if whatif_res.get("skip_date") else "one catalog"
+    skip_label = pd.Timestamp(whatif_res["skip_date"]).strftime("%d %b %Y") if whatif_res.get("skip_date") else None
+
+    kpis = [
+        KpiItem(
+            label=f"Highest ROI: {channel_label(top)}" + (" (upper bound)" if top_upper else ""),
+            value=f"{float(media_rt.loc[top, 'roi']):.2f}×",
+            delta=f"90 % interval {float(media_rt.loc[top, 'roi_lo']):.2f}–{float(media_rt.loc[top, 'roi_hi']):.2f}×; "
+            f"{float(media_rt.loc[top, 'pct_of_contribution']):.1f}% of modelled sales",
+            status="warn" if top_upper else "success",
+        ),
+    ]
+    if print_slug and print_slug in media_rt.index:
+        kpis.append(
+            KpiItem(
+                label=f"{channel_label(print_slug)} revenue ROI",
+                value=f"{float(media_rt.loc[print_slug, 'roi']):.2f}×",
+                delta=f"Marginal ROI {float(media_rt.loc[print_slug, 'mroi']):.2f}×",
+                status="neutral",
+            )
+        )
+    kpis.append(
+        KpiItem(
+            label="Media share of modelled sales",
+            value=f"{media_share_pct:.1f}%",
+            delta=f"Remaining {100.0 - media_share_pct:.1f}% is baseline & controls",
+            status="neutral",
+        )
     )
+    if skip_label:
+        kpis.append(
+            KpiItem(
+                label=f"Skipping one {channel_label(print_slug)} send-out",
+                value=f"−{fmt_eur(whatif_res['sales_lost'])} sales",
+                delta=f"saves {fmt_eur(whatif_res['cost_saved'])} cost (ratio {whatif_res['ratio']:.2f})",
+                status="neutral",
+            )
+        )
+    else:
+        kpis.append(
+            KpiItem(
+                label="ROIs mostly from the prior",
+                value=str(len(weak)),
+                delta="of the media channels" if weak else "every ROI is informed by the data",
+                status="warn" if weak else "success",
+            )
+        )
+
+    callouts: list[Any] = []
+    if upper:
+        names = ", ".join(channel_label(c) for c in upper)
+        share = sum(float(media_rt.loc[c, "pct_of_contribution"]) for c in upper)
+        callouts.append(
+            CalloutBlock(
+                tone="warn",
+                title=f"Upper-bound ROI: {names}",
+                body=(
+                    f"{names} {'is' if len(upper) == 1 else 'are'} billed per click and the cost follows {('its' if len(upper) == 1 else 'their')} "
+                    f"own clicks, so spend rises whenever demand rises ({share:.1f}% of modelled sales). The model cannot separate "
+                    "that demand from the media effect: the ROI is an upper bound. A geo or hold-out experiment should confirm the "
+                    "lift before budget moves into these channels."
+                    + (
+                        f" {channel_label(flattest)} has the lowest marginal ROI ({float(media_rt.loc[flattest, 'mroi']):.2f}×)."
+                        if flattest is not None
+                        else ""
+                    )
+                ),
+            )
+        )
+    if weak:
+        names = ", ".join(channel_label(c) for c in weak)
+        callouts.append(
+            CalloutBlock(
+                tone="info",
+                title=f"ROI mostly from the prior: {names}",
+                body=(
+                    f"The posterior 90 % interval of {names} is still at least {100 * WEAK_IDENTIFICATION_RATIO:.0f} % as wide as "
+                    "the prior's (as a ratio of high to low), so the data say little about these ROIs; even a channel without any "
+                    "effect gets a positive ROI under a LogNormal prior. Treat them as unknown until an experiment measures them."
+                ),
+            )
+        )
 
     blocks = [
-        KpisBlock(
-            items=[
-                KpiItem(
-                    label="SEA revenue ROI (upper bound)",
-                    value=f"{sea_roi:.2f}×",
-                    delta=f"{sea_share:.1f}% of sales; cost follows search demand",
-                    status="warn",
-                ),
-                KpiItem(
-                    label="Catalog revenue ROI",
-                    value=f"{cat_roi:.2f}×",
-                    delta=f"Marginal ROI {cat_mroi:.2f}×",
-                    status="neutral",
-                ),
-                KpiItem(
-                    label="Media share of total sales",
-                    value=f"{media_share_pct:.1f}%",
-                    delta=f"Remaining {100.0 - media_share_pct:.1f}% is baseline & controls",
-                    status="success",
-                ),
-                KpiItem(
-                    label="Skipping one catalog send-out",
-                    value=f"−{fmt_eur(whatif_res['sales_lost'])} sales",
-                    delta=f"saves {fmt_eur(whatif_res['cost_saved'])} cost (ratio {whatif_res['ratio']:.2f})",
-                    status="neutral",
-                ),
-            ]
-        ),
-        CalloutBlock(
-            tone="warn",
-            title="SEA's ROI is an upper bound, not a causal estimate",
-            body=(
-                f"SEA takes {sea_share:.1f}% of all sales in the decomposition and its weekly shape mirrors total demand: it is billed "
-                "per click, so its cost rises whenever search demand rises. It stays a media channel because it forecasts well, but a geo "
-                "or hold-out experiment should validate its lift before budget moves into it."
-                + (
-                    f" {CHANNEL_DISPLAY_NAMES.get(flattest, flattest)} has the lowest marginal ROI "
-                    f"({float(media_rt.loc[flattest, 'mroi']):.2f}×), so it is cut first by the optimiser."
-                    if flattest is not None
-                    else ""
-                )
-            ),
-        ),
+        KpisBlock(items=kpis),
+        *callouts,
         ChartBlock(
             id="drivers_roi_chart",
             title="Revenue ROI by channel (posterior mean, 90% credible interval)",
@@ -912,9 +1011,12 @@ def build_drivers_roi_section(
                 TableColumn(key="pct_contrib", label="Share of sales", align="right"),
                 TableColumn(key="roi", label="ROI", align="right"),
                 TableColumn(key="roi_ci", label="ROI 90% interval", align="right"),
+                TableColumn(key="p_loss", label="P(ROI < 1)", align="right"),
                 TableColumn(key="mroi", label="Marginal ROI", align="right"),
+                TableColumn(key="evidence", label="Evidence"),
             ],
             rows=roi_rows,
+            caption="Evidence: “upper bound” = cost follows demand; “mostly prior” = the data barely narrowed the prior.",
         ),
         ChartBlock(
             id="drivers_weekly_decomp",
@@ -925,7 +1027,7 @@ def build_drivers_roi_section(
         ChartBlock(
             id="drivers_adstock_curves",
             title="Carry-over: share of the effect remaining n days after spend",
-            subtitle="Posterior mean with a 90 % credible band by channel (catalog: days after the in-home date).",
+            subtitle="Posterior mean with a 90 % credible band by channel (print events: days after the in-home date).",
             figure=fig_adstock,
         ),
         ChartBlock(
@@ -934,16 +1036,19 @@ def build_drivers_roi_section(
             subtitle="Incremental sales (€M) vs the channel's total spend over the period (€M), with a 90 % credible band; the dot is the actual spend.",
             figure=fig_rc,
         ),
-        ChartBlock(
-            id="drivers_whatif_catalog",
-            title=f"What-if: skipping the {skip_label} catalog send-out",
-            subtitle=(
-                f"Forecast sales lost over the following weeks: {fmt_eur(whatif_res['sales_lost'])} vs "
-                f"{fmt_eur(whatif_res['cost_saved'])} cost saved (ratio {whatif_res['ratio']:.2f})."
-            ),
-            figure=fig_whatif,
-        ),
     ]
+    if skip_label:
+        blocks.append(
+            ChartBlock(
+                id="drivers_whatif_catalog",
+                title=f"What-if: skipping the {skip_label} {channel_label(print_slug)} send-out",
+                subtitle=(
+                    f"Forecast sales lost over the following weeks: {fmt_eur(whatif_res['sales_lost'])} vs "
+                    f"{fmt_eur(whatif_res['cost_saved'])} cost saved (ratio {whatif_res['ratio']:.2f})."
+                ),
+                figure=fig_whatif,
+            )
+        )
 
     sec = Section(
         id="drivers_roi",

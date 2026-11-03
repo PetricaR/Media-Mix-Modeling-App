@@ -28,7 +28,12 @@ export function useRun(runId: string | null) {
   });
 }
 
-/** Server configuration (version, whether writes need an access code); it only changes with a deploy. */
+/** Whether the server needs an access code and whether this browser is signed in (re-checked after any 401). */
+export function useAuthSession() {
+  return useQuery({ queryKey: ["auth-session"], queryFn: () => api.session(), staleTime: 60_000, retry: 1 });
+}
+
+/** Server configuration (version, whether the studio needs an access code); it only changes with a deploy. */
 export function useHealth() {
   return useQuery({ queryKey: ["health"], queryFn: () => api.health(), staleTime: Infinity, retry: false });
 }

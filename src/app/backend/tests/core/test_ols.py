@@ -15,9 +15,10 @@ def test_ols_benchmark_matches_notebook_04(
     profiled_case_study: tuple[pd.DataFrame, DataProfile],
     wide_model: pd.DataFrame,
     golden_data: dict[str, Any],
+    notebook_parity: Any,
 ) -> None:
     _, profile = profiled_case_study
-    res = evaluate_ols_suite(wide_model, config=profile.role_config)
+    res = evaluate_ols_suite(wide_model, config=notebook_parity(profile.role_config))
     assert res["windows"]["primary"] == {
         "label": "Q4 2024",
         "train_end": "2024-09-30",
@@ -38,6 +39,11 @@ def test_ols_benchmark_matches_notebook_04(
 
     sec = build_benchmark_section(wide_model, meridian_summary=None, config=profile.role_config, ols_res=res)
     assert sec.slug == "benchmark"
+
+    # The app's default adds missing-row controls to OLS-2 too, so the comparison with Meridian stays like-for-like
+    default_res = evaluate_ols_suite(wide_model, config=profile.role_config)
+    default_by = {(r["window"], r["model"]): r["MAE_over_mean"] for r in default_res["rows"]}
+    assert default_by[("primary", OLS2)] != pytest.approx(by[("primary", OLS2)], abs=1e-9)
     kpis = sec.blocks[0].items
     assert kpis[0].value == "pending"  # no Meridian numbers are invented before the fit
     assert any(r.get("model") == OLS2 for b in sec.blocks if b.type == "table" for r in b.rows)

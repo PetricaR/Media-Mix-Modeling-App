@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/Layout/AppShell";
+import { AuthGate } from "./components/Layout/AuthGate";
 import { RunsPage } from "./pages/Runs";
 import { RunSetupPage } from "./pages/RunSetup";
 import { RunStatusPage } from "./pages/RunStatus";
@@ -40,28 +41,30 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <AppShell selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/overview" replace />} />
-        <Route path="/runs" element={<RunsPage selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId} />} />
-        <Route path="/setup" element={<RunSetupPage runId={selectedRunId} />} />
-        <Route path="/status" element={<RunStatusPage runId={selectedRunId} />} />
-        {/* The former combined page */}
-        <Route path="/import" element={<Navigate to="/runs" replace />} />
-        <Route path="/overview" element={<OverviewPage runId={selectedRunId} />} />
-        <Route path="/data-quality" element={<DataQualityPage runId={selectedRunId} />} />
-        <Route path="/explore" element={<ExplorePage runId={selectedRunId} />} />
-        <Route path="/preparation" element={<PreparationPage runId={selectedRunId} />} />
-        <Route path="/model" element={<ModelPage runId={selectedRunId} />} />
-        <Route path="/drivers" element={<DriversPage runId={selectedRunId} />} />
-        <Route path="/benchmark" element={<BenchmarkPage runId={selectedRunId} />} />
-        <Route path="/optimizer" element={<OptimizerPage runId={selectedRunId} />} />
-        <Route path="/forecast" element={<ForecastPage runId={selectedRunId} />} />
-        <Route path="/reports" element={<ReportsPage runId={selectedRunId} />} />
-        <Route path="/brief" element={<BriefPage runId={selectedRunId} />} />
-        <Route path="*" element={<Navigate to="/overview" replace />} />
-      </Routes>
-    </AppShell>
+    <AuthGate>
+      <AppShell selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/overview" replace />} />
+          <Route path="/runs" element={<RunsPage selectedRunId={selectedRunId} onSelectRunId={setSelectedRunId} />} />
+          <Route path="/setup" element={<RunSetupPage runId={selectedRunId} />} />
+          <Route path="/status" element={<RunStatusPage runId={selectedRunId} />} />
+          {/* The former combined page */}
+          <Route path="/import" element={<Navigate to="/runs" replace />} />
+          <Route path="/overview" element={<OverviewPage runId={selectedRunId} />} />
+          <Route path="/data-quality" element={<DataQualityPage runId={selectedRunId} />} />
+          <Route path="/explore" element={<ExplorePage runId={selectedRunId} />} />
+          <Route path="/preparation" element={<PreparationPage runId={selectedRunId} />} />
+          <Route path="/model" element={<ModelPage runId={selectedRunId} />} />
+          <Route path="/drivers" element={<DriversPage runId={selectedRunId} />} />
+          <Route path="/benchmark" element={<BenchmarkPage runId={selectedRunId} />} />
+          <Route path="/optimizer" element={<OptimizerPage runId={selectedRunId} />} />
+          <Route path="/forecast" element={<ForecastPage runId={selectedRunId} />} />
+          <Route path="/reports" element={<ReportsPage runId={selectedRunId} />} />
+          <Route path="/brief" element={<BriefPage runId={selectedRunId} />} />
+          <Route path="*" element={<Navigate to="/overview" replace />} />
+        </Routes>
+      </AppShell>
+    </AuthGate>
   );
 };
 

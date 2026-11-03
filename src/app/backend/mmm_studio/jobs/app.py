@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
@@ -10,9 +12,9 @@ from typing import Any
 import procrastinate
 import psycopg
 
-from mmm_studio.db.models import ForecastRun, Run
+from mmm_studio.db.models import ForecastRun, OptimisationRun, Run, ScenarioRun
 from mmm_studio.db.session import get_session_factory
-from mmm_studio.jobs.cloud_run import wake_worker
+from mmm_studio.jobs.cloud_run import wake_idle_queues, wake_worker
 from mmm_studio.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -47,59 +49,81 @@ def ensure_procrastinate_schema(conninfo: str | None = None) -> None:
         app.schema_manager.apply_schema()
 
 
-def count_active_queue_jobs(queue: str, conninfo: str | None = None) -> int:
-    """Return the number of `todo` + `doing` jobs on a given Procrastinate queue."""
-    dsn = conninfo or get_settings().psycopg_conninfo
+class QueueUnavailable(RuntimeError):
+    """The job queue's tables could not be read; callers fail closed instead of assuming an empty queue."""
+
+
+def _queue_rows(sql: str, params: dict[str, Any]) -> list[Any]:
+    """Run a read-only query on the queue tables through the application's pooled engine."""
+    from sqlalchemy import text
+
+    from mmm_studio.db.session import get_engine
+
     try:
-        with psycopg.connect(dsn) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM procrastinate_jobs WHERE queue_name = %s AND status IN ('todo', 'doing')",
-                (queue,),
-            ).fetchone()
-            return int(row[0]) if row else 0
-    except Exception:
-        return 0
+        with get_engine().connect() as conn:
+            return list(conn.execute(text(sql), params).fetchall())
+    except Exception as exc:  # noqa: BLE001 - surfaced as QueueUnavailable
+        raise QueueUnavailable(str(exc)) from exc
+
+
+def count_active_queue_jobs(queue: str, conninfo: str | None = None) -> int:
+    """Return the number of `todo` + `doing` jobs on a queue (raises `QueueUnavailable` rather than guessing 0)."""
+    rows = _queue_rows(
+        "SELECT COUNT(*) FROM procrastinate_jobs WHERE queue_name = :queue AND status IN ('todo', 'doing')",
+        {"queue": queue},
+    )
+    return int(rows[0][0]) if rows else 0
 
 
 def count_todo_queue_jobs(queue: str, conninfo: str | None = None) -> int:
     """Return the number of `todo` (waiting) jobs on a given Procrastinate queue."""
-    dsn = conninfo or get_settings().psycopg_conninfo
+    rows = _queue_rows("SELECT COUNT(*) FROM procrastinate_jobs WHERE queue_name = :queue AND status = 'todo'", {"queue": queue})
+    return int(rows[0][0]) if rows else 0
+
+
+def pending_queueing_locks(locks: list[str]) -> list[str]:
+    """Which of `locks` still have a waiting job (deferring another job with that queueing lock would fail)."""
+    if not locks:
+        return []
+    rows = _queue_rows(
+        "SELECT DISTINCT queueing_lock FROM procrastinate_jobs WHERE status = 'todo' AND queueing_lock = ANY(:locks)",
+        {"locks": list(locks)},
+    )
+    return [str(r[0]) for r in rows]
+
+
+def get_queue_positions(job_ids: list[int], queue: str, conninfo: str | None = None) -> dict[int, int]:
+    """`{job_id: position}` in one query: 0 while `doing`, 1..N while `todo` in queue order; finished jobs are absent."""
+    ids = [int(j) for j in job_ids if j]
+    if not ids:
+        return {}
     try:
-        with psycopg.connect(dsn) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM procrastinate_jobs WHERE queue_name = %s AND status = 'todo'",
-                (queue,),
-            ).fetchone()
-            return int(row[0]) if row else 0
-    except Exception:
-        return 0
+        rows = _queue_rows(
+            """
+            SELECT id, status,
+                   (SELECT COUNT(*) FROM procrastinate_jobs t
+                     WHERE t.queue_name = :queue AND t.status = 'todo' AND t.id <= j.id) AS pos
+              FROM procrastinate_jobs j
+             WHERE j.id = ANY(:ids)
+            """,
+            {"queue": queue, "ids": ids},
+        )
+    except QueueUnavailable:
+        return {}
+    out: dict[int, int] = {}
+    for job_id, job_status, pos in rows:
+        if job_status == "doing":
+            out[int(job_id)] = 0
+        elif job_status == "todo":
+            out[int(job_id)] = int(pos)
+    return out
 
 
 def get_queue_position(job_id: int | None, queue: str, conninfo: str | None = None) -> int | None:
     """Return 0 if the job is currently `doing`, 1..N if `todo` in queue order, or None if finished."""
     if not job_id:
         return None
-    dsn = conninfo or get_settings().psycopg_conninfo
-    try:
-        with psycopg.connect(dsn) as conn:
-            row = conn.execute(
-                "SELECT status FROM procrastinate_jobs WHERE id = %s",
-                (job_id,),
-            ).fetchone()
-            if not row:
-                return None
-            status = str(row[0])
-            if status == "doing":
-                return 0
-            if status != "todo":
-                return None
-            pos_row = conn.execute(
-                "SELECT COUNT(*) FROM procrastinate_jobs WHERE queue_name = %s AND status = 'todo' AND id <= %s",
-                (queue, job_id),
-            ).fetchone()
-            return int(pos_row[0]) if pos_row else 1
-    except Exception:
-        return None
+    return get_queue_positions([job_id], queue).get(int(job_id))
 
 
 def defer_task(
@@ -114,13 +138,16 @@ def defer_task(
     ensure_procrastinate_schema(conninfo)
     app = get_procrastinate_app(conninfo)
     task_name = getattr(task_obj, "name", None) or str(task_obj)
-    with app.open():
-        job_id = app.configure_task(
-            name=task_name,
-            queue=queue,
-            lock=lock,
-            queueing_lock=queueing_lock,
-        ).defer(**kwargs)
+
+    def _defer() -> int:
+        return app.configure_task(name=task_name, queue=queue, lock=lock, queueing_lock=queueing_lock).defer(**kwargs)
+
+    if getattr(app.connector, "_async_pool", None) is not None:
+        # Inside a worker (a job chaining the next one) the app is already open asynchronously: defer through it
+        job_id = _defer()
+    else:
+        with app.open():
+            job_id = _defer()
     wake_worker(queue)
     return int(job_id)
 
@@ -204,6 +231,17 @@ def sweep_stale_runs(
                     cancel_procrastinate_job(r.meridian_job_id, abort=True, conninfo=conninfo)
                     marked_ids.append(r.id)
 
+        # Interactive jobs have no heartbeat: a scenario or optimisation left running past the threshold lost its worker
+        for model in (ScenarioRun, OptimisationRun):
+            for rec in db.query(model).filter(model.status.in_(("queued", "running"))).all():
+                upd = rec.updated_at
+                if upd is not None and upd.tzinfo is None:
+                    upd = upd.replace(tzinfo=timezone.utc)
+                if upd is not None and upd < cutoff - timedelta(seconds=threshold_sec):
+                    rec.status = "failed"
+                    rec.error = "The worker stopped before this finished; run it again."
+                    marked_ids.append(rec.id)
+
         running_forecasts = db.query(ForecastRun).filter(ForecastRun.status == "running").all()
         for f in running_forecasts:
             hb = f.heartbeat_at
@@ -220,3 +258,27 @@ def sweep_stale_runs(
             db.commit()
 
     return marked_ids
+
+
+_LAST_SWEEP = 0.0
+_SWEEP_LOCK = threading.Lock()
+
+
+def sweep_stale_runs_throttled() -> None:
+    """`sweep_stale_runs` at most once per `sweep_interval_seconds` per process, for the API's read paths.
+
+    Also wakes the Cloud Run worker of any queue that has waiting jobs, in case a wake-up was skipped while a worker was
+    finishing.
+    """
+    global _LAST_SWEEP
+    interval = get_settings().sweep_interval_seconds
+    with _SWEEP_LOCK:
+        now = time.monotonic()
+        if interval and now - _LAST_SWEEP < interval:
+            return
+        _LAST_SWEEP = now
+    try:
+        sweep_stale_runs()
+        wake_idle_queues(count_todo_queue_jobs)
+    except Exception:  # noqa: BLE001 - a failed sweep must never fail the request that triggered it
+        logger.warning("Stale-run sweep failed", exc_info=True)

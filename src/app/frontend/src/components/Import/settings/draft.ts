@@ -77,6 +77,7 @@ export function channelChanged(c: ChannelConfig, defaults: SettingsDefaults): bo
   if (!isMedia(c.role)) return false;
   if ((c.adstock_shape ?? defaultShape(c.role)) !== defaultShape(c.role)) return true;
   if ((c.saturation ?? "hill") !== "hill") return true;
+  if (c.demand_following != null && c.demand_following !== Boolean(c.inferred_demand_following)) return true;
   return c.role === "print_event" && (c.in_home_shift_days ?? defaults.in_home_shift_days) !== defaults.in_home_shift_days;
 }
 
@@ -99,6 +100,7 @@ export function changesByTab(d: SettingsDraft, defaults: SettingsDefaults): Reco
   add("data", "Calendar controls", JSON.stringify(ms.calendar) !== JSON.stringify(base.calendar));
   add("data", "Yearly Fourier pairs", ms.n_fourier !== base.n_fourier);
   add("data", "Linear trend", ms.trend !== base.trend);
+  add("data", "Missing-row controls", ms.missing_row_controls !== base.missing_row_controls);
 
   for (const c of rc.channels) add("channels", c.name, channelChanged(c, defaults));
 

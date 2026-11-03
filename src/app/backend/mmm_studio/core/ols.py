@@ -10,6 +10,7 @@ import pandas as pd
 from mmm_studio.charts.builders import bar_figure, line_figure
 from mmm_studio.charts.theme import COPPER, INK_MUTED, NAVY, SLATE, STATUS_DANGER, TEAL
 from mmm_studio.core.features import (
+    DEFAULT_CATALOG_SHIFT,
     calendar_controls,
     catalog_inhome_adstock,
     holdout_windows,
@@ -41,11 +42,19 @@ CV_FOLD_DAYS = 42
 
 
 def ols_design_sets(panel: pd.DataFrame, config: DataRoleConfig | None = None) -> dict[str, pd.DataFrame]:
-    """OLS-1: the raw paid-channel costs. OLS-2: Meridian's inputs (digital costs, catalog in-home adstock, controls)."""
+    """OLS-1: the raw paid-channel costs. OLS-2: Meridian's inputs (digital costs, catalog in-home adstock, controls).
+
+    OLS-2 follows the run's settings: the print channel's in-home shift, the calendar/seasonality controls and the
+    missing-row controls, so OLS and Meridian are compared on the same inputs.
+    """
+    shift = DEFAULT_CATALOG_SHIFT
     if config is not None and config.paid_channels:
         slug_map = config.slug_map()
         paid_cols = [f"cost_{slug_map[c]}" for c in config.paid_channels if f"cost_{slug_map[c]}" in panel.columns]
         print_cols = [f"cost_{slug_map[c]}" for c in config.print_event_channels if f"cost_{slug_map[c]}" in panel.columns]
+        print_cfg = next((c for c in config.channels if c.enabled and c.role == "print_event"), None)
+        if print_cfg is not None and print_cfg.in_home_shift_days is not None:
+            shift = int(print_cfg.in_home_shift_days)
     else:
         from mmm_studio.core.tables import CANONICAL_PAID_CHANNELS
 
@@ -53,12 +62,16 @@ def ols_design_sets(panel: pd.DataFrame, config: DataRoleConfig | None = None) -
         print_cols = ["cost_catalog"] if "cost_catalog" in panel.columns else []
     idx = pd.DatetimeIndex(panel.index)
     digital = [c for c in paid_cols if c not in print_cols]
-    # The benchmark uses the run's own controls, so OLS and Meridian are compared on the same inputs
     ms = config.model_settings if config is not None else ModelSettings()
     controls = calendar_controls(idx, ms.calendar.groups()).join(seasonality_controls(idx, ms.n_fourier, ms.trend))
+    if ms.missing_row_controls and config is not None:
+        flags = [f"missing_{c.slug}" for c in config.channels if c.enabled and f"missing_{c.slug}" in panel.columns]
+        flags = [f for f in flags if float(panel[f].sum()) > 0]
+        if flags:
+            controls = controls.join(panel[flags].astype(float))
     ols2 = panel[digital].copy()
     if print_cols:
-        ols2 = ols2.join(catalog_inhome_adstock(panel[print_cols[0]]))
+        ols2 = ols2.join(catalog_inhome_adstock(panel[print_cols[0]], shift=shift))
     return {OLS1: panel[paid_cols], OLS2: ols2.join(controls)}
 
 
@@ -167,6 +180,14 @@ def _meridian_rows(meridian_summary: dict[str, Any] | None, windows: dict[str, d
     return out
 
 
+def _pct_or_none(v: float | None) -> float | None:
+    return round(100 * v, 1) if v is not None else None
+
+
+def _pct_text(v: float | None) -> str:
+    return f"{100 * v:.1f}%" if v is not None else "–"
+
+
 def _fold_label(fold_start: str) -> str:
     ts = pd.Timestamp(fold_start)
     return f"{ts.day}\u00a0{ts:%b %Y}"  # no-break space: wraps as "15 Jan" / "2024" at most
@@ -197,18 +218,18 @@ def build_benchmark_section(
     series = [
         {
             "name": f"Hold-out {p_label}",
-            "values": [round(100 * (score("primary", m) or 0), 1) for m in models],
+            "values": [_pct_or_none(score("primary", m)) for m in models],
             "color": NAVY,
-            "text": [f"{100 * (score('primary', m) or 0):.1f}%" for m in models],
+            "text": [_pct_text(score("primary", m)) for m in models],
         }
     ]
     if f_label:
         series.append(
             {
                 "name": f"Hold-out {f_label}",
-                "values": [round(100 * (score("forward", m) or 0), 1) for m in models],
+                "values": [_pct_or_none(score("forward", m)) for m in models],
                 "color": TEAL,
-                "text": [f"{100 * (score('forward', m) or 0):.1f}%" for m in models],
+                "text": [_pct_text(score("forward", m)) for m in models],
             }
         )
     fig_cmp = bar_figure(
@@ -279,26 +300,44 @@ def build_benchmark_section(
     ols2_p, ols2_f = score("primary", OLS2), score("forward", OLS2)
     mer_p, mer_f = score("primary", MERIDIAN), score("forward", MERIDIAN)
     naive_vals = [v for v in (score("primary", NAIVE), score("forward", NAIVE)) if v is not None]
-    takeaways = [
-        f"- **Naive forecasts fail the target** ({100 * min(naive_vals):.0f}–{100 * max(naive_vals):.0f} % MAE / mean)."
-        if naive_vals
-        else "",
-        f"- **Raw costs alone (OLS-1) are unreliable:** walk-forward folds swing up to {100 * cv['worst'][OLS1]:.0f} %, "
-        "because same-day costs miss the catalog's delay and the seasonality.",
-        f"- **OLS-2 (Meridian's inputs) is robust:** {100 * cv['mean'][OLS2]:.1f} % on average across "
-        f"{len(cv['folds'])} walk-forward folds, {100 * cv['worst'][OLS2]:.1f} % in the worst fold.",
-    ]
+    target = 100 * TARGET_MAE_RATIO
+    takeaways = []
+    if naive_vals:
+        verdict = "fail" if min(naive_vals) > TARGET_MAE_RATIO else ("partly meet" if max(naive_vals) > TARGET_MAE_RATIO else "meet")
+        takeaways.append(
+            f"- **Naive forecasts {verdict} the {target:.0f} % target** ({100 * min(naive_vals):.0f}–{100 * max(naive_vals):.0f} % MAE / mean)."
+        )
+    cv_mean, cv_worst = cv["mean"], cv["worst"]
+    if cv["folds"]:
+        ols1_ok = cv_worst[OLS1] <= TARGET_MAE_RATIO
+        takeaways.append(
+            f"- **Raw costs alone (OLS-1) {'stay within the target' if ols1_ok else 'are unreliable'}:** walk-forward folds reach "
+            f"{100 * cv_worst[OLS1]:.0f} % in the worst fold"
+            + ("." if ols1_ok else ", because same-day costs miss the print channel's delay and the seasonality.")
+        )
+        ols2_ok = cv_worst[OLS2] <= TARGET_MAE_RATIO
+        takeaways.append(
+            f"- **OLS-2 (Meridian's inputs) {'is robust' if ols2_ok else 'misses the target in some folds'}:** "
+            f"{100 * cv_mean[OLS2]:.1f} % on average across {len(cv['folds'])} walk-forward folds, {100 * cv_worst[OLS2]:.1f} % "
+            "in the worst fold."
+        )
     if mer_p is not None and ols2_p is not None:
         fwd = (
             f", and {100 * mer_f:.1f} % vs {100 * ols2_f:.1f} % in {f_label}"
             if mer_f is not None and ols2_f is not None and f_label
             else ""
         )
-        better = mer_p <= ols2_p
+        gap = mer_p - ols2_p
+        if gap <= 0:
+            verdict = "is the most accurate model"
+        elif gap <= 0.01:
+            verdict = "is within one point of the OLS benchmark"
+        else:
+            verdict = f"is {100 * gap:.1f} points less accurate than the OLS benchmark"
         takeaways.append(
-            f"- **Meridian {'is the most accurate model' if better else 'is close to the OLS benchmark'}:** "
-            f"{100 * mer_p:.1f} % vs {100 * ols2_p:.1f} % for OLS-2 in {p_label}{fwd}. On top, it gives credible "
-            "intervals, ROI and response curves, and budget optimisation — which is why it is the main model."
+            f"- **Meridian {verdict}:** {100 * mer_p:.1f} % vs {100 * ols2_p:.1f} % for OLS-2 in {p_label}{fwd}. It adds credible "
+            "intervals, ROIs, response curves and budget optimisation"
+            + (", which is why it is the main model." if gap <= 0.01 else "; its forecast accuracy should be investigated before relying on it.")
         )
     else:
         takeaways.append("- **Meridian** results appear here once the Bayesian fit has finished.")
@@ -318,7 +357,7 @@ def build_benchmark_section(
         ),
         KpiItem(
             label=f"OLS-1 · {p_label}",
-            value=f"{100 * (score('primary', OLS1) or 0):.1f}%",
+            value=_pct_text(score("primary", OLS1)),
             delta="Raw costs only",
             status="success" if (score("primary", OLS1) or 1) <= TARGET_MAE_RATIO else "warn",
         ),

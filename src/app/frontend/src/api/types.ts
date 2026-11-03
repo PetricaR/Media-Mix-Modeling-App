@@ -28,6 +28,9 @@ export interface ChannelConfig {
   saturation?: "hill" | "none";
   /** The role the app inferred from the workbook */
   inferred_role?: ChannelRole | null;
+  /** Cost billed per click that follows demand: its ROI is an upper bound (null = infer from the data) */
+  demand_following?: boolean | null;
+  inferred_demand_following?: boolean | null;
 }
 
 export interface CalendarControls {
@@ -55,6 +58,8 @@ export interface ModelSettings {
   calendar: CalendarControls;
   n_fourier: number;
   trend: boolean;
+  /** A 0/1 control per channel with missing workbook rows (off reproduces the notebooks exactly) */
+  missing_row_controls: boolean;
   max_lag: number;
   baseline: "constant" | "knots" | "auto";
   n_knots: number;
@@ -74,8 +79,6 @@ export interface DataRoleConfig {
   target_column: string;
   date_column: string;
   channels: ChannelConfig[];
-  structural_break_year: number;
-  allow_single_year: boolean;
   holdout_days?: number;
   drop_trailing_isolated_days?: boolean;
   model_settings?: ModelSettings;
@@ -94,6 +97,8 @@ export interface SettingsDefaults {
   drop_trailing_isolated_days: boolean;
   seed: number;
   in_home_shift_days: number;
+  /** Training days a run needs before its hold-out */
+  min_training_days?: number;
   profiles: Record<"full" | "quick" | "smoke", SamplingSettings>;
   limits: Record<string, Bounds>;
   meridian_roi_prior: RoiPrior;
@@ -143,6 +148,12 @@ export interface StageStatus {
 }
 
 /** `GET /health`. */
+/** `GET /auth/session`. */
+export interface AuthSession {
+  auth_required: boolean;
+  authenticated: boolean;
+}
+
 export interface HealthInfo {
   status: string;
   version: string;
@@ -320,8 +331,14 @@ export interface ScenarioResult {
   /** 90 % credible interval of delta_sales (Meridian posterior only) */
   delta_sales_lo?: number | null;
   delta_sales_hi?: number | null;
-  prediction_lo_total?: number;
-  prediction_hi_total?: number;
+  /** 90 % prediction interval of the total over the shown days (quantiles of the draws' sums) */
+  prediction_total_lo?: number | null;
+  prediction_total_hi?: number | null;
+  /** Sums of the daily 5 % / 95 % bounds (much wider than an interval of the total) */
+  sum_daily_prediction_lo?: number;
+  sum_daily_prediction_hi?: number;
+  /** Share of back-test days inside their daily interval (the band's measured coverage) */
+  backtest_coverage?: number | null;
   channel_summary: ScenarioChannelRow[];
   /** Daily spend per channel slug: the plan as submitted, and the scenario's plan */
   plan_daily?: Record<string, number[]>;
@@ -391,6 +408,7 @@ export interface OptimisationDetail {
     uplift_eur: number;
     uplift_pct: number;
     include_catalog: boolean;
+    fixed_channels?: string[];
     channels?: OptimisationChannelRow[];
     allocations?: OptimisationChannelRow[];
   } | null;

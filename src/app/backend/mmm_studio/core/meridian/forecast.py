@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -10,13 +12,11 @@ import pandas as pd
 
 from mmm_studio.charts.builders import bar_figure, line_figure
 from mmm_studio.charts.theme import COPPER, INK_MUTED, NAVY, SLATE, TEAL
-from mmm_studio.core.meridian.fit import FAST_SAMPLING, fit_meridian
+from mmm_studio.core.meridian.fit import FAST_SAMPLING, fit_meridian_isolated
 from mmm_studio.core.meridian.spec import (
-    CHANNEL_DISPLAY_NAMES,
     DEFAULT_PAID_CHANNELS,
     MeridianSpecConfig,
-    build_input_data,
-    build_meridian_model,
+    channel_label,
     meridian_roles,
     meridian_table,
 )
@@ -77,16 +77,36 @@ def validate_plan(
                 f"Budget plan must start on {expected_start.strftime('%Y-%m-%d')} (the day after history ends)."
             )
 
-    target_cols = [slugify_channel(c) for c in paid_channels] if paid_channels else PLAN_COLUMNS
+    target_cols = [slugify_channel(c) for c in paid_channels] if paid_channels else list(PLAN_COLUMNS)
+    target_set = set(target_cols)
+    col_map: dict[str, str] = {}
+    unknown_cols: list[str] = []
+    for raw_col in df.columns:
+        slug = slugify_channel(str(raw_col))
+        base = slug[5:] if slug.startswith("cost_") and slug[5:] in target_set else slug
+        if base in target_set:
+            if base in col_map:
+                raise PlanValidationError(f"Columns '{col_map[base]}' and '{raw_col}' both describe channel '{base}'.")
+            col_map[base] = str(raw_col)
+        else:
+            unknown_cols.append(str(raw_col))
+
+    if unknown_cols:
+        raise PlanValidationError(
+            f"Unknown or misspelled channel column(s) {unknown_cols} in budget plan. Expected: {target_cols}."
+        )
+
+    # Every channel needs a column: a missing one would silently be forecast at €0 (write explicit zeros instead)
+    missing_cols = [c for c in target_cols if c not in col_map]
+    if missing_cols:
+        raise PlanValidationError(
+            f"Missing channel column(s) {missing_cols} in budget plan; add them (0 for no spend). Expected: {target_cols}."
+        )
+
     out = pd.DataFrame(0.0, index=df.index, columns=target_cols)
-    col_map = {slugify_channel(c): c for c in df.columns}
     for col in target_cols:
-        if col in df.columns:
-            vals = pd.to_numeric(df[col], errors="coerce")
-        elif col in col_map:
+        if col in col_map:
             vals = pd.to_numeric(df[col_map[col]], errors="coerce")
-        elif f"cost_{col}" in df.columns:
-            vals = pd.to_numeric(df[f"cost_{col}"], errors="coerce")
         else:
             vals = pd.Series(0.0, index=df.index)
         if vals.isna().any():
@@ -102,6 +122,23 @@ def _flatten_draws(values: Any) -> np.ndarray:
     return arr.reshape(-1, *arr.shape[2:])
 
 
+def _weekday_profile(history: pd.DataFrame, dates: pd.DatetimeIndex, cost_col: str) -> np.ndarray:
+    """Daily cost for `dates` from history alone: last year's same-window weekday means × the year-on-year growth."""
+    last_yr_start = dates[0] - pd.DateOffset(years=1)
+    last_yr_end = dates[-1] - pd.DateOffset(years=1)
+    last_year = history.loc[last_yr_start:last_yr_end]
+    if len(last_year) < 7:
+        last_year = history.iloc[-min(365, len(history)) :]
+    recent = history.iloc[-min(365, len(history)) :]
+    before = history.iloc[-min(730, len(history)) : -min(365, len(history))]
+    if len(before) < 30:
+        before = recent
+    by_weekday = last_year[cost_col].groupby(last_year.index.dayofweek).mean()
+    denom = float(before[cost_col].sum())
+    growth = float(recent[cost_col].sum()) / denom if denom > 0 else 1.0
+    return by_weekday.reindex(dates.dayofweek).fillna(0.0).to_numpy() * growth
+
+
 def build_example_plan(
     history: pd.DataFrame,
     start: str | None = None,
@@ -109,22 +146,13 @@ def build_example_plan(
     send_outs: list[str] | None = None,
     catalog_cost: float | None = None,
     paid_channels: list[str] | None = None,
+    print_slugs: tuple[str, ...] = ("catalog",),
 ) -> pd.DataFrame:
     """Build a realistic future daily budget plan from historical weekday spend and YoY growth."""
     hist_end = pd.Timestamp(history.index[-1])
     start_ts = pd.Timestamp(start) if start else (hist_end + pd.Timedelta(days=1))
     dates = pd.date_range(start_ts, periods=days, freq="D", name="date")
-
-    last_yr_start = dates[0] - pd.DateOffset(years=1)
-    last_yr_end = dates[-1] - pd.DateOffset(years=1)
-    last_year = history.loc[last_yr_start:last_yr_end]
-    if len(last_year) < 7:
-        last_year = history.iloc[-min(365, len(history)) :]
-
     recent = history.iloc[-min(365, len(history)) :]
-    before = history.iloc[-min(730, len(history)) : -min(365, len(history))]
-    if len(before) < 30:
-        before = recent
 
     if send_outs is None:
         # Default: 2nd and 5th Thursdays of the forecast window (e.g. 2025-01-09 and 2025-01-30)
@@ -140,19 +168,43 @@ def build_example_plan(
         cost_col = f"cost_{col}"
         if cost_col not in history.columns:
             continue
-        if col == "catalog":
+        if col in print_slugs:
             sends = recent[cost_col][recent[cost_col] > 0]
             avg_send_cost = catalog_cost or (float(sends.mean()) if len(sends) > 0 else 0.0)
             valid_so = [pd.Timestamp(s) for s in send_outs if pd.Timestamp(s) in plan.index]
             if valid_so:
                 plan.loc[pd.DatetimeIndex(valid_so), col] = avg_send_cost
             continue
-        by_weekday = last_year[cost_col].groupby(last_year.index.dayofweek).mean()
-        denom = float(before[cost_col].sum())
-        growth = float(recent[cost_col].sum()) / denom if denom > 0 else 1.0
-        plan[col] = by_weekday.reindex(dates.dayofweek).fillna(0.0).to_numpy() * growth
+        plan[col] = _weekday_profile(history, dates, cost_col)
 
     return plan
+
+
+def _seasonal_run_rate(history: pd.DataFrame, dates: pd.DatetimeIndex, cost_col: str, recent_days: int = 56) -> np.ndarray:
+    """Daily cost for `dates` as a planner would estimate it: the last `recent_days` days' weekday means (the current
+    run-rate, so a recent rate change is included) × last year's seasonal ratio (same window vs the same recent days)."""
+    recent = history.iloc[-recent_days:]
+    base = recent[cost_col].groupby(recent.index.dayofweek).mean().reindex(dates.dayofweek).fillna(0.0).to_numpy()
+    last_window = history.loc[dates[0] - pd.DateOffset(years=1) : dates[-1] - pd.DateOffset(years=1), cost_col]
+    last_recent = history.loc[recent.index[0] - pd.DateOffset(years=1) : recent.index[-1] - pd.DateOffset(years=1), cost_col]
+    ratio = 1.0
+    if len(last_window) >= 7 and len(last_recent) >= 7 and float(last_recent.mean()) > 0:
+        ratio = float(last_window.mean()) / float(last_recent.mean())
+    return base * ratio
+
+
+def plan_time_controls(history: pd.DataFrame, plan: pd.DataFrame, cfg: MeridianSpecConfig) -> pd.DataFrame:
+    """`plan` with each cost control (e.g. a sales commission) replaced by what was knowable before the plan window.
+
+    A realised commission is paid on realised sales, so feeding it into a back-test leaks the outcome. The plan-time
+    value is the recent run-rate × last year's seasonal ratio, from `history` only.
+    """
+    out = plan.copy()
+    dates = pd.DatetimeIndex(plan.index)
+    for slug in cfg.as_controls:
+        if slug in out.columns and f"cost_{slug}" in history.columns:
+            out[slug] = _seasonal_run_rate(history, dates, f"cost_{slug}")
+    return out
 
 
 def extend_history(wide: pd.DataFrame, plan: pd.DataFrame) -> pd.DataFrame:
@@ -198,28 +250,65 @@ def _summarise_draws(
     )
 
 
+def total_interval(predictive: np.ndarray, index: pd.DatetimeIndex, days: pd.DatetimeIndex) -> tuple[float, float]:
+    """90 % prediction interval of the *total* over `days`: quantiles of each draw's sum (not a sum of daily quantiles)."""
+    mask = pd.DatetimeIndex(index).isin(days)
+    totals = predictive[:, mask].sum(axis=1)
+    return float(np.quantile(totals, 0.05)), float(np.quantile(totals, 0.95))
+
+
+@dataclass
+class PlanForecast:
+    """A refit forecast of a budget plan: the daily table, the fitted model, its spec and the plan total's interval."""
+
+    daily: pd.DataFrame
+    mmm: Any
+    cfg: MeridianSpecConfig
+    total_lo: float
+    total_hi: float
+
+
 def forecast_budget_plan(
     history: pd.DataFrame,
     plan: pd.DataFrame,
-    cfg: MeridianSpecConfig | None = None,
+    cfg: MeridianSpecConfig,
     sampling: dict[str, int] | None = None,
     seed: int = 0,
-) -> tuple[pd.DataFrame, Any, MeridianSpecConfig]:
-    """Fit Meridian on `history + plan` (with plan dates masked as holdout) and return daily forecast."""
+    *,
+    work_path: Path | None = None,
+    spawn_child: bool = False,
+    should_cancel: Callable[[], bool] | None = None,
+    on_heartbeat: Callable[[], None] | None = None,
+    timeout_seconds: int | None = None,
+) -> PlanForecast:
+    """Fit Meridian on `history + plan` (with plan dates masked as holdout) and return the daily forecast.
+
+    The fit goes through `fit_meridian_isolated`, so it can run in a spawned child with cancellation and a timeout.
+    """
+    import tempfile
+
     start = plan.index[0].strftime("%Y-%m-%d")
     end = plan.index[-1].strftime("%Y-%m-%d")
-    fc_cfg = replace(cfg or MeridianSpecConfig(), holdout=(start, end))
     ext = extend_history(history, plan)
-    table = meridian_table(ext, fc_cfg)
-    mmm = fit_meridian(
-        build_meridian_model(build_input_data(table, fc_cfg), fc_cfg),
-        seed=seed,
-        **(sampling or FAST_SAMPLING),
-    )
+    fc_cfg = replace(cfg, holdout=(start, end)).with_training_priors(ext)
+    with tempfile.TemporaryDirectory(prefix="mmm_fc_") as tmp:
+        mmm = fit_meridian_isolated(
+            ext,
+            fc_cfg,
+            work_path or Path(tmp) / "meridian_forecast.binpb",
+            sampling=sampling or FAST_SAMPLING,
+            seed=seed,
+            spawn_child=spawn_child,
+            should_cancel=should_cancel,
+            on_heartbeat=on_heartbeat,
+            **({"timeout_seconds": timeout_seconds} if timeout_seconds else {}),
+        )
     expected, predictive = _prediction_draws(mmm, seed=seed)
-    daily = _summarise_draws(expected, predictive, pd.DatetimeIndex(pd.to_datetime(table["time"]))).loc[start:end].copy()
+    index = pd.DatetimeIndex(pd.to_datetime(meridian_table(ext, fc_cfg)["time"]))
+    daily = _summarise_draws(expected, predictive, index).loc[start:end].copy()
     daily["planned_spend"] = plan.sum(axis=1).to_numpy()
-    return daily, mmm, fc_cfg
+    lo, hi = total_interval(predictive, index, pd.DatetimeIndex(plan.index))
+    return PlanForecast(daily=daily, mmm=mmm, cfg=fc_cfg, total_lo=lo, total_hi=hi)
 
 
 def evaluate_forecast_scenario(
@@ -229,18 +318,30 @@ def evaluate_forecast_scenario(
     alt_plan: pd.DataFrame,
     cfg: MeridianSpecConfig,
     seed: int = 0,
-) -> pd.DataFrame:
-    """Evaluate an alternative budget plan over the same forecast window without refitting."""
+    *,
+    with_controls: bool = False,
+    horizon_days: int | None = None,
+) -> tuple[pd.DataFrame, tuple[float, float]]:
+    """Evaluate an alternative budget plan over the same forecast window without refitting.
+
+    Returns `(daily, (total_lo, total_hi))`, the total's 90 % prediction interval over the first `horizon_days` days.
+    With `with_controls` the plan's control columns (e.g. a commission) are passed to the model too; otherwise only
+    the media change and the fitted model's controls are kept.
+    """
     from meridian.analysis.tensors import DataTensors
 
     alt_table = meridian_table(extend_history(history, alt_plan), cfg)
-    spend_cols, _, _ = meridian_roles(alt_table, cfg)
+    spend_cols, _, control_cols = meridian_roles(alt_table, cfg)
     media = alt_table[spend_cols].to_numpy(dtype=float)[np.newaxis, :, :]
-    expected, predictive = _prediction_draws(mmm, new_data=DataTensors(media=media), seed=seed)
+    tensors = {"media": media}
+    if with_controls and control_cols:
+        tensors["controls"] = alt_table[control_cols].to_numpy(dtype=float)[np.newaxis, :, :]
+    expected, predictive = _prediction_draws(mmm, new_data=DataTensors(**tensors), seed=seed)
     index = pd.DatetimeIndex(pd.to_datetime(alt_table["time"]))
     daily = _summarise_draws(expected, predictive, index).loc[base_daily.index].copy()
     daily["planned_spend"] = alt_plan.sum(axis=1).to_numpy()
-    return daily
+    n = min(horizon_days or len(base_daily), len(base_daily))
+    return daily, total_interval(predictive, index, pd.DatetimeIndex(base_daily.index[:n]))
 
 
 def channel_effect_draws(
@@ -298,8 +399,13 @@ def scenario_payload(
     multipliers: dict[str, float] | None = None,
     effect_draws: np.ndarray | None = None,
     effect_channels: list[str] | None = None,
+    total_pi: tuple[float, float] | None = None,
+    coverage: float | None = None,
 ) -> dict[str, Any]:
     """Result payload shared by forecasts and scenarios (totals, deltas, per-channel summary, daily rows, figure).
+
+    `total_pi` is the 90 % prediction interval of the total over the shown days, from the draws.
+    `coverage` is the share of back-test days inside their daily 90 % interval, shown next to the band.
 
     `effect_draws` holds each media channel's change in daily sales, shape `(n_draws, n_days, n_channels)` in the
     order of `effect_channels`. With more than one draw the payload carries 90 % credible intervals; a single draw
@@ -332,7 +438,7 @@ def scenario_payload(
         b_sp = float(base_plan[col].sum())
         a_sp = float(alt_plan[col].sum())
         row: dict[str, Any] = {
-            "channel": CHANNEL_DISPLAY_NAMES.get(col, col),
+            "channel": channel_label(col),
             "slug": col,
             "multiplier": round(a_sp / b_sp, 3) if b_sp > 0 else float((multipliers or {}).get(col, 1.0)),
             "base_spend": round(b_sp, 0),
@@ -397,8 +503,13 @@ def scenario_payload(
         "marginal_roas": m_roas,
         "delta_sales_lo": round(total_ci[0], 0) if total_ci else None,
         "delta_sales_hi": round(total_ci[1], 0) if total_ci else None,
-        "prediction_lo_total": round(float(alt_daily["prediction_lo"].sum()), 0),
-        "prediction_hi_total": round(float(alt_daily["prediction_hi"].sum()), 0),
+        # 90 % prediction interval of the total (quantiles of each draw's sum); None when no draws were available
+        "prediction_total_lo": round(total_pi[0], 0) if total_pi else None,
+        "prediction_total_hi": round(total_pi[1], 0) if total_pi else None,
+        # Sums of the daily 5 % / 95 % bounds: much wider than an interval of the total, kept for weekly tables
+        "sum_daily_prediction_lo": round(float(alt_daily["prediction_lo"].sum()), 0),
+        "sum_daily_prediction_hi": round(float(alt_daily["prediction_hi"].sum()), 0),
+        "backtest_coverage": round(coverage, 3) if coverage is not None else None,
         "channel_summary": channel_summary,
         "plan_daily": plan_arrays(base_plan),
         "scenario_plan_daily": plan_arrays(alt_plan),
@@ -418,6 +529,7 @@ def model_scenario_from_multipliers(
     horizon_days: int | None = None,
     seed: int = 0,
     base_effects: tuple[np.ndarray, list[str]] | None = None,
+    coverage: float | None = None,
 ) -> dict[str, Any]:
     """Evaluate a multiplier scenario with the fitted forecast model (no refit), as in notebook 05 §4.
 
@@ -425,8 +537,8 @@ def model_scenario_from_multipliers(
     pass `base_effects` (`channel_effect_draws` of `base_plan`) to reuse the plan's draws across scenarios.
     """
     alt_plan = apply_multipliers(base_plan, multipliers, locked=tuple(cfg.as_controls))
-    alt_daily = evaluate_forecast_scenario(mmm, history, base_daily, alt_plan, cfg, seed=seed)
     n = min(horizon_days or len(base_daily), len(base_daily))
+    alt_daily, totals = evaluate_forecast_scenario(mmm, history, base_daily, alt_plan, cfg, seed=seed, horizon_days=n)
     base_draws, channels = base_effects or channel_effect_draws(mmm, history, base_plan, cfg)
     alt_draws, _ = channel_effect_draws(mmm, history, alt_plan, cfg)
     return scenario_payload(
@@ -438,6 +550,8 @@ def model_scenario_from_multipliers(
         multipliers,
         effect_draws=alt_draws - base_draws,
         effect_channels=channels,
+        total_pi=totals,
+        coverage=coverage,
     )
 
 
@@ -448,10 +562,11 @@ def fast_forecast_from_multipliers(
     horizon_days: int | None = None,
     mroi_map: dict[str, float] | None = None,
     catalog_shift: int = 2,
+    print_slugs: tuple[str, ...] = ("catalog",),
 ) -> dict[str, Any]:
     """Approximate a scenario from the run's marginal ROIs when the fitted forecast model is not available.
 
-    Each channel's spend change is spread over a short carry-over kernel (catalog: after its in-home date) and
+    Each channel's spend change is spread over a short carry-over kernel (print events: after the in-home date) and
     multiplied by that channel's posterior marginal ROI. Channels without an mROI (e.g. controls) do not move sales.
     """
     mults = {slugify_channel(k): float(v) for k, v in (multipliers or {}).items()}
@@ -469,7 +584,7 @@ def fast_forecast_from_multipliers(
             continue
         p_alt[col] = p_base[col] * mults.get(slug, 1.0)
         diff = (p_alt[col] - p_base[col]).to_numpy(dtype=float)
-        if slug == "catalog":
+        if slug in print_slugs:
             kernel = np.r_[np.zeros(catalog_shift), 0.8 ** np.arange(14)]
         else:
             kernel = 0.5 ** np.arange(4)
@@ -495,6 +610,12 @@ def fast_forecast_from_multipliers(
     )
 
 
+def interval_coverage(df: pd.DataFrame) -> float:
+    """Share of days whose actual sales fall inside the daily prediction interval."""
+    inside = (df["actual"] >= df["prediction_lo"]) & (df["actual"] <= df["prediction_hi"])
+    return float(inside.mean())
+
+
 def build_forecast_scenarios_section(
     wide_df: pd.DataFrame,
     backtest_df: pd.DataFrame,
@@ -504,32 +625,38 @@ def build_forecast_scenarios_section(
     backtest_label: str = "hold-out",
     backtest_train_end: str | None = None,
     sampling_label: str | None = None,
+    plan_time_df: pd.DataFrame | None = None,
+    control_names: list[str] | None = None,
+    forecast_total_pi: tuple[float, float] | None = None,
+    print_slugs: tuple[str, ...] = ("catalog",),
 ) -> Section:
     """Build the `forecast_scenarios` section reproducing `05_forecast.ipynb`.
 
     `backtest_df` holds `actual`, `forecast` and the 90 % prediction interval of a leak-free back-test: a model fitted
-    only on history up to `backtest_train_end` and given the hold-out's actual spend as its plan.
+    only on history up to `backtest_train_end` and given the hold-out's actual spend as its plan. `plan_time_df` is the
+    same back-test with the cost controls (`control_names`, e.g. a sales commission) replaced by values knowable before
+    the window; it is the headline accuracy for budget planning when present.
     """
     bt_m = regression_metrics(backtest_df["actual"].to_numpy(), backtest_df["forecast"].to_numpy())
-    coverage = float(
-        ((backtest_df["actual"] >= backtest_df["prediction_lo"]) & (backtest_df["actual"] <= backtest_df["prediction_hi"])).mean()
-    )
+    head_df = plan_time_df if plan_time_df is not None else backtest_df
+    head_m = regression_metrics(head_df["actual"].to_numpy(), head_df["forecast"].to_numpy())
+    coverage = interval_coverage(head_df)
+    controls_txt = ", ".join(control_names or [])
     bt_dates = [d.strftime("%Y-%m-%d") for d in backtest_df.index]
-    fig_bt = line_figure(
-        x=bt_dates,
-        series=[
-            {
-                "name": "Forecast (90% prediction interval)",
-                "y": backtest_df["forecast"].round(0).tolist(),
-                "band_lower": backtest_df["prediction_lo"].round(0).tolist(),
-                "band_upper": backtest_df["prediction_hi"].round(0).tolist(),
-                "color": TEAL,
-                "width": 2.0,
-            },
-            {"name": "Actual", "y": backtest_df["actual"].round(0).tolist(), "color": NAVY, "width": 1.4, "mode": "lines+markers", "marker": {"size": 4}},
-        ],
-        yaxis_title="Daily total sales (€)",
-    )
+    bt_series = [
+        {
+            "name": "Forecast from a plan (90% prediction interval)" if plan_time_df is not None else "Forecast (90% prediction interval)",
+            "y": head_df["forecast"].round(0).tolist(),
+            "band_lower": head_df["prediction_lo"].round(0).tolist(),
+            "band_upper": head_df["prediction_hi"].round(0).tolist(),
+            "color": TEAL,
+            "width": 2.0,
+        },
+        {"name": "Actual", "y": backtest_df["actual"].round(0).tolist(), "color": NAVY, "width": 1.4, "mode": "lines+markers", "marker": {"size": 4}},
+    ]
+    if plan_time_df is not None:
+        bt_series.insert(1, {"name": f"With realised {controls_txt}", "y": backtest_df["forecast"].round(0).tolist(), "color": INK_MUTED, "dash": "dot", "width": 1.4})
+    fig_bt = line_figure(x=bt_dates, series=bt_series, yaxis_title="Daily total sales (€)")
 
     recent_hist = wide_df["total_sales"].iloc[-min(48, len(wide_df)) :]
     hist_dates = [d.strftime("%Y-%m-%d") for d in recent_hist.index]
@@ -537,9 +664,9 @@ def build_forecast_scenarios_section(
     all_dates = hist_dates + fc_dates
     pad = [None] * len(hist_dates)
     vlines = [{"x": fc_dates[0], "color": SLATE, "dash": "dash", "label": "history | forecast"}]
-    if "catalog" in plan_df.columns:
-        for d in plan_df.index[plan_df["catalog"] > 0]:
-            vlines.append({"x": d.strftime("%Y-%m-%d"), "color": COPPER, "dash": "dot", "label": "Catalog"})
+    for col in [c for c in plan_df.columns if c in print_slugs]:
+        for d in plan_df.index[plan_df[col] > 0]:
+            vlines.append({"x": d.strftime("%Y-%m-%d"), "color": COPPER, "dash": "dot", "label": channel_label(col)})
     fig_fc = line_figure(
         x=all_dates,
         series=[
@@ -606,69 +733,89 @@ def build_forecast_scenarios_section(
     ]
 
     scen_notes = []
-    skip = scenarios_df[(scenarios_df["delta_spend"] < 0) & scenarios_df["scenario"].str.contains("catalog", case=False)]
+    skip = scenarios_df[(scenarios_df["delta_spend"] < 0) & scenarios_df["scenario"].str.startswith("Skip the ")]
     if len(skip):
         r = skip.iloc[0]
         scen_notes.append(
-            f"Skipping a catalog saves {fmt_eur(-float(r['delta_spend']))} and loses {fmt_eur(-float(r['delta_sales']))} in sales "
+            f"Skipping a send-out saves {fmt_eur(-float(r['delta_spend']))} and loses {fmt_eur(-float(r['delta_sales']))} in sales "
             f"(ratio {float(r['delta_sales']) / float(r['delta_spend']):.2f})."
         )
-    if scenarios_df["scenario"].str.contains("SEA").any():
-        scen_notes.append("Moving budget to SEA rides on SEA's upward-biased ROI and should be tested before acting on it.")
+    if scenarios_df["scenario"].str.contains("upper-bound", case=False).any():
+        scen_notes.append("Moving budget into an upper-bound channel rides on its upward-biased ROI; test it before acting on it.")
 
     tot_fc_sales = float(forecast_daily["forecast"].sum())
     tot_fc_spend = float(forecast_daily["planned_spend"].sum())
-    n_sends = int((plan_df["catalog"] > 0).sum()) if "catalog" in plan_df.columns else 0
-    blocks: list[Any] = [
-        KpisBlock(
-            items=[
-                KpiItem(
-                    label=f"Forecast sales, {len(forecast_daily)} days",
-                    value=fmt_eur(tot_fc_sales),
-                    delta=f"Ø {fmt_eur(float(forecast_daily['forecast'].mean()))}/day",
-                    status="success",
-                ),
-                KpiItem(
-                    label="Planned spend",
-                    value=fmt_eur(tot_fc_spend),
-                    delta=f"{n_sends} catalog send-out{'s' if n_sends != 1 else ''} · {fc_dates[0]} → {fc_dates[-1]}",
-                ),
-                KpiItem(
-                    label=f"Back-test {backtest_label} MAE / mean",
-                    value=f"{100.0 * bt_m['MAE_over_mean']:.1f}%",
-                    delta=f"R² {bt_m['R2']:.3f} · RMSE {fmt_eur(bt_m['RMSE'])} · bias {fmt_eur_signed(bt_m['bias'])}/day",
-                    status="success" if bt_m["MAE_over_mean"] <= 0.15 else "warn",
-                ),
-                KpiItem(
-                    label="Days inside 90% prediction interval",
-                    value=f"{100.0 * coverage:.0f}%",
-                    delta="Nominal 90 %",
-                    status="success" if coverage >= 0.85 else "warn",
-                ),
-            ]
+    print_cols = [c for c in plan_df.columns if c in print_slugs]
+    n_sends = int((plan_df[print_cols] > 0).to_numpy().sum()) if print_cols else 0
+    head_label = "from a plan" if plan_time_df is not None else "with realised costs"
+    kpis = [
+        KpiItem(
+            label=f"Forecast sales, {len(forecast_daily)} days",
+            value=fmt_eur(tot_fc_sales),
+            delta=(
+                f"90 % interval {fmt_eur(forecast_total_pi[0])}–{fmt_eur(forecast_total_pi[1])}"
+                if forecast_total_pi
+                else f"Ø {fmt_eur(float(forecast_daily['forecast'].mean()))}/day"
+            ),
+            status="neutral",
         ),
+        KpiItem(
+            label="Planned spend",
+            value=fmt_eur(tot_fc_spend),
+            delta=(f"{n_sends} send-out{'s' if n_sends != 1 else ''} · " if print_cols else "") + f"{fc_dates[0]} → {fc_dates[-1]}",
+        ),
+        KpiItem(
+            label=f"Back-test {backtest_label} {head_label} (MAE / mean)",
+            value=f"{100.0 * head_m['MAE_over_mean']:.1f}%",
+            delta=(
+                f"{100.0 * bt_m['MAE_over_mean']:.1f}% with realised {controls_txt} · bias {fmt_eur_signed(head_m['bias'])}/day"
+                if plan_time_df is not None
+                else f"R² {bt_m['R2']:.3f} · bias {fmt_eur_signed(bt_m['bias'])}/day"
+            ),
+            status="success" if head_m["MAE_over_mean"] <= 0.15 else "warn",
+        ),
+        KpiItem(
+            label="Days inside the 90% prediction interval",
+            value=f"{100.0 * coverage:.0f}%",
+            delta="Measured on the back-test; nominal 90 %",
+            status="success" if coverage >= 0.85 else "warn",
+        ),
+    ]
+    blocks: list[Any] = [
+        KpisBlock(items=kpis),
         MarkdownBlock(
             title="How the forecast works",
             body=(
                 "Meridian only predicts inside the window it is fitted on, so the plan's days are appended to the history as "
                 "**hold-out rows** (their sales are unknown) and the model is refit"
                 + (f" ({sampling_label})" if sampling_label else "")
-                + ". The rows' sales placeholder is the training mean, so Meridian's KPI scaling is unchanged and no future "
-                "sales are used.\n\n"
-                "- **90 % prediction interval:** where an *actual* day's sales are expected to land — use this for planning.\n"
-                "- **90 % credible interval:** uncertainty about the *expected* level only (much narrower)."
+                + ". The rows' sales placeholder is the training mean, so no future sales are used; it keeps Meridian's KPI "
+                "mean and shrinks its scale slightly (a few percent), which does not change the forecast's level.\n\n"
+                f"- **Prediction interval:** where an *actual* day's sales are expected to land. Nominally 90 %; on the back-test "
+                f"it held {100.0 * coverage:.0f} % of the days, so plan with that coverage in mind.\n"
+                "- **Credible interval:** uncertainty about the *expected* level only (much narrower).\n"
+                "- **Totals:** the interval of a total comes from the draws' sums, not from adding daily bounds."
+                + (
+                    f"\n- **Cost controls ({controls_txt}):** a plan only knows planned amounts. The back-test therefore uses "
+                    "their recent run-rate × last year's seasonal pattern instead of their realised cost; the gap between the "
+                    "two back-tests shows how much the forecast depends on knowing them."
+                    if plan_time_df is not None
+                    else ""
+                )
             ),
         ),
         ChartBlock(
             id="forecast_backtest_q4",
-            title=f"Leak-free back-test, {backtest_label}: MAE / mean = {100.0 * bt_m['MAE_over_mean']:.1f}%",
+            title=f"Leak-free back-test, {backtest_label}: MAE / mean {head_label} = {100.0 * head_m['MAE_over_mean']:.1f}%",
             subtitle=(
-                f"Trained only on history up to {backtest_train_end or 'the day before the window'}; the plan is the actual spend of the "
-                "window; no sales from the window are used, not even in the KPI scaling."
+                f"Trained only on history up to {backtest_train_end or 'the day before the window'}; the media plan is the actual "
+                "spend of the window"
+                + (f" and {controls_txt} is estimated from history" if plan_time_df is not None else "")
+                + "; no sales from the window are used, not even in the KPI scaling."
             ),
             figure=fig_bt,
             caption=(
-                f"Coverage below the nominal 90 % comes from the level offset (bias {fmt_eur_signed(bt_m['bias'])}/day); "
+                f"Coverage below the nominal 90 % comes from the level offset (bias {fmt_eur_signed(head_m['bias'])}/day); "
                 "refitting weekly re-anchors the level."
                 if coverage < 0.85
                 else None
@@ -679,7 +826,7 @@ def build_forecast_scenarios_section(
             title=f"Daily sales forecast for the budget plan ({fc_dates[0]} → {fc_dates[-1]})",
             subtitle=(
                 f"{fmt_eur(tot_fc_sales)} forecast sales (Ø {fmt_eur(float(forecast_daily['forecast'].mean()))}/day) for "
-                f"{fmt_eur(tot_fc_spend)} planned spend; dotted lines are planned catalog send-outs."
+                f"{fmt_eur(tot_fc_spend)} planned spend" + ("; dotted lines are planned send-outs." if print_cols else ".")
             ),
             figure=fig_fc,
         ),
@@ -700,7 +847,10 @@ def build_forecast_scenarios_section(
         ChartBlock(
             id="forecast_scenarios_chart",
             title="Budget scenarios on the same forecast window",
-            subtitle="Evaluated with the fitted model (no refit); only media channels change, Affiliate stays as planned.",
+            subtitle=(
+                "Evaluated with the fitted model (no refit); only media channels change"
+                + (f", {controls_txt} stays as planned." if controls_txt else ".")
+            ),
             figure=fig_scen,
         ),
         TableBlock(
@@ -723,7 +873,7 @@ def build_forecast_scenarios_section(
             subtitle="Example plan built from history: same-weekday spend one year earlier × each channel's spend growth.",
             columns=[
                 TableColumn(key="week_ending", label="Week ending"),
-                *[TableColumn(key=col, label=CHANNEL_DISPLAY_NAMES.get(col, col), align="right") for col in plan_df.columns],
+                *[TableColumn(key=col, label=channel_label(col), align="right") for col in plan_df.columns],
                 TableColumn(key="total", label="Total", align="right"),
             ],
             rows=wk_plan_rows,

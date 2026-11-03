@@ -25,6 +25,7 @@ import { api } from "../api/client";
 import { useOptimisation, useSection } from "../api/hooks";
 import { RUN_STATUS_LABEL, runStatusColor } from "../components/Import/format";
 import { SectionRenderer } from "../components/Sections/SectionRenderer";
+import { parseBudgetMillions } from "../lib/budget";
 import { PALETTE } from "../theme";
 
 export const OptimizerPage: React.FC<{ runId: string | null }> = ({ runId }) => {
@@ -38,15 +39,16 @@ export const OptimizerPage: React.FC<{ runId: string | null }> = ({ runId }) => 
   const [submitErr, setSubmitErr] = useState<string | null>(null);
 
   const { data: optDetail } = useOptimisation(activeOptId);
+  const parsedBudget = parseBudgetMillions(customBudget);
 
   const handleRunOptimiser = async () => {
     if (!runId) return;
     setSubmitting(true);
     setSubmitErr(null);
     try {
-      const budgetVal = customBudget.trim() ? Number(customBudget.replace(/[^0-9.]/g, "")) : null;
-      if (budgetVal !== null && !(budgetVal > 0)) {
-        setSubmitErr("Enter the total budget in euros, e.g. 121800000.");
+      const budgetVal = parseBudgetMillions(customBudget);
+      if (budgetVal !== null && Number.isNaN(budgetVal)) {
+        setSubmitErr("Enter the total budget in € million as one number, e.g. 121.8 or 121,8.");
         return;
       }
       const resp = await api.createOptimisation(runId, {
@@ -103,12 +105,19 @@ export const OptimizerPage: React.FC<{ runId: string | null }> = ({ runId }) => 
         <Grid item xs={12} sm={6} md={3}>
           <TextField
             size="small"
-            label="Total budget (€, optional)"
+            label="Total budget (€ million, optional)"
             placeholder="Historical total"
-            inputMode="numeric"
+            inputMode="decimal"
             value={customBudget}
             onChange={(e) => setCustomBudget(e.target.value)}
-            helperText="Leave empty to keep the historical total"
+            error={parsedBudget !== null && Number.isNaN(parsedBudget)}
+            helperText={
+              parsedBudget === null
+                ? "Leave empty to keep the historical total"
+                : Number.isNaN(parsedBudget)
+                  ? "One number in € million, e.g. 121.8"
+                  : `= €${parsedBudget.toLocaleString("en-GB")}`
+            }
             fullWidth
           />
         </Grid>
@@ -120,7 +129,7 @@ export const OptimizerPage: React.FC<{ runId: string | null }> = ({ runId }) => 
                 onChange={(e) => setIncludeCatalog(e.target.checked)}
               />
             }
-            label="Let the catalog budget move"
+            label="Let the print budget (catalog) move"
           />
         </Grid>
         <Grid item xs={12} md={2}>

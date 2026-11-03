@@ -67,9 +67,12 @@ class LocalStorage(ArtifactStorage):
         return target
 
     def write_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        import os
+        import uuid
+
         path = self._resolve(key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
         tmp_path.write_bytes(data)
         tmp_path.replace(path)
         return key.lstrip("/")

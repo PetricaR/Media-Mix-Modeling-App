@@ -38,6 +38,7 @@ import { FONT_SANS, NUMERIC, PALETTE } from "../../theme";
 import { PageHeader } from "../Layout/PageHeader";
 import { Markdown } from "./Markdown";
 import { OnThisPage, type TocEntry } from "./OnThisPage";
+import { escapeCsvCell } from "../../lib/csv";
 
 const LazyPlotlyChart = React.lazy(() => import("../Charts/PlotlyChart"));
 
@@ -259,9 +260,9 @@ const TableRenderer: React.FC<{ block: TableBlock; anchorId?: string }> = ({ blo
   }, [block.rows, orderBy, orderDir]);
 
   const exportCsv = () => {
-    const headers = block.columns.map((c) => `"${c.label.replace(/"/g, '""')}"`).join(",");
+    const headers = block.columns.map((c) => escapeCsvCell(c.label)).join(",");
     const lines = sortedRows.map((r) =>
-      block.columns.map((c) => `"${String(r[c.key] ?? "").replace(/"/g, '""')}"`).join(",")
+      block.columns.map((c) => escapeCsvCell(r[c.key])).join(",")
     );
     const blob = new Blob([[headers, ...lines].join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);

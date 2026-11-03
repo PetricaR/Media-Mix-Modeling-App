@@ -1,0 +1,38 @@
+[FAIL] DP-dup: duplicate (date, channel) rows are not silently summed
+        50 duplicated rows -> profile.duplicate_rows_count=50, warning raised=False, target total_sales inflated by EUR 4,259,262, total_cost inflated by EUR 2,305,376
+[FAIL] DP-neg: negative costs are rejected or warned
+        5 negative costs -> accepted, negative_values_count=5, warning raised=False
+[FAIL] DP-miss: missing channel-days are handled in the Meridian model
+        44 days have >=1 missing channel row ({'Catalog': 4, 'Owned': 2, 'TV': 38}); their total_sales is on average -11.7% vs same-weekday neighbours (min -42.1%); missing-row flag in Meridian controls=False
+[FAIL] OPT-1: include_catalog=False keeps catalog spend fixed
+        include_catalog=False, budget 1.5x history: catalog 20,000,000 -> 26,582,278 (should stay fixed); result reports include_catalog=False
+[FAIL] OPT-2: optimiser respects the user's min/max bounds
+        budget 0.5x history with bounds [0.7, 1.3]: allocations outside the user's bounds: ['sea x0.50', 'catalog x0.50', 'display x0.50']; no infeasibility error or warning field in result keys=[]
+[PASS] OPT-3: optimiser stays inside the response-curve range
+        allocations beyond the 2x curve range use PCHIP extrapolation: sea x2.90: optimiser says 22.92M vs true curve 23.52M; catalog x3.03: optimiser says 17.68M vs true curve 18.34M; display x3.09: optimiser says 2.76M vs true curve 2.88M
+[FAIL] OPT-4: channel_bounds have one unit
+        channel_bounds display=(5, 12) is read as multipliers (hi <= 10) -> display spend 12 EUR (x0.00); (5, 12) would be EUR, (5, 10) multipliers: the same field has two units
+[FAIL] FC-1: a plan with a missing/misspelt channel column is rejected
+        plan with a misspelt 'catalg' column and no affiliate/display_network/social_media/psm columns is accepted; catalog spend used=0, columns silently zero-filled=['catalog', 'affiliate', 'display_network', 'social_media', 'psm']
+[FAIL] HO-1: hold-out follows holdout_days for any dataset
+        data 2022-01-01..2023-01-25, holdout_days=200 -> cfg.holdout=('2024-10-01', '2025-01-01') (hard-coded Q4 2024, outside the data: the model then trains on every day and the 'hold-out' metrics fall back to the training metrics in build_meridian_model_section)
+[FAIL] TXT-1: executive summary does not claim the target is met when it is not
+        hold-out MAE/mean 22 % (target 15 %) -> executive summary says: "**Can daily sales be forecast from the marketing budget?** Yes: Meridian MMM forecasts the Q4 2024 hold-out with **22.0% MAE / mean** and the Q3 2024 forward hold-out with **22.0%** — below the brief's 15 % threshold. The main mod"
+[FAIL] TXT-2: draft brief shows no invented catalog ROI
+        draft brief (no Meridian ROI yet) catalog row: '30.5% of spend with revenue ROI ≈ 1; attributed ROAS 2.07 misses the halo.'; fixed text in answer 2: 'Most important channels (preliminary OLS with HAC errors): Affiliate, SEA and Catalog; the others cannot be told apart from zero.'
+[FAIL] STAT-leak: hold-out accuracy without realised demand-following costs
+        corr(Affiliate cost, Affiliate sales)=0.797, corr(SEA cost, SEA clicks)=0.959; primary: OLS-2 9.6% | without realised Affiliate cost 12.2% | without Affiliate & SEA cost 13.8% || forward: OLS-2 14.0% | without realised Affiliate cost 15.6% | without Affiliate & SEA cost 24.9%
+
+SUMMARY
+FAIL  DP-dup: duplicate (date, channel) rows are not silently summed
+FAIL  DP-neg: negative costs are rejected or warned
+FAIL  DP-miss: missing channel-days are handled in the Meridian model
+FAIL  OPT-1: include_catalog=False keeps catalog spend fixed
+FAIL  OPT-2: optimiser respects the user's min/max bounds
+PASS  OPT-3: optimiser stays inside the response-curve range
+FAIL  OPT-4: channel_bounds have one unit
+FAIL  FC-1: a plan with a missing/misspelt channel column is rejected
+FAIL  HO-1: hold-out follows holdout_days for any dataset
+FAIL  TXT-1: executive summary does not claim the target is met when it is not
+FAIL  TXT-2: draft brief shows no invented catalog ROI
+FAIL  STAT-leak: hold-out accuracy without realised demand-following costs

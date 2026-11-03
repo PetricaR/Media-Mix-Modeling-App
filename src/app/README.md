@@ -98,14 +98,17 @@ The idempotent deployment script [`src/app/deploy/deploy.sh`](deploy/deploy.sh) 
 Build (no local Docker):
 - **Cloud SQL PostgreSQL 16** (`mmm-studio-pg`, `db-f1-micro`, Enterprise edition), the only resource billed while idle
 - **Cloud Storage Bucket** (`gs://formare-dev-mmm-studio-artifacts`)
-- **Artifact Registry** (`mmm-studio`) & **Secret Manager** (`mmm-studio-database-url`, and `mmm-studio-access-code`
-  only when `APP_ACCESS_CODE` is given; without it the app is open to anyone with the link)
-- **3 Cloud Run Jobs** (scale-to-zero workers; the API starts an execution whenever it defers work on their queue):
+- **Artifact Registry** (`mmm-studio`) & **Secret Manager** (`mmm-studio-database-url`, `mmm-studio-access-code`).
+  The studio access code is mandatory: `APP_ACCESS_CODE` (≥ 16 characters) if given, else the stored secret, else a
+  generated random code. Every visitor signs in with it; the API refuses to start in production without it.
+- **3 Cloud Run Jobs** (scale-to-zero workers; the API starts an execution when it defers work on their queue and none
+  is running):
   - `mmm-studio-worker-analysis` (2 vCPU / 4 GiB, `--burst`)
   - `mmm-studio-worker-meridian` (8 vCPU / 16 GiB, `--burst`, 4 h timeout)
   - `mmm-studio-worker-interactive` (4 vCPU / 8 GiB, `--idle-exit 300` with warm 2-run LRU cache)
 - **1 Cloud Run Service** `mmm-studio`: nginx + React SPA, with the FastAPI API as a sidecar on `localhost:8000`
-  (public through `invoker-iam-disabled`, which works under domain-restricted sharing)
+  (reachable through `invoker-iam-disabled`, which works under domain-restricted sharing; the access code protects
+  every page and download). For named users instead of one shared code, put Identity-Aware Proxy in front.
 
 To deploy (from the repo root, after `gcloud auth login`):
 

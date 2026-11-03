@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from mmm_studio.api.deps import get_app_storage, get_db
 from mmm_studio.db.models import Run
-from mmm_studio.jobs.app import sweep_stale_runs
+from mmm_studio.jobs.app import sweep_stale_runs_throttled
 from mmm_studio.storage import StorageBackend
 
 router = APIRouter(prefix="/runs/{run_id}/sections", tags=["sections"])
@@ -22,7 +22,7 @@ def list_sections(
     storage: StorageBackend = Depends(get_app_storage),
 ) -> dict[str, Any]:
     """Return the index of available sections and per-stage progress for a Run."""
-    sweep_stale_runs()
+    sweep_stale_runs_throttled()
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found.")

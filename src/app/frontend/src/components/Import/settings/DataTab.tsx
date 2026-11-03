@@ -79,7 +79,7 @@ export const DataTab: React.FC<TabProps & { dataProfile?: DataProfile | null }> 
         </Box>
       </Group>
 
-      <Group title="Controls" description="Calendar and seasonality terms in both the OLS benchmark and Meridian. The data-preparation page keeps notebook 02's steps." changed={calendarChanged || ms.n_fourier !== base.n_fourier || ms.trend !== base.trend}>
+      <Group title="Controls" description="Calendar and seasonality terms in both the OLS benchmark and Meridian. The data-preparation page keeps notebook 02's steps." changed={calendarChanged || ms.n_fourier !== base.n_fourier || ms.trend !== base.trend || ms.missing_row_controls !== base.missing_row_controls}>
         <FormControl component="fieldset" fullWidth disabled={locked} sx={{ m: 0, p: 0, border: 0, minWidth: 0, mb: 2.5 }}>
           <FormLabel component="legend" sx={{ fontWeight: 650, fontSize: "0.84rem", color: PALETTE.inkPrimary, mb: 0.5, "&.Mui-focused": { color: PALETTE.inkPrimary } }}>
             Calendar controls
@@ -128,6 +128,15 @@ export const DataTab: React.FC<TabProps & { dataProfile?: DataProfile | null }> 
               disabled={locked}
               onChange={(trend) => patchSettings(setDraft, { trend })}
               help="A straight line in years since the first day, for slow growth or decline."
+            />
+          </Box>
+          <Box sx={{ maxWidth: 420 }}>
+            <SwitchField
+              label="Missing-row controls"
+              checked={ms.missing_row_controls}
+              disabled={locked}
+              onChange={(missing_row_controls) => patchSettings(setDraft, { missing_row_controls })}
+              help="A 0/1 control for each channel's days without a workbook row, so those days are not read as sales drops. Switch off to reproduce the notebooks exactly."
             />
           </Box>
         </Box>

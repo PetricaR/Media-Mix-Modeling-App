@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -53,10 +54,10 @@ def _custom_config(profile: DataProfile) -> DataRoleConfig:
 
 
 def test_defaults_reproduce_the_notebook_specification(
-    profiled_case_study: tuple[pd.DataFrame, DataProfile], wide_model: pd.DataFrame
+    profiled_case_study: tuple[pd.DataFrame, DataProfile], wide_model: pd.DataFrame, notebook_parity: Any
 ) -> None:
     _, profile = profiled_case_study
-    cfg = MeridianSpecConfig.from_role_config(profile.role_config, wide=wide_model)
+    cfg = MeridianSpecConfig.from_role_config(notebook_parity(profile.role_config), wide=wide_model)
     assert cfg.catalog_shift == 2
     assert cfg.as_controls == ("affiliate",)
     assert cfg.max_lag == 21
@@ -71,6 +72,14 @@ def test_defaults_reproduce_the_notebook_specification(
     legacy = build_meridian_table(wide_model, catalog_shift=2, n_fourier=2, paid_channels=cfg.paid_channels)
     pd.testing.assert_frame_equal(meridian_table(wide_model, cfg), legacy)
     assert settings_changes(profile.role_config) == []
+    assert [c["setting"] for c in settings_changes(notebook_parity(profile.role_config))] == ["Missing-row controls"]
+
+    # The default adds a 0/1 control for each channel with missing workbook rows (TV, Catalog, Owned)
+    default_cfg = MeridianSpecConfig.from_role_config(profile.role_config, wide=wide_model)
+    extra = [c for c in meridian_table(wide_model, default_cfg).columns if c not in legacy.columns]
+    assert sorted(extra) == ["missing_catalog", "missing_owned", "missing_tv"]
+    # SEA and PSM are billed per click and follow their own clicks: upper-bound ROIs
+    assert set(default_cfg.upper_bound_slugs) == {"sea", "psm"}
     assert sampling_for("full") == FULL_SAMPLING
     assert sampling_for("quick") == FAST_SAMPLING and sampling_for("full", "selection") == FAST_SAMPLING
 
@@ -105,7 +114,8 @@ def test_roas_prior_preset_is_centred_on_attributed_roas(
     rc.model_settings = ModelSettings(roi_prior="attributed_roas", roas_prior_sigma=0.7)
     cfg = MeridianSpecConfig.from_role_config(rc, wide=wide_model)
     assert cfg.roi_prior is not None and "affiliate" not in cfg.roi_prior
-    roas = wide_model["sales_sea"].sum() / wide_model["cost_sea"].sum()
+    train = wide_model.loc[: pd.Timestamp(cfg.holdout[0]) - pd.Timedelta(days=1)]
+    roas = train["sales_sea"].sum() / train["cost_sea"].sum()
     assert cfg.roi_prior["sea"] == (pytest.approx(math.log(roas)), 0.7)
     # Other prior types have no ROI prior to set
     rc.model_settings = ModelSettings(roi_prior="attributed_roas", media_prior_type="mroi")

@@ -1,4 +1,5 @@
-"""Media efficiency, funnel KPIs, Social Media Aug 2024 regime break, and Affiliate Feb 2024 commission shift (01b)."""
+"""Media efficiency, funnel KPIs, and regime breaks detected from the data: a Social Media spend shift and a change
+of the commission channel's rate (01b; Aug 2024 and Feb 2024 in the case study)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from mmm_studio.charts.theme import COPPER, NAVY, STATUS_WARNING, TEAL, channel_
 from mmm_studio.core.eda.notebook_stats import social_regime
 from mmm_studio.core.features import complete_years
 from mmm_studio.core.schema import DataRoleConfig
-from mmm_studio.report.facts import AFFILIATE_BREAK, SOCIAL_BREAK
+from mmm_studio.report.facts import detect_level_shift
 from mmm_studio.report.narrative import fmt_eur
 from mmm_studio.report.sections import (
     CalloutBlock,
@@ -145,15 +146,21 @@ def build_explore_efficiency_section(
         height=390,
     )
 
-    # 3. Social Media structural break on 2024-08-01: Jan–Jul vs Aug–Dec of the break year (01b §8.3)
+    # 3. Social Media structural break, detected from the spend series: Jan–Jul vs Aug–Dec of the break year (01b §8.3)
     dates_str = [d.strftime("%Y-%m-%d") for d in wide_df.index]
-    has_social = "cost_social_media" in wide_df and wide_df.index.min() < SOCIAL_BREAK < wide_df.index.max()
-    regime = social_regime(wide_df, SOCIAL_BREAK) if has_social else None
+    social_shift = detect_level_shift(wide_df["cost_social_media"]) if "cost_social_media" in wide_df else None
+    social_break = social_shift[0] if social_shift else None
+    has_social = social_break is not None and all(
+        c in wide_df for c in ("clicks_social_media", "impr_social_media", "sales_social_media")
+    )
+    regime = social_regime(wide_df, social_break) if has_social else None
     soc_mult = float(regime.loc["Spend", "ratio"]) if regime is not None else float("nan")
     soc_cost_pre = float(regime.loc["Spend", "before"]) if regime is not None else float("nan")
     soc_cost_post = float(regime.loc["Spend", "after"]) if regime is not None else float("nan")
     soc_sales_mult = float(regime.loc["Attributed sales", "ratio"]) if regime is not None else float("nan")
     soc_clicks_mult = float(regime.loc["Clicks", "ratio"]) if regime is not None else float("nan")
+    soc_before = f"Jan–{(social_break - pd.Timedelta(days=1)):%b} {social_break.year}" if social_break is not None else ""
+    soc_after = f"{social_break:%b}–Dec {social_break.year}" if social_break is not None else ""
 
     fig_social = line_figure(
         x=dates_str,
@@ -174,20 +181,33 @@ def build_explore_efficiency_section(
         title=None,
         xaxis_title="Date",
         yaxis_title="€ / Day",
-        vlines=[{"x": "2024-08-01", "color": STATUS_WARNING, "width": 2, "dash": "dash", "label": "2024-08-01 Regime Shift"}],
+        vlines=(
+            [{"x": f"{social_break:%Y-%m-%d}", "color": STATUS_WARNING, "width": 2, "dash": "dash", "label": f"{social_break:%Y-%m-%d} Regime Shift"}]
+            if social_break is not None
+            else []
+        ),
         height=360,
     )
 
-    # 4. Affiliate commission rate shift in Feb 2024
-    aff_cost = wide_df.get("cost_affiliate", pd.Series(0.0, index=wide_df.index))
-    aff_sales = wide_df.get("sales_affiliate", pd.Series(1.0, index=wide_df.index))
+    # 4. Commission rate shift of the commission channel (Affiliate in the case study), detected from its rate
+    commission = next((c for c in config.channels if c.enabled and c.role == "commission"), None)
+    comm_slug = commission.slug if commission is not None else "affiliate"
+    comm_name = commission.name if commission is not None else "Affiliate"
+    has_comm = f"cost_{comm_slug}" in wide_df and f"sales_{comm_slug}" in wide_df
+    aff_cost = wide_df.get(f"cost_{comm_slug}", pd.Series(0.0, index=wide_df.index))
+    aff_sales = wide_df.get(f"sales_{comm_slug}", pd.Series(1.0, index=wide_df.index))
     comm_rate = np.where(aff_sales > 0, 100.0 * aff_cost / aff_sales, np.nan)
+    aff_shift = detect_level_shift(pd.Series(comm_rate, index=wide_df.index)) if has_comm else None
+    aff_break = aff_shift[0] if aff_shift else None
     # Commission as a share of sales over each period (ratio of sums, robust to low-sales days)
-    pre_mask, post_mask = wide_df.index < AFFILIATE_BREAK, wide_df.index >= AFFILIATE_BREAK
-    comm_pre = 100.0 * float(aff_cost[pre_mask].sum()) / max(float(aff_sales[pre_mask].sum()), 1.0)
-    comm_post = 100.0 * float(aff_cost[post_mask].sum()) / max(float(aff_sales[post_mask].sum()), 1.0)
+    if aff_break is not None:
+        pre_mask, post_mask = wide_df.index < aff_break, wide_df.index >= aff_break
+        comm_pre = 100.0 * float(aff_cost[pre_mask].sum()) / max(float(aff_sales[pre_mask].sum()), 1.0)
+        comm_post = 100.0 * float(aff_cost[post_mask].sum()) / max(float(aff_sales[post_mask].sum()), 1.0)
+    else:
+        comm_pre = comm_post = 100.0 * float(aff_cost.sum()) / max(float(aff_sales.sum()), 1.0)
     comm_word = "step-up" if comm_post > comm_pre else "step-down"
-    r_aff = float(aff_cost.corr(aff_sales)) if aff_cost.std() > 0 else float("nan")
+    r_aff = float(aff_cost.corr(aff_sales)) if has_comm and aff_cost.std() > 0 else float("nan")
     r_sea = float(wide_df["cost_sea"].corr(wide_df["clicks_sea"])) if "cost_sea" in wide_df and "clicks_sea" in wide_df else float("nan")
 
     fig_aff = line_figure(
@@ -204,34 +224,52 @@ def build_explore_efficiency_section(
         title=None,
         xaxis_title="Date",
         yaxis_title="Commission Rate (%)",
-        vlines=[{"x": "2024-02-01", "color": COPPER, "width": 2, "dash": "dash", "label": "2024-02-01 Commission Shift"}],
+        vlines=(
+            [{"x": f"{aff_break:%Y-%m-%d}", "color": COPPER, "width": 2, "dash": "dash", "label": f"{aff_break:%Y-%m-%d} Commission Shift"}]
+            if aff_break is not None
+            else []
+        ),
         height=350,
     )
+
+    kpis: list[KpiItem] = []
+    breaks: list[str] = []
+    if regime is not None:
+        kpis.append(KpiItem(label=f"Social Media regime ({social_break:%b %Y})", value=f"×{soc_mult:.1f} spend", delta=f"clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f}", status="warn"))
+        breaks.append(
+            f"**Social Media ({social_break:%d %b %Y}):** daily spend ×{soc_mult:.1f} ({fmt_eur(soc_cost_pre)} → {fmt_eur(soc_cost_post)}), "
+            f"clicks ×{soc_clicks_mult:.1f} and attributed sales ×{soc_sales_mult:.1f} ({soc_after} vs {soc_before}). This looks like a change of "
+            "campaign type or tracking set-up, not a gradual gain: a single Social coefficient across the period is mis-specified."
+        )
+    if has_comm:
+        if aff_break is not None:
+            kpis.append(KpiItem(label=f"{comm_name} commission", value=f"{comm_pre:.1f}% → {comm_post:.1f}%", delta=f"of own sales; {comm_word} in {aff_break:%b %Y}", status="warn"))
+            breaks.append(
+                f"**{comm_name} ({aff_break:%b %Y}):** commission {comm_pre:.1f}% → {comm_post:.1f}% of its own sales. Because the "
+                f"cost is a commission on realised sales (r = {r_aff:.2f}), its high correlation with total sales is largely reverse causality."
+            )
+        else:
+            kpis.append(KpiItem(label=f"{comm_name} commission", value=f"{comm_pre:.1f}%", delta="of own sales; no rate change detected"))
+        kpis.append(KpiItem(label=f"{comm_name} r(cost, own sales)", value=f"{r_aff:.2f}", delta="Cost follows sales (commission)", status="warn"))
+    if r_sea == r_sea:
+        kpis.append(KpiItem(label="SEA r(cost, clicks)", value=f"{r_sea:.2f}", delta="Billed per click"))
 
     return Section(
         id="explore_efficiency",
         title="Media efficiency and regime breaks",
-        subtitle="Unit-cost dynamics (CPC, CPM, CTR), within-channel funnel correlations, and the two 2024 regime shifts.",
+        subtitle="Unit-cost dynamics (CPC, CPM, CTR), within-channel funnel correlations, and the regime shifts found in the data.",
         blocks=[
-            KpisBlock(
-                items=[
-                    KpiItem(label="Social Media regime (Aug 2024)", value=f"×{soc_mult:.1f} spend", delta=f"clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f}", status="warn"),
-                    KpiItem(label="Affiliate commission", value=f"{comm_pre:.1f}% → {comm_post:.1f}%", delta=f"of own sales; {comm_word} in Feb 2024", status="warn"),
-                    KpiItem(label="Affiliate r(cost, own sales)", value=f"{r_aff:.2f}", delta="Cost follows sales (commission)", status="warn"),
-                    KpiItem(label="SEA r(cost, clicks)", value=f"{r_sea:.2f}", delta="Billed per click"),
+            *([KpisBlock(items=kpis)] if kpis else []),
+            *(
+                [
+                    CalloutBlock(
+                        tone="warn",
+                        title=f"{len(breaks)} structural break{'s' if len(breaks) != 1 else ''} identified",
+                        body="\n".join(f"{i}. {b}" for i, b in enumerate(breaks, start=1)),
+                    )
                 ]
-            ),
-            CalloutBlock(
-                tone="warn",
-                title="Two Structural Breaks Identified in 2024",
-                body=(
-                    f"1. **Social Media ({SOCIAL_BREAK:%d %b %Y}):** daily spend ×{soc_mult:.1f} ({fmt_eur(soc_cost_pre)} → {fmt_eur(soc_cost_post)}), "
-                    f"clicks ×{soc_clicks_mult:.1f} and attributed sales ×{soc_sales_mult:.1f} (Aug–Dec vs Jan–Jul). This looks like a change of "
-                    "campaign type or tracking set-up, not a gradual gain: a single Social coefficient across the period is mis-specified, "
-                    "and the Q4 hold-out lies entirely in the new regime.\n"
-                    f"2. **Affiliate ({AFFILIATE_BREAK:%b %Y}):** commission {comm_pre:.1f}% → {comm_post:.1f}% of its own sales. Because the "
-                    f"cost is a commission on realised sales (r = {r_aff:.2f}), its high correlation with total sales is largely reverse causality."
-                ),
+                if breaks
+                else []
             ),
             ChartBlock(
                 id="efficiency_kpis",
@@ -254,21 +292,27 @@ def build_explore_efficiency_section(
                 subtitle="Daily Pearson correlation across Cost → Impressions → Clicks → Channel Sales.",
                 figure=fig_funnel,
             ),
-            ChartBlock(
-                id="social_regime_change",
-                title="Social Media Regime Shift on 2024-08-01",
-                subtitle=f"Daily spend ×{soc_mult:.1f}, clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f} (Aug–Dec vs Jan–Jul {SOCIAL_BREAK.year}).",
-                figure=fig_social,
+            *(
+                [
+                    ChartBlock(
+                        id="social_regime_change",
+                        title=f"Social Media Regime Shift on {social_break:%Y-%m-%d}",
+                        subtitle=f"Daily spend ×{soc_mult:.1f}, clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f} ({soc_after} vs {soc_before}).",
+                        figure=fig_social,
+                    )
+                ]
+                if regime is not None
+                else []
             ),
             *(
                 [
                     TableBlock(
                         id="social_regime_table",
-                        title=f"Social Media before and after {SOCIAL_BREAK:%d %b %Y}",
+                        title=f"Social Media before and after {social_break:%d %b %Y}",
                         columns=[
                             TableColumn(key="metric", label="Daily mean"),
-                            TableColumn(key="before", label=f"Jan–Jul {SOCIAL_BREAK.year}", align="right"),
-                            TableColumn(key="after", label=f"Aug–Dec {SOCIAL_BREAK.year}", align="right"),
+                            TableColumn(key="before", label=soc_before, align="right"),
+                            TableColumn(key="after", label=soc_after, align="right"),
                             TableColumn(key="ratio", label="Ratio", align="right"),
                         ],
                         rows=[
@@ -285,11 +329,21 @@ def build_explore_efficiency_section(
                 if regime is not None
                 else []
             ),
-            ChartBlock(
-                id="affiliate_commission",
-                title="Affiliate Effective Commission Rate (`cost_affiliate / sales_affiliate`)",
-                subtitle=f"Commission {comm_pre:.1f}% of own sales before {AFFILIATE_BREAK:%b %Y}, {comm_post:.1f}% after.",
-                figure=fig_aff,
+            *(
+                [
+                    ChartBlock(
+                        id="affiliate_commission",
+                        title=f"{comm_name} Effective Commission Rate (`cost_{comm_slug} / sales_{comm_slug}`)",
+                        subtitle=(
+                            f"Commission {comm_pre:.1f}% of own sales before {aff_break:%b %Y}, {comm_post:.1f}% after."
+                            if aff_break is not None
+                            else f"Commission {comm_pre:.1f}% of own sales over the whole period."
+                        ),
+                        figure=fig_aff,
+                    )
+                ]
+                if has_comm
+                else []
             ),
             TableBlock(
                 id="efficiency_summary_table",

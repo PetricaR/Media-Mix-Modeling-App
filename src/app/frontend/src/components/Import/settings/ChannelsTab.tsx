@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, MenuItem, Select, Typography, alpha } from "@mui/material";
+import { Box, Checkbox, FormControlLabel, MenuItem, Select, Typography, alpha } from "@mui/material";
 import type { AdstockShape, ChannelConfig, ChannelRole } from "../../../api/types";
 import { FONT_MONO, PALETTE } from "../../../theme";
 import { ROLE_OPTIONS, roleOption } from "../format";
@@ -195,6 +195,21 @@ export const ChannelsTab: React.FC<TabProps> = ({ draft, setDraft, defaults, loc
                 ) : (
                   <Dash label={`No saturation: ${ch.name} is not a media channel`} />
                 )}
+                {media && (
+                  <FormControlLabel
+                    sx={{ mt: 0.5, ml: -0.75, "& .MuiFormControlLabel-label": { fontSize: "0.76rem", color: PALETTE.inkSecondary } }}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={Boolean(ch.demand_following ?? ch.inferred_demand_following)}
+                        disabled={locked}
+                        onChange={(e) => update(idx, (c) => ({ ...c, demand_following: e.target.checked }))}
+                        inputProps={{ "aria-label": `${ch.name}: cost follows demand (ROI is an upper bound)` }}
+                      />
+                    }
+                    label={`Cost follows demand${ch.inferred_demand_following ? " (detected)" : ""}`}
+                  />
+                )}
               </Box>
 
               <Box sx={{ minWidth: 0 }}>
@@ -221,7 +236,9 @@ export const ChannelsTab: React.FC<TabProps> = ({ draft, setDraft, defaults, loc
       <Typography variant="caption" component="p" sx={{ mt: 1.25, color: PALETTE.inkSecondary, maxWidth: "80ch" }}>
         Geometric adstock decays from the first day; binomial can peak after a delay (as a catalog does once it is in homes).
         Without saturation a channel's effect grows linearly with spend. The in-home shift moves print spend from the send-out
-        date to the day the catalog arrives.
+        date to the day the catalog arrives. “Cost follows demand” marks a channel billed per click whose spend tracks its
+        own clicks (detected when the daily correlation is 0.9 or more): its ROI is shown as an upper bound and the optimiser
+        holds it at its current spend for the headline recommendation.
       </Typography>
     </Group>
   );

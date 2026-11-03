@@ -53,6 +53,11 @@ export interface PlannerFigureInput {
 
 const shiftMs = (iso: string, ms: number) => new Date(new Date(`${iso}T00:00:00Z`).getTime() + ms).toISOString();
 
+/** Legend label of the plan's band: nominally 90 %, with the coverage it reached on the back-test when known. */
+export function bandLabel(coverage: number | null | undefined): string {
+  return coverage != null ? `Plan: 90 % interval (held ${Math.round(100 * coverage)} % in back-test)` : "Plan: 90 % prediction interval";
+}
+
 /** History before the plan, the plan's forecast with its 90 % prediction interval, scenario lines and daily spend. */
 export function plannerFigure({ history, plan, historyDays, showLastYear, lines, channelNames, compact = false }: PlannerFigureInput) {
   const fcDates = plan.daily.map((r) => r.date);
@@ -111,7 +116,7 @@ export function plannerFigure({ history, plan, historyDays, showLastYear, lines,
     {
       type: "scatter",
       mode: "lines",
-      name: "Plan: 90 % prediction interval",
+      name: bandLabel(plan.backtest_coverage),
       x: fcDates,
       y: plan.daily.map((r) => r.prediction_lo),
       line: { width: 0 },

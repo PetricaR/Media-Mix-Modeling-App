@@ -32,11 +32,11 @@ import {
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+import LogoutIcon from "@mui/icons-material/Logout";
 import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
 import { Link as RouterLink, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { api, getAccessCode, onAuthRequired, setAccessCode } from "../../api/client";
+import { api } from "../../api/client";
 import { isRunActive, useHealth, useRun, useRuns } from "../../api/hooks";
 import { LAYOUT, PALETTE } from "../../theme";
 import { PROFILES, RUN_STATUS_LABEL as STATUS_LABEL, runStatusColor as statusColor } from "../Import/format";
@@ -87,24 +87,10 @@ export const AppShell: React.FC<{
     lastStatus.current = st;
   }, [currentRun, queryClient]);
 
-  const [authDialogOpen, setAuthDialogOpen] = useState(false);
-  const [codeInput, setCodeInput] = useState(getAccessCode());
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  // The access-code button only appears on servers that ask for one (or once a request was refused)
+  // Sign-out only exists on servers that require an access code (the AuthGate handles signing in)
   const { data: health } = useHealth();
-  const [authPrompted, setAuthPrompted] = useState(false);
-  const showAccessCode = Boolean(health?.auth_required || authPrompted || getAccessCode());
-
-  useEffect(
-    () =>
-      onAuthRequired(() => {
-        setCodeInput(getAccessCode());
-        setAuthPrompted(true);
-        setAuthDialogOpen(true);
-      }),
-    []
-  );
 
   useEffect(() => setMobileOpen(false), [location.pathname]);
 
@@ -129,10 +115,13 @@ export const AppShell: React.FC<{
     }
   }, [location.pathname, location.state, navigationType]);
 
-  const handleSaveCode = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAccessCode(codeInput.trim());
-    setAuthDialogOpen(false);
+  const handleSignOut = async () => {
+    try {
+      await api.logout();
+    } finally {
+      queryClient.clear();
+      await queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+    }
   };
 
   const handleCancelRun = async () => {
@@ -401,10 +390,10 @@ export const AppShell: React.FC<{
             )}
           </Stack>
 
-          {showAccessCode && (
-            <Tooltip title="Access code for uploads and computations">
-              <IconButton size="small" aria-label="Set access code" onClick={() => setAuthDialogOpen(true)}>
-                <LockOutlinedIcon fontSize="small" />
+          {health?.auth_required && (
+            <Tooltip title="Sign out">
+              <IconButton size="small" aria-label="Sign out" onClick={() => void handleSignOut()}>
+                <LogoutIcon fontSize="small" />
               </IconButton>
             </Tooltip>
           )}
@@ -497,33 +486,6 @@ export const AppShell: React.FC<{
         </DialogActions>
       </Dialog>
 
-      <Dialog open={authDialogOpen} onClose={() => setAuthDialogOpen(false)} maxWidth="xs" fullWidth>
-        <form onSubmit={handleSaveCode}>
-          <DialogTitle>Access code</DialogTitle>
-          <DialogContent>
-            <DialogContentText sx={{ mb: 2 }}>
-              Viewing runs is open. Uploading workbooks, starting fits and running scenarios need the studio access code
-              when the server has one configured. It is kept for this browser tab only.
-            </DialogContentText>
-            <TextField
-              fullWidth
-              size="small"
-              type="password"
-              label="Access code"
-              autoComplete="current-password"
-              value={codeInput}
-              onChange={(e) => setCodeInput(e.target.value)}
-              autoFocus
-            />
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setAuthDialogOpen(false)}>Close</Button>
-            <Button type="submit" variant="contained">
-              Save
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
     </Box>
   );
 };
