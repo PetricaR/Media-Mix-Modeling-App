@@ -11,7 +11,9 @@ uv sync                  # one .venv: core analysis, Jupyter/dev tools, Google M
 uv run jupyter lab
 ```
 
-See [PLAN.md](PLAN.md) for the project plan.
+See [PLAN.md](PLAN.md) for the project plan and [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) for the full
+documentation: data, EDA insights, feature engineering, the Meridian MMM, the OLS benchmark, ROI and budget
+optimisation, forecasting, and the MMM Studio app.
 
 ## Forecasting a new budget plan
 
