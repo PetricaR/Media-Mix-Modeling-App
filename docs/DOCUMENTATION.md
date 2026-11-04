@@ -103,6 +103,7 @@ Case-Study-Marketing-Data-Science-Tchibo/
 │   ├── DataScienceMarketingUseCase.xlsx   # the raw workbook (read-only)
 │   ├── input/                             # budget plan template + example plan (Jan–Feb 2025)
 │   └── processed/                         # daily_wide.csv, meridian_input.csv (written by notebook 02)
+├── docs/                                  # this documentation + GCP_ML_LIFECYCLE.md (bonus architecture)
 ├── docx/                                  # the case-study brief (PDF)
 ├── notebooks/                             # the case-study analysis, run in order
 │   ├── 01_data_understanding.ipynb        # EDA, correlations, catalog delay and halo, answers Q1–Q3
@@ -1141,6 +1142,12 @@ coverage below nominal, realised commission in the hold-out). All were fixed; se
 ---
 
 ## 16. Google Cloud MLOps mapping
+
+> **Full architecture:** [GCP_ML_LIFECYCLE.md](GCP_ML_LIFECYCLE.md) covers the weekly Vertex AI pipeline, the
+> promotion gate, serving patterns, monitoring thresholds, retraining triggers, CI/CD, security, a compiled KFP
+> pipeline sketch and a roll-out roadmap.
+
+![Google Cloud ML lifecycle](../reports/figures/gcp_ml_lifecycle.png)
 
 Reference architecture: data → features → training → evaluation → registry → serving → monitoring → retraining,
 with three automation levels (0: manual notebooks; 1: continuous-training pipeline; 2: CI/CD for the pipelines).

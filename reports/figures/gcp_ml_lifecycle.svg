@@ -1,0 +1,262 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1130" viewBox="0 0 1800 1130" role="img" aria-labelledby="title desc">
+<title id="title">Google Cloud ML lifecycle for the Tchibo Meridian MMM</title>
+<desc id="desc">Sources flow into Cloud Storage and BigQuery, are validated and turned into features, trained weekly by a Vertex AI pipeline that fits Meridian, evaluated against the 15 % MAE / mean gate, registered, served as batch forecasts and an interactive scenario service, consumed in MMM Studio and Looker Studio, and monitored against actual sales to trigger retraining. Cloud Build deploys the pipeline itself.</desc>
+<defs>
+<marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9AA5B1"/></marker>
+</defs>
+<rect width="1800" height="1130" fill="#FBFAF7"/>
+<text x="30.0" y="44.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="700" fill="#1F2933" text-anchor="start">Google Cloud ML lifecycle · Tchibo daily sales forecast with Google Meridian</text>
+<text x="30.0" y="72.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="500" fill="#52606D" text-anchor="start">Weekly continuous training (MLOps level 1) with CI/CD for the pipeline (level 2) · region europe-west3 · target: MAE / mean ≤ 15 %</text>
+<rect x="30.0" y="96.0" width="1740.0" height="132.0" rx="14" fill="#EEF1F4" stroke="#8B99A8" stroke-width="1.2"/>
+<text x="44.0" y="122.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">CI/CD for the pipeline</text>
+<text x="44.0" y="141.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">MLOps level 2</text>
+<rect x="262.0" y="130.0" width="270.0" height="66" rx="8" fill="#FFFFFF" stroke="#8B99A8" stroke-width="1.2"/>
+<rect x="262.0" y="130.0" width="5" height="66" rx="2" fill="#8B99A8"/>
+<text x="278.0" y="152.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">GitHub</text>
+<text x="278.0" y="172.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Pull request: Python,</text>
+<text x="278.0" y="188.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">SQL, pipeline spec</text>
+<line x1="536.0" y1="163.0" x2="562.0" y2="163.0" stroke="#9AA5B1" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="566.0" y="130.0" width="270.0" height="66" rx="8" fill="#FFFFFF" stroke="#8B99A8" stroke-width="1.2"/>
+<rect x="566.0" y="130.0" width="5" height="66" rx="2" fill="#8B99A8"/>
+<text x="582.0" y="152.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Cloud Build</text>
+<text x="582.0" y="172.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">ruff, golden parity tests,</text>
+<text x="582.0" y="188.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">build images, compile KFP</text>
+<rect x="784.0" y="139.0" width="42" height="18" rx="9" fill="#1E8E3E"/>
+<text x="805.0" y="152.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">live</text>
+<line x1="840.0" y1="163.0" x2="866.0" y2="163.0" stroke="#9AA5B1" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="870.0" y="130.0" width="270.0" height="66" rx="8" fill="#FFFFFF" stroke="#8B99A8" stroke-width="1.2"/>
+<rect x="870.0" y="130.0" width="5" height="66" rx="2" fill="#8B99A8"/>
+<text x="886.0" y="152.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Artifact Registry</text>
+<text x="886.0" y="172.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Worker image +</text>
+<text x="886.0" y="188.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">pipeline templates</text>
+<rect x="1088.0" y="139.0" width="42" height="18" rx="9" fill="#1E8E3E"/>
+<text x="1109.0" y="152.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">live</text>
+<line x1="1144.0" y1="163.0" x2="1170.0" y2="163.0" stroke="#9AA5B1" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="1174.0" y="130.0" width="270.0" height="66" rx="8" fill="#FFFFFF" stroke="#8B99A8" stroke-width="1.2"/>
+<rect x="1174.0" y="130.0" width="5" height="66" rx="2" fill="#8B99A8"/>
+<text x="1190.0" y="152.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Staging pipeline run</text>
+<text x="1190.0" y="172.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Smoke sampling on the</text>
+<text x="1190.0" y="188.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">fixture workbook</text>
+<line x1="1448.0" y1="163.0" x2="1474.0" y2="163.0" stroke="#9AA5B1" stroke-width="2.2" marker-end="url(#head)"/>
+<rect x="1478.0" y="130.0" width="270.0" height="66" rx="8" fill="#FFFFFF" stroke="#8B99A8" stroke-width="1.2"/>
+<rect x="1478.0" y="130.0" width="5" height="66" rx="2" fill="#8B99A8"/>
+<text x="1494.0" y="152.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Promote to production</text>
+<text x="1494.0" y="172.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Tag the template; the next</text>
+<text x="1494.0" y="188.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">scheduled run picks it up</text>
+<rect x="30.0" y="262.0" width="230.0" height="558.0" rx="14" fill="#F1EFEA" stroke="#B8B2A7" stroke-width="1.2"/>
+<text x="44.0" y="288.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">1 · Sources</text>
+<text x="44.0" y="307.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">Data the business owns</text>
+<rect x="292.0" y="262.0" width="250.0" height="558.0" rx="14" fill="#EAF2FB" stroke="#7FA7D6" stroke-width="1.2"/>
+<text x="306.0" y="288.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">2 · Ingest &amp; store</text>
+<text x="306.0" y="307.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">Single source of truth</text>
+<rect x="574.0" y="262.0" width="250.0" height="558.0" rx="14" fill="#EAF6F1" stroke="#76B79C" stroke-width="1.2"/>
+<text x="588.0" y="288.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">3 · Validate &amp; features</text>
+<text x="588.0" y="307.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">Data quality, feature tables</text>
+<rect x="856.0" y="262.0" width="320.0" height="558.0" rx="14" fill="#F2EEFA" stroke="#9C88CF" stroke-width="1.2"/>
+<text x="870.0" y="288.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">4 · Continuous training</text>
+<text x="870.0" y="307.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">Vertex AI Pipelines · weekly</text>
+<rect x="1208.0" y="262.0" width="280.0" height="558.0" rx="14" fill="#FDEFEA" stroke="#D99577" stroke-width="1.2"/>
+<text x="1222.0" y="288.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">5 · Registry &amp; serving</text>
+<text x="1222.0" y="307.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">Batch forecasts + what-if</text>
+<rect x="1520.0" y="262.0" width="250.0" height="558.0" rx="14" fill="#F4F1E6" stroke="#B9A36A" stroke-width="1.2"/>
+<text x="1534.0" y="288.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">6 · Consume &amp; decide</text>
+<text x="1534.0" y="307.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">Marketing steering</text>
+<rect x="42.0" y="322.0" width="206.0" height="50" rx="8" fill="#FFFFFF" stroke="#B8B2A7" stroke-width="1.2"/>
+<rect x="42.0" y="322.0" width="5" height="50" rx="2" fill="#B8B2A7"/>
+<text x="58.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Shop &amp; ERP orders</text>
+<text x="58.0" y="364.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Daily sales by channel</text>
+<rect x="42.0" y="384.0" width="206.0" height="66" rx="8" fill="#FFFFFF" stroke="#B8B2A7" stroke-width="1.2"/>
+<rect x="42.0" y="384.0" width="5" height="66" rx="2" fill="#B8B2A7"/>
+<text x="58.0" y="406.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Ad platforms &amp; print</text>
+<text x="58.0" y="426.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Daily spend, clicks,</text>
+<text x="58.0" y="442.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">impressions, catalog cost</text>
+<rect x="42.0" y="462.0" width="206.0" height="66" rx="8" fill="#FFFFFF" stroke="#B8B2A7" stroke-width="1.2"/>
+<rect x="42.0" y="462.0" width="5" height="66" rx="2" fill="#B8B2A7"/>
+<text x="58.0" y="484.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Budget plans</text>
+<text x="58.0" y="504.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Planned daily spend per</text>
+<text x="58.0" y="520.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">channel (CSV / Sheets)</text>
+<rect x="42.0" y="540.0" width="206.0" height="66" rx="8" fill="#FFFFFF" stroke="#B8B2A7" stroke-width="1.2"/>
+<rect x="42.0" y="540.0" width="5" height="66" rx="2" fill="#B8B2A7"/>
+<text x="58.0" y="562.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Calendar &amp; weather</text>
+<text x="58.0" y="582.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Google Calendar holidays,</text>
+<text x="58.0" y="598.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Open-Meteo forecasts</text>
+<rect x="42.0" y="618.0" width="206.0" height="66" rx="8" fill="#FFFFFF" stroke="#B8B2A7" stroke-width="1.2"/>
+<rect x="42.0" y="618.0" width="5" height="66" rx="2" fill="#B8B2A7"/>
+<text x="58.0" y="640.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Lift &amp; geo experiments</text>
+<text x="58.0" y="660.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Measured incremental ROI</text>
+<text x="58.0" y="676.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">→ calibrated ROI priors</text>
+<rect x="304.0" y="322.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#7FA7D6" stroke-width="1.2"/>
+<rect x="304.0" y="322.0" width="5" height="66" rx="2" fill="#7FA7D6"/>
+<text x="320.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Cloud Storage</text>
+<text x="320.0" y="364.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Landing zone: workbooks,</text>
+<text x="320.0" y="380.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">plans, model artifacts</text>
+<rect x="478.0" y="331.0" width="42" height="18" rx="9" fill="#1E8E3E"/>
+<text x="499.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">live</text>
+<rect x="304.0" y="400.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#7FA7D6" stroke-width="1.2"/>
+<rect x="304.0" y="400.0" width="5" height="66" rx="2" fill="#7FA7D6"/>
+<text x="320.0" y="422.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Cloud Scheduler + Pub/Sub</text>
+<text x="320.0" y="442.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Daily loads and</text>
+<text x="320.0" y="458.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">pipeline triggers</text>
+<rect x="304.0" y="478.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#7FA7D6" stroke-width="1.2"/>
+<rect x="304.0" y="478.0" width="5" height="66" rx="2" fill="#7FA7D6"/>
+<text x="320.0" y="500.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">BigQuery</text>
+<text x="320.0" y="520.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">raw → staging → marts;</text>
+<text x="320.0" y="536.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">actual sales for monitoring</text>
+<rect x="304.0" y="556.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#7FA7D6" stroke-width="1.2"/>
+<rect x="304.0" y="556.0" width="5" height="66" rx="2" fill="#7FA7D6"/>
+<text x="320.0" y="578.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Dataform</text>
+<text x="320.0" y="598.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">SQL: daily wide table,</text>
+<text x="320.0" y="614.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">one row per day</text>
+<rect x="586.0" y="322.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#76B79C" stroke-width="1.2"/>
+<rect x="586.0" y="322.0" width="5" height="66" rx="2" fill="#76B79C"/>
+<text x="602.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Dataplex data quality</text>
+<text x="602.0" y="364.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Gaps, duplicates, negative</text>
+<text x="602.0" y="380.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">costs, freshness</text>
+<rect x="586.0" y="400.0" width="226.0" height="98" rx="8" fill="#FFFFFF" stroke="#76B79C" stroke-width="1.2"/>
+<rect x="586.0" y="400.0" width="5" height="98" rx="2" fill="#76B79C"/>
+<text x="602.0" y="422.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Feature tables</text>
+<text x="602.0" y="442.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">BigQuery / Vertex AI</text>
+<text x="602.0" y="458.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Feature Store: catalog</text>
+<text x="602.0" y="474.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">in-home shift, calendar,</text>
+<text x="602.0" y="490.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Fourier, trend, Affiliate</text>
+<rect x="586.0" y="510.0" width="226.0" height="82" rx="8" fill="#FFFFFF" stroke="#76B79C" stroke-width="1.2"/>
+<rect x="586.0" y="510.0" width="5" height="82" rx="2" fill="#76B79C"/>
+<text x="602.0" y="532.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Experimentation</text>
+<text x="602.0" y="552.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Vertex AI Workbench /</text>
+<text x="602.0" y="568.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Colab Enterprise:</text>
+<text x="602.0" y="584.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">notebooks 01–05</text>
+<rect x="586.0" y="604.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#76B79C" stroke-width="1.2"/>
+<rect x="586.0" y="604.0" width="5" height="66" rx="2" fill="#76B79C"/>
+<text x="602.0" y="626.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Experiments + ML Metadata</text>
+<text x="602.0" y="646.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Params, metrics and</text>
+<text x="602.0" y="662.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">lineage of every run</text>
+<rect x="868.0" y="322.0" width="296.0" height="66" rx="8" fill="#FFFFFF" stroke="#9C88CF" stroke-width="1.2"/>
+<rect x="868.0" y="322.0" width="5" height="66" rx="2" fill="#9C88CF"/>
+<text x="884.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">1  Validate inputs</text>
+<text x="884.0" y="364.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">≥ 365 training days, regime</text>
+<text x="884.0" y="380.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">breaks, every channel present</text>
+<line x1="1016.0" y1="389.0" x2="1016.0" y2="403.0" stroke="#9AA5B1" stroke-width="1.8" marker-end="url(#head)"/>
+<rect x="868.0" y="404.0" width="296.0" height="66" rx="8" fill="#FFFFFF" stroke="#9C88CF" stroke-width="1.2"/>
+<rect x="868.0" y="404.0" width="5" height="66" rx="2" fill="#9C88CF"/>
+<text x="884.0" y="426.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">2  Build Meridian table</text>
+<text x="884.0" y="446.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">KPI, 6 media spend columns,</text>
+<text x="884.0" y="462.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">controls incl. Affiliate</text>
+<line x1="1016.0" y1="471.0" x2="1016.0" y2="485.0" stroke="#9AA5B1" stroke-width="1.8" marker-end="url(#head)"/>
+<rect x="868.0" y="486.0" width="296.0" height="66" rx="8" fill="#FFFFFF" stroke="#9C88CF" stroke-width="1.2"/>
+<rect x="868.0" y="486.0" width="5" height="66" rx="2" fill="#9C88CF"/>
+<text x="884.0" y="508.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">3  Fit Meridian · Custom Job</text>
+<text x="884.0" y="528.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">MMM Studio worker image,</text>
+<text x="884.0" y="544.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">4 chains × 1,000 draws, CPU</text>
+<line x1="1016.0" y1="553.0" x2="1016.0" y2="567.0" stroke="#9AA5B1" stroke-width="1.8" marker-end="url(#head)"/>
+<rect x="868.0" y="568.0" width="296.0" height="66" rx="8" fill="#FFFFFF" stroke="#9C88CF" stroke-width="1.2"/>
+<rect x="868.0" y="568.0" width="5" height="66" rx="2" fill="#9C88CF"/>
+<text x="884.0" y="590.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">4  Evaluate</text>
+<text x="884.0" y="610.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Hold-out + plan-time back-test,</text>
+<text x="884.0" y="626.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">R-hat, ROI plausibility</text>
+<line x1="1016.0" y1="635.0" x2="1016.0" y2="649.0" stroke="#9AA5B1" stroke-width="1.8" marker-end="url(#head)"/>
+<rect x="868.0" y="650.0" width="296.0" height="66" rx="8" fill="#FFF4DC" stroke="#C98A00" stroke-width="2"/>
+<rect x="868.0" y="650.0" width="5" height="66" rx="2" fill="#C98A00"/>
+<text x="884.0" y="672.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">5  Promotion gate</text>
+<text x="884.0" y="692.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">MAE / mean ≤ 15 %, R-hat &lt; 1.2</text>
+<text x="884.0" y="708.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">else keep champion + alert</text>
+<line x1="1016.0" y1="717.0" x2="1016.0" y2="731.0" stroke="#9AA5B1" stroke-width="1.8" marker-end="url(#head)"/>
+<rect x="868.0" y="732.0" width="296.0" height="50" rx="8" fill="#FFFFFF" stroke="#9C88CF" stroke-width="1.2"/>
+<rect x="868.0" y="732.0" width="5" height="50" rx="2" fill="#9C88CF"/>
+<text x="884.0" y="754.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">6  Register challenger</text>
+<text x="884.0" y="774.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Model, metrics, model card</text>
+<rect x="1220.0" y="322.0" width="256.0" height="66" rx="8" fill="#FFFFFF" stroke="#D99577" stroke-width="1.2"/>
+<rect x="1220.0" y="322.0" width="5" height="66" rx="2" fill="#D99577"/>
+<text x="1236.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Vertex AI Model Registry</text>
+<text x="1236.0" y="364.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Versions with aliases:</text>
+<text x="1236.0" y="380.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">champion · challenger</text>
+<rect x="1220.0" y="400.0" width="256.0" height="82" rx="8" fill="#FFFFFF" stroke="#D99577" stroke-width="1.2"/>
+<rect x="1220.0" y="400.0" width="5" height="82" rx="2" fill="#D99577"/>
+<text x="1236.0" y="422.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Batch forecast pipeline</text>
+<text x="1236.0" y="442.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Refit on history + plan</text>
+<text x="1236.0" y="458.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">window → daily forecast,</text>
+<text x="1236.0" y="474.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">90 % intervals</text>
+<rect x="1220.0" y="494.0" width="256.0" height="66" rx="8" fill="#FFFFFF" stroke="#D99577" stroke-width="1.2"/>
+<rect x="1220.0" y="494.0" width="5" height="66" rx="2" fill="#D99577"/>
+<text x="1236.0" y="516.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">BigQuery forecast tables</text>
+<text x="1236.0" y="536.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Forecasts, ROI, response</text>
+<text x="1236.0" y="552.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">curves, run metadata</text>
+<rect x="1220.0" y="572.0" width="256.0" height="66" rx="8" fill="#FFFFFF" stroke="#D99577" stroke-width="1.2"/>
+<rect x="1220.0" y="572.0" width="5" height="66" rx="2" fill="#D99577"/>
+<text x="1236.0" y="594.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Scenario &amp; optimiser API</text>
+<text x="1236.0" y="614.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Cloud Run + Cloud Run Jobs</text>
+<text x="1236.0" y="630.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">(MMM Studio workers)</text>
+<rect x="1424.0" y="581.0" width="42" height="18" rx="9" fill="#1E8E3E"/>
+<text x="1445.0" y="594.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">live</text>
+<rect x="1532.0" y="322.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#B9A36A" stroke-width="1.2"/>
+<rect x="1532.0" y="322.0" width="5" height="66" rx="2" fill="#B9A36A"/>
+<text x="1548.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">MMM Studio</text>
+<text x="1548.0" y="364.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Planner, ROI, optimiser,</text>
+<text x="1548.0" y="380.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Meridian HTML reports</text>
+<rect x="1706.0" y="331.0" width="42" height="18" rx="9" fill="#1E8E3E"/>
+<text x="1727.0" y="344.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">live</text>
+<rect x="1532.0" y="400.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#B9A36A" stroke-width="1.2"/>
+<rect x="1532.0" y="400.0" width="5" height="66" rx="2" fill="#B9A36A"/>
+<text x="1548.0" y="422.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Looker Studio</text>
+<text x="1548.0" y="442.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Dashboards; Meridian</text>
+<text x="1548.0" y="458.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Scenario Planner</text>
+<rect x="1532.0" y="478.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#B9A36A" stroke-width="1.2"/>
+<rect x="1532.0" y="478.0" width="5" height="66" rx="2" fill="#B9A36A"/>
+<text x="1548.0" y="500.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Gemini on Vertex AI</text>
+<text x="1548.0" y="520.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Weekly narrative from</text>
+<text x="1548.0" y="536.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">computed numbers only</text>
+<rect x="1532.0" y="556.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#B9A36A" stroke-width="1.2"/>
+<rect x="1532.0" y="556.0" width="5" height="66" rx="2" fill="#B9A36A"/>
+<text x="1548.0" y="578.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Marketing decisions</text>
+<text x="1548.0" y="598.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Next 2–6 weeks&#x27; budget</text>
+<text x="1548.0" y="614.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">plan → back to sources</text>
+<line x1="263.0" y1="501.0" x2="289.0" y2="501.0" stroke="#9AA5B1" stroke-width="3" marker-end="url(#head)"/>
+<line x1="545.0" y1="501.0" x2="571.0" y2="501.0" stroke="#9AA5B1" stroke-width="3" marker-end="url(#head)"/>
+<line x1="827.0" y1="501.0" x2="853.0" y2="501.0" stroke="#9AA5B1" stroke-width="3" marker-end="url(#head)"/>
+<line x1="1179.0" y1="501.0" x2="1205.0" y2="501.0" stroke="#9AA5B1" stroke-width="3" marker-end="url(#head)"/>
+<line x1="1491.0" y1="501.0" x2="1517.0" y2="501.0" stroke="#9AA5B1" stroke-width="3" marker-end="url(#head)"/>
+<line x1="1016.0" y1="228.0" x2="1016.0" y2="260.0" stroke="#9AA5B1" stroke-width="2.2" stroke-dasharray="6 5" marker-end="url(#head)"/>
+<text x="1026.0" y="250.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#52606D" text-anchor="start">pipeline template + worker image</text>
+<rect x="30.0" y="850.0" width="1740.0" height="148.0" rx="14" fill="#FBEEF0" stroke="#CF8796" stroke-width="1.2"/>
+<text x="44.0" y="876.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#1F2933" text-anchor="start">Monitor &amp; retrain</text>
+<text x="44.0" y="895.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#52606D" text-anchor="start">Closes the loop</text>
+<rect x="304.0" y="890.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#CF8796" stroke-width="1.2"/>
+<rect x="304.0" y="890.0" width="5" height="66" rx="2" fill="#CF8796"/>
+<text x="320.0" y="912.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Cloud Monitoring &amp; Logging</text>
+<text x="320.0" y="932.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Pipeline runs, job failures,</text>
+<text x="320.0" y="948.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">data freshness</text>
+<rect x="586.0" y="890.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#CF8796" stroke-width="1.2"/>
+<rect x="586.0" y="890.0" width="5" height="66" rx="2" fill="#CF8796"/>
+<text x="602.0" y="912.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Input drift</text>
+<text x="602.0" y="932.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Spend mix, CPC / CPM drift,</text>
+<text x="602.0" y="948.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">regime breaks, new channels</text>
+<rect x="868.0" y="890.0" width="296.0" height="66" rx="8" fill="#FFFFFF" stroke="#CF8796" stroke-width="1.2"/>
+<rect x="868.0" y="890.0" width="5" height="66" rx="2" fill="#CF8796"/>
+<text x="884.0" y="912.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Retraining triggers</text>
+<text x="884.0" y="932.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Weekly schedule · alert ·</text>
+<text x="884.0" y="948.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">new lift test → Eventarc</text>
+<rect x="1220.0" y="890.0" width="256.0" height="66" rx="8" fill="#FFFFFF" stroke="#CF8796" stroke-width="1.2"/>
+<rect x="1220.0" y="890.0" width="5" height="66" rx="2" fill="#CF8796"/>
+<text x="1236.0" y="912.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Forecast accuracy vs actuals</text>
+<text x="1236.0" y="932.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Rolling 4-week MAE / mean:</text>
+<text x="1236.0" y="948.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">warn 12 %, breach 15 %</text>
+<rect x="1532.0" y="890.0" width="226.0" height="66" rx="8" fill="#FFFFFF" stroke="#CF8796" stroke-width="1.2"/>
+<rect x="1532.0" y="890.0" width="5" height="66" rx="2" fill="#CF8796"/>
+<text x="1548.0" y="912.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#1F2933" text-anchor="start">Alert policies</text>
+<text x="1548.0" y="932.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">Email / chat to the data</text>
+<text x="1548.0" y="948.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#52606D" text-anchor="start">team; marketing notified</text>
+<line x1="816.0" y1="923.0" x2="864.0" y2="923.0" stroke="#9AA5B1" stroke-width="2.2" marker-end="url(#head)"/>
+<line x1="1216.0" y1="923.0" x2="1168.0" y2="923.0" stroke="#9AA5B1" stroke-width="2.2" marker-end="url(#head)"/>
+<line x1="1480.0" y1="923.0" x2="1528.0" y2="923.0" stroke="#9AA5B1" stroke-width="2.2" marker-end="url(#head)"/>
+<line x1="1348.0" y1="822.0" x2="1348.0" y2="887.0" stroke="#9AA5B1" stroke-width="2.2" stroke-dasharray="6 5" marker-end="url(#head)"/>
+<text x="1358.0" y="839.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#52606D" text-anchor="start">forecasts vs actual sales</text>
+<line x1="1016.0" y1="888.0" x2="1016.0" y2="823.0" stroke="#9AA5B1" stroke-width="2.6" marker-end="url(#head)"/>
+<text x="1026.0" y="839.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#52606D" text-anchor="start">retrain</text>
+<rect x="30" y="1014" width="1740" height="44" rx="10" fill="#E9ECEF" stroke="#ADB5BD"/>
+<text x="46.0" y="1042.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" fill="#1F2933" text-anchor="start">Security &amp; governance (every stage):</text>
+<text x="330.0" y="1042.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#52606D" text-anchor="start">one service account per stage (least privilege) · Secret Manager · VPC Service Controls · CMEK · Dataplex lineage · Cloud Audit Logs · EU data residency</text>
+<rect x="30" y="1077" width="42" height="18" rx="9" fill="#1E8E3E"/>
+<text x="51.0" y="1091.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">live</text>
+<text x="82.0" y="1091.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#52606D" text-anchor="start">already running in the project today (MMM Studio on Cloud Run: Cloud Storage, Artifact Registry, Cloud Build, Cloud Run service + jobs)</text>
+<rect x="1080" y="1077" width="18" height="18" rx="4" fill="#FFF4DC" stroke="#C98A00" stroke-width="2"/>
+<text x="1108.0" y="1091.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#52606D" text-anchor="start">quality gate: a model is promoted only if it meets the brief&#x27;s 15 % target</text>
+</svg>
