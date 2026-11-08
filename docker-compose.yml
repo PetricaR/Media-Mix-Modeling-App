@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mmm
+      POSTGRES_PASSWORD: mmm
+      POSTGRES_DB: mmm_studio
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmm -d mmm_studio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      target: api
+    environment:
+      MMM_DATABASE_URL: postgresql://mmm:mmm@postgres:5432/mmm_studio
+      MMM_STORAGE_BACKEND: local
+      MMM_LOCAL_DATA_DIR: /data
+      MMM_APP_ACCESS_CODE: ${MMM_APP_ACCESS_CODE:-}
+      # Gemini explanations of charts and tables (empty = the Explain buttons are hidden)
+      MMM_GEMINI_API_KEY: ${MMM_GEMINI_API_KEY:-}
+    ports:
+      - "8000:8080"
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      target: worker
+    environment:
+      MMM_DATABASE_URL: postgresql://mmm:mmm@postgres:5432/mmm_studio
+      MMM_STORAGE_BACKEND: local
+      MMM_LOCAL_DATA_DIR: /data
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["worker", "--queue", "analysis"]
+
+  # One worker per queue, so interactive scenarios never wait behind a multi-minute Meridian fit
+  worker-meridian:
+    build:
+      context: ./backend
+      target: worker
+    environment:
+      MMM_DATABASE_URL: postgresql://mmm:mmm@postgres:5432/mmm_studio
+      MMM_STORAGE_BACKEND: local
+      MMM_LOCAL_DATA_DIR: /data
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["worker", "--queue", "meridian"]
+
+  worker-interactive:
+    build:
+      context: ./backend
+      target: worker
+    environment:
+      MMM_DATABASE_URL: postgresql://mmm:mmm@postgres:5432/mmm_studio
+      MMM_STORAGE_BACKEND: local
+      MMM_LOCAL_DATA_DIR: /data
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["worker", "--queue", "interactive"]
+
+  web:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+    ports:
+      - "5173:8080"
+      - "8080:8080"
+    environment:
+      API_ORIGIN: http://api:8080
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  appdata:

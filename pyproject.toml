@@ -1,0 +1,27 @@
+[project]
+name = "mmm-studio-workspace"
+version = "0.1.0"
+description = "MMM Studio — Bayesian Marketing Mix Modelling, Budget Optimisation & Forecasting Web Application"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mmm-studio[worker]",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.sources]
+mmm-studio = { path = "backend", editable = true }
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"

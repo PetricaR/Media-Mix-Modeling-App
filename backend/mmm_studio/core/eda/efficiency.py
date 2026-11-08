@@ -1,0 +1,376 @@
+"""Media efficiency, funnel KPIs, and regime breaks detected from the data: a Social Media spend shift and a change
+of the commission channel's rate (e.g. Aug 2024 and Feb 2024 in the sample workbook)."""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from mmm_studio.charts.builders import heatmap_figure, line_figure, small_multiples_figure
+from mmm_studio.charts.theme import COPPER, NAVY, STATUS_WARNING, TEAL, channel_color
+from mmm_studio.core.eda.stats import social_regime
+from mmm_studio.core.features import complete_years
+from mmm_studio.core.schema import DataRoleConfig
+from mmm_studio.report.facts import detect_level_shift
+from mmm_studio.report.narrative import fmt_eur
+from mmm_studio.report.sections import (
+    CalloutBlock,
+    ChartBlock,
+    KpiItem,
+    KpisBlock,
+    Section,
+    TableBlock,
+    TableColumn,
+)
+
+
+def build_explore_efficiency_section(
+    wide_df: pd.DataFrame,
+    config: DataRoleConfig,
+) -> Section:
+    """Build the `explore_efficiency` section covering CPC/CPM/CTR, funnel links, and structural breaks."""
+    slug_map = config.slug_map()
+    paid_channels = config.paid_channels
+    digital_channels = config.digital_paid_channels
+
+    monthly = complete_years(wide_df).resample("ME").sum()
+    m_labels = [d.strftime("%Y-%m") for d in monthly.index]
+
+    # 1. Monthly CPC, CPM, CTR across digital channels
+    cpc_traces = []
+    cpm_traces = []
+    ctr_traces = []
+    roas_traces = []
+    monthly_kpi: dict[str, dict[str, pd.Series]] = {"CPC (€)": {}, "CPM (€)": {}, "CTR": {}, "Attributed ROAS": {}}
+    for ch in digital_channels:
+        slug = slug_map[ch]
+        c_m = monthly[f"cost_{slug}"]
+        cl_m = monthly[f"clicks_{slug}"]
+        im_m = monthly[f"impr_{slug}"]
+        color = channel_color(ch)
+
+        if (cl_m > 0).any():
+            cpc = np.where(cl_m > 0, c_m / cl_m, np.nan)
+            cpc_traces.append({"type": "scatter", "mode": "lines", "name": ch, "x": m_labels, "y": cpc, "line": {"color": color, "width": 2}})
+        if (im_m > 0).any():
+            cpm = np.where(im_m > 0, (c_m / im_m) * 1000.0, np.nan)
+            cpm_traces.append({"type": "scatter", "mode": "lines", "name": ch, "x": m_labels, "y": cpm, "line": {"color": color, "width": 2}})
+        if (im_m > 0).any() and (cl_m > 0).any():
+            ctr = np.where(im_m > 0, 100.0 * cl_m / im_m, np.nan)
+            ctr_traces.append({"type": "scatter", "mode": "lines", "name": ch, "x": m_labels, "y": ctr, "line": {"color": color, "width": 2}})
+        sa_m = monthly[f"sales_{slug}"]
+        if config.has_channel_sales:
+            roas = np.where(c_m > 0, sa_m / c_m, np.nan)
+            roas_traces.append({"type": "scatter", "mode": "lines", "name": ch, "x": m_labels, "y": roas, "line": {"color": color, "width": 2}})
+        # Monthly KPI ratios; the quarterly table is the quarterly mean of these
+        monthly_kpi["CPC (€)"][ch] = (c_m / cl_m.where(cl_m > 0)).astype(float)
+        monthly_kpi["CPM (€)"][ch] = (c_m / im_m.where(im_m > 0) * 1000.0).astype(float)
+        monthly_kpi["CTR"][ch] = (cl_m / im_m.where(im_m > 0)).astype(float)
+        if config.has_channel_sales:
+            monthly_kpi["Attributed ROAS"][ch] = (sa_m / c_m.where(c_m > 0)).astype(float)
+
+    quarter_rows: list[dict[str, str]] = []
+    quarters: list[str] = []
+    for kpi_name, by_ch in monthly_kpi.items():
+        for ch, s in by_ch.items():
+            q = s.groupby(s.index.to_period("Q")).mean()
+            quarters = quarters or [str(p) for p in q.index]
+            if q.notna().any():
+                fmt = (lambda v: f"{100 * v:.2f}%") if kpi_name == "CTR" else (lambda v: f"{v:.3f}")
+                quarter_rows.append({"series": f"{kpi_name} · {ch}", **{str(p): fmt(v) if pd.notna(v) else "–" for p, v in q.items()}})
+
+    fig_eff = small_multiples_figure(
+        panels=[
+            {"title": "Monthly CPC (€ / Click)", "xaxis_title": "Month", "yaxis_title": "CPC (€)", "traces": cpc_traces},
+            {"title": "Monthly CPM (€ / 1,000 Impressions)", "xaxis_title": "Month", "yaxis_title": "CPM (€)", "traces": cpm_traces},
+            {"title": "Monthly CTR (Clicks / Impressions %)", "xaxis_title": "Month", "yaxis_title": "CTR (%)", "traces": ctr_traces},
+            {"title": "Monthly attributed ROAS (attributed sales / cost)", "xaxis_title": "Month", "yaxis_title": "ROAS", "traces": roas_traces},
+        ],
+        ncols=2,
+        height_per_row=300,
+        title="Monthly Funnel Efficiency KPIs Across Digital Paid Channels (CPC, CPM, CTR)",
+    )
+
+    # 2. Within-channel funnel correlations (Cost->Impr, Cost->Clicks, Clicks->Sales, Cost->Sales)
+    funnel_pairs = ["Cost ↔ Impr", "Cost ↔ Clicks", "Impr ↔ Clicks", "Cost ↔ Ch.Sales", "Clicks ↔ Ch.Sales"]
+    funnel_z = []
+    kpi_rows = []
+    ctr_over_100: list[str] = []
+    no_impressions: list[str] = []
+
+    for ch in paid_channels:
+        slug = slug_map[ch]
+        c = wide_df[f"cost_{slug}"]
+        im = wide_df[f"impr_{slug}"]
+        cl = wide_df[f"clicks_{slug}"]
+        sa = wide_df[f"sales_{slug}"]
+
+        def _corr(a: pd.Series, b: pd.Series) -> float:
+            if (a > 0).sum() < 5 or (b > 0).sum() < 5 or a.std() == 0 or b.std() == 0:
+                return np.nan
+            return float(a.corr(b))
+
+        row_z = [_corr(c, im), _corr(c, cl), _corr(im, cl), _corr(c, sa), _corr(cl, sa)]
+        funnel_z.append(row_z)
+
+        c_sum = float(c.sum())
+        im_sum = float(im.sum())
+        cl_sum = float(cl.sum())
+        sa_sum = float(sa.sum())
+        if im_sum <= 0:
+            no_impressions.append(ch)
+        elif cl_sum > im_sum:
+            ctr_over_100.append(ch)
+        kpi_rows.append(
+            {
+                "channel": ch,
+                "cpm": f"€{(c_sum / im_sum * 1000.0):.2f}" if im_sum > 0 else "—",
+                "cpc": f"€{(c_sum / cl_sum):.2f}" if cl_sum > 0 else "—",
+                "ctr": f"{(100.0 * cl_sum / im_sum):.2f}%" if im_sum > 0 and cl_sum > 0 else "—",
+                "sales_per_click": f"€{(sa_sum / cl_sum):.2f}" if cl_sum > 0 else "—",
+                "corr_cost_clicks": f"{row_z[1]:.2f}" if not np.isnan(row_z[1]) else "—",
+                "corr_cost_sales": f"{row_z[3]:.2f}" if not np.isnan(row_z[3]) else "—",
+            }
+        )
+
+    fig_funnel = heatmap_figure(
+        x=funnel_pairs,
+        y=paid_channels,
+        z=np.asarray(funnel_z),
+        title="Within-Channel Funnel Correlations (Daily Cost → Impressions → Clicks → Attributed Sales)",
+        xaxis_title="Funnel Link",
+        yaxis_title="Paid Channel",
+        colorscale="RdBu_r",
+        zmin=-0.2,
+        zmax=1.0,
+        show_values=True,
+        value_fmt=".2f",
+        height=390,
+    )
+
+    # 3. Social Media structural break, detected from the spend series: Jan–Jul vs Aug–Dec of the break year
+    dates_str = [d.strftime("%Y-%m-%d") for d in wide_df.index]
+    social_shift = detect_level_shift(wide_df["cost_social_media"]) if "cost_social_media" in wide_df else None
+    social_break = social_shift[0] if social_shift else None
+    has_social = social_break is not None and all(
+        c in wide_df for c in ("clicks_social_media", "impr_social_media", "sales_social_media")
+    )
+    regime = social_regime(wide_df, social_break) if has_social else None
+    soc_mult = float(regime.loc["Spend", "ratio"]) if regime is not None else float("nan")
+    soc_cost_pre = float(regime.loc["Spend", "before"]) if regime is not None else float("nan")
+    soc_cost_post = float(regime.loc["Spend", "after"]) if regime is not None else float("nan")
+    soc_sales_mult = float(regime.loc["Attributed sales", "ratio"]) if regime is not None else float("nan")
+    soc_clicks_mult = float(regime.loc["Clicks", "ratio"]) if regime is not None else float("nan")
+    soc_before = f"Jan–{(social_break - pd.Timedelta(days=1)):%b} {social_break.year}" if social_break is not None else ""
+    soc_after = f"{social_break:%b}–Dec {social_break.year}" if social_break is not None else ""
+
+    fig_social = line_figure(
+        x=dates_str,
+        series=[
+            {
+                "name": "Social Media Daily Spend (€)",
+                "y": wide_df.get("cost_social_media", pd.Series(0.0, index=wide_df.index)).to_numpy(),
+                "color": COPPER,
+                "width": 2.0,
+            },
+            {
+                "name": "Social Media Attributed Sales (7d MA, €)",
+                "y": wide_df.get("sales_social_media", pd.Series(0.0, index=wide_df.index)).rolling(7, min_periods=1).mean().to_numpy(),
+                "color": NAVY,
+                "width": 2.2,
+            },
+        ],
+        title=None,
+        xaxis_title="Date",
+        yaxis_title="€ / Day",
+        vlines=(
+            [{"x": f"{social_break:%Y-%m-%d}", "color": STATUS_WARNING, "width": 2, "dash": "dash", "label": f"{social_break:%Y-%m-%d} Regime Shift"}]
+            if social_break is not None
+            else []
+        ),
+        height=360,
+    )
+
+    # 4. Commission rate shift of the commission channel (e.g. Affiliate), detected from its rate
+    commission = next((c for c in config.channels if c.enabled and c.role == "commission"), None)
+    comm_slug = commission.slug if commission is not None else "affiliate"
+    comm_name = commission.name if commission is not None else "Affiliate"
+    has_comm = f"cost_{comm_slug}" in wide_df and f"sales_{comm_slug}" in wide_df
+    aff_cost = wide_df.get(f"cost_{comm_slug}", pd.Series(0.0, index=wide_df.index))
+    aff_sales = wide_df.get(f"sales_{comm_slug}", pd.Series(1.0, index=wide_df.index))
+    comm_rate = np.where(aff_sales > 0, 100.0 * aff_cost / aff_sales, np.nan)
+    aff_shift = detect_level_shift(pd.Series(comm_rate, index=wide_df.index)) if has_comm else None
+    aff_break = aff_shift[0] if aff_shift else None
+    # Commission as a share of sales over each period (ratio of sums, robust to low-sales days)
+    if aff_break is not None:
+        pre_mask, post_mask = wide_df.index < aff_break, wide_df.index >= aff_break
+        comm_pre = 100.0 * float(aff_cost[pre_mask].sum()) / max(float(aff_sales[pre_mask].sum()), 1.0)
+        comm_post = 100.0 * float(aff_cost[post_mask].sum()) / max(float(aff_sales[post_mask].sum()), 1.0)
+    else:
+        comm_pre = comm_post = 100.0 * float(aff_cost.sum()) / max(float(aff_sales.sum()), 1.0)
+    comm_word = "step-up" if comm_post > comm_pre else "step-down"
+    r_aff = float(aff_cost.corr(aff_sales)) if has_comm and aff_cost.std() > 0 else float("nan")
+    r_sea = float(wide_df["cost_sea"].corr(wide_df["clicks_sea"])) if "cost_sea" in wide_df and "clicks_sea" in wide_df else float("nan")
+
+    fig_aff = line_figure(
+        x=dates_str,
+        series=[
+            {"name": "Daily Effective Commission % (Cost / Sales)", "y": comm_rate, "color": TEAL, "width": 1.6},
+            {
+                "name": "7-Day Rolling Commission %",
+                "y": pd.Series(comm_rate, index=wide_df.index).rolling(7, min_periods=1).mean().to_numpy(),
+                "color": NAVY,
+                "width": 2.4,
+            },
+        ],
+        title=None,
+        xaxis_title="Date",
+        yaxis_title="Commission Rate (%)",
+        vlines=(
+            [{"x": f"{aff_break:%Y-%m-%d}", "color": COPPER, "width": 2, "dash": "dash", "label": f"{aff_break:%Y-%m-%d} Commission Shift"}]
+            if aff_break is not None
+            else []
+        ),
+        height=350,
+    )
+
+    kpis: list[KpiItem] = []
+    breaks: list[str] = []
+    if regime is not None:
+        kpis.append(KpiItem(label=f"Social Media regime ({social_break:%b %Y})", value=f"×{soc_mult:.1f} spend", delta=f"clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f}", status="warn"))
+        breaks.append(
+            f"**Social Media ({social_break:%d %b %Y}):** daily spend ×{soc_mult:.1f} ({fmt_eur(soc_cost_pre)} → {fmt_eur(soc_cost_post)}), "
+            f"clicks ×{soc_clicks_mult:.1f} and attributed sales ×{soc_sales_mult:.1f} ({soc_after} vs {soc_before}). This looks like a change of "
+            "campaign type or tracking set-up, not a gradual gain: a single Social coefficient across the period is mis-specified."
+        )
+    if has_comm:
+        if aff_break is not None:
+            kpis.append(KpiItem(label=f"{comm_name} commission", value=f"{comm_pre:.1f}% → {comm_post:.1f}%", delta=f"of own sales; {comm_word} in {aff_break:%b %Y}", status="warn"))
+            breaks.append(
+                f"**{comm_name} ({aff_break:%b %Y}):** commission {comm_pre:.1f}% → {comm_post:.1f}% of its own sales. Because the "
+                f"cost is a commission on realised sales (r = {r_aff:.2f}), its high correlation with total sales is largely reverse causality."
+            )
+        else:
+            kpis.append(KpiItem(label=f"{comm_name} commission", value=f"{comm_pre:.1f}%", delta="of own sales; no rate change detected"))
+        kpis.append(KpiItem(label=f"{comm_name} r(cost, own sales)", value=f"{r_aff:.2f}", delta="Cost follows sales (commission)", status="warn"))
+    if r_sea == r_sea:
+        kpis.append(KpiItem(label="SEA r(cost, clicks)", value=f"{r_sea:.2f}", delta="Billed per click"))
+
+    return Section(
+        id="explore_efficiency",
+        title="Media efficiency and regime breaks",
+        subtitle="Unit-cost dynamics (CPC, CPM, CTR), within-channel funnel correlations, and the regime shifts found in the data.",
+        blocks=[
+            *([KpisBlock(items=kpis)] if kpis else []),
+            *(
+                [
+                    CalloutBlock(
+                        tone="warn",
+                        title=f"{len(breaks)} structural break{'s' if len(breaks) != 1 else ''} identified",
+                        body="\n".join(f"{i}. {b}" for i, b in enumerate(breaks, start=1)),
+                    )
+                ]
+                if breaks
+                else []
+            ),
+            ChartBlock(
+                id="efficiency_kpis",
+                title="Monthly Unit-Cost & Funnel Efficiency KPIs (CPC, CPM, CTR, ROAS)",
+                subtitle=f"Cost per click, cost per mille, click-through rate and attributed ROAS across the {len(digital_channels)} digital channels.",
+                figure=fig_eff,
+            ),
+            TableBlock(
+                id="efficiency_quarterly",
+                title="Quarterly mean of the monthly KPI",
+                columns=[
+                    TableColumn(key="series", label="KPI · channel"),
+                    *[TableColumn(key=q, label=q, align="right") for q in quarters],
+                ],
+                rows=quarter_rows,
+            ),
+            ChartBlock(
+                id="funnel_correlations",
+                title="Within-Channel Funnel Correlation Matrix",
+                subtitle="Daily Pearson correlation across Cost → Impressions → Clicks → Channel Sales.",
+                figure=fig_funnel,
+            ),
+            *(
+                [
+                    ChartBlock(
+                        id="social_regime_change",
+                        title=f"Social Media Regime Shift on {social_break:%Y-%m-%d}",
+                        subtitle=f"Daily spend ×{soc_mult:.1f}, clicks ×{soc_clicks_mult:.1f}, attributed sales ×{soc_sales_mult:.1f} ({soc_after} vs {soc_before}).",
+                        figure=fig_social,
+                    )
+                ]
+                if regime is not None
+                else []
+            ),
+            *(
+                [
+                    TableBlock(
+                        id="social_regime_table",
+                        title=f"Social Media before and after {social_break:%d %b %Y}",
+                        columns=[
+                            TableColumn(key="metric", label="Daily mean"),
+                            TableColumn(key="before", label=soc_before, align="right"),
+                            TableColumn(key="after", label=soc_after, align="right"),
+                            TableColumn(key="ratio", label="Ratio", align="right"),
+                        ],
+                        rows=[
+                            {
+                                "metric": m,
+                                "before": f"{100 * regime.loc[m, 'before']:.2f}%" if m == "CTR" else (f"{regime.loc[m, 'before']:,.0f}" if m == "Clicks" else fmt_eur(float(regime.loc[m, 'before']))),
+                                "after": f"{100 * regime.loc[m, 'after']:.2f}%" if m == "CTR" else (f"{regime.loc[m, 'after']:,.0f}" if m == "Clicks" else fmt_eur(float(regime.loc[m, 'after']))),
+                                "ratio": f"×{regime.loc[m, 'ratio']:.1f}",
+                            }
+                            for m in regime.index
+                        ],
+                    )
+                ]
+                if regime is not None
+                else []
+            ),
+            *(
+                [
+                    ChartBlock(
+                        id="affiliate_commission",
+                        title=f"{comm_name} Effective Commission Rate (`cost_{comm_slug} / sales_{comm_slug}`)",
+                        subtitle=(
+                            f"Commission {comm_pre:.1f}% of own sales before {aff_break:%b %Y}, {comm_post:.1f}% after."
+                            if aff_break is not None
+                            else f"Commission {comm_pre:.1f}% of own sales over the whole period."
+                        ),
+                        figure=fig_aff,
+                    )
+                ]
+                if has_comm
+                else []
+            ),
+            TableBlock(
+                id="efficiency_summary_table",
+                title="Paid Channel Funnel KPI & Correlation Summary",
+                columns=[
+                    TableColumn(key="channel", label="Paid Channel"),
+                    TableColumn(key="cpm", label="Mean CPM", align="right"),
+                    TableColumn(key="cpc", label="Mean CPC", align="right"),
+                    TableColumn(key="ctr", label="Mean CTR", align="right"),
+                    TableColumn(key="sales_per_click", label="Sales / Click", align="right"),
+                    TableColumn(key="corr_cost_clicks", label="r(Cost, Clicks)", align="right"),
+                    TableColumn(key="corr_cost_sales", label="r(Cost, Ch.Sales)", align="right"),
+                ],
+                rows=kpi_rows,
+                caption=" ".join(
+                    part
+                    for part in (
+                        f"{', '.join(ctr_over_100)}: more clicks than impressions (CTR > 100 %), so CPM and CTR are not meaningful."
+                        if ctr_over_100
+                        else "",
+                        f"{', '.join(no_impressions)}: no impressions recorded." if no_impressions else "",
+                    )
+                    if part
+                )
+                or None,
+            ),
+        ],
+    )

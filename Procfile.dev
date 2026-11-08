@@ -1,0 +1,5 @@
+api: cd backend && uv run --project .. uvicorn mmm_studio.main:app --reload --port 8000
+worker-analysis: cd backend && uv run --project .. mmm-studio worker --queue analysis
+worker-meridian: cd backend && uv run --project .. mmm-studio worker --queue meridian
+worker-interactive: cd backend && uv run --project .. mmm-studio worker --queue interactive
+web: cd frontend && npm run dev -- --port 5173

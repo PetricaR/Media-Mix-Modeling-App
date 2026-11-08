@@ -1,0 +1,463 @@
+date,event_id,name,kind,regions,source
+2021-01-01,20210101_mvubcr3h1tqeevvua40afl5uts,New Year's Day,public,,ical
+2021-01-06,20210106_9uceps9c3gtlpjdilp6hn0ljd0,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2021-02-14,20210214_tkl6373ddjebvi2aahuelu8c4g,Valentine's Day,observance,,ical
+2021-02-15,20210215_3dfth4pciriu7oskcqfosqq3is,Shrove Monday,observance,,ical
+2021-02-16,20210216_eaa77ecm4bs8hlfm8v5ktj8tlg,Carnival Tuesday,observance,,ical
+2021-02-17,20210217_shpj0a136v75k2m3fpnmleqj94,Carnival / Ash Wednesday,observance,,ical
+2021-03-08,20210308_jrleio8s0mobieaqhap6r1dsgo,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2021-03-28,20210328_mccu60d3imp6npjs185sqtrbk0,Daylight Saving Time starts,observance,,ical
+2021-03-28,20210328_7d6eblahsd2jnj96tof4og4qjk,Palm Sunday,observance,,ical
+2021-04-01,20210401_i2h2nhb7s060g4amc0gkn8bktk,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2021-04-02,20210402_lfe27pnvjtoefkp1itaks3ifnc,Good Friday,public,,ical
+2021-04-03,20210403_ffhur2v821upm4e43j01s8a37c,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2021-04-04,20210404_1huhljgos0kcn031h88l8vsdv4,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2021-04-05,20210405_4d6q7veh0h9tursc7ubf0948qg,Easter Monday,public,,ical
+2021-05-01,20210501_k7jbqjfa47aktoo8b6fj42db58,May Day,public,,ical
+2021-05-08,20210508_deuhmhpr0r0qdgs1ehe4ktk9u4,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2021-05-09,20210509_1lkdvuj56gikh53b24fcv446fs,Mother’s Day,observance,,ical
+2021-05-13,20210513_19b0mjra3apskkr53nn1mi3n7o,Ascension Day,public,,ical
+2021-05-13,20210513_94svn3anj38d3vtt3937g358a4,Father’s Day,observance,,ical
+2021-05-23,20210523_dkigkkgdld3lj1pp1q0ue6nrf8,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2021-05-24,20210524_ek5dp9nn9gp6h1u8qvts576i4k,Whit Monday,public,,ical
+2021-06-03,20210603_7bht3j5psrlghfcrohttuac2l4,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2021-08-15,20210815_185483fe8lmi6i5nova4kebl74,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2021-09-20,20210920_fbiri2sbg24t31g88gn1iufir0,German World Children's Day (Thuringia),regional,Thuringia,ical
+2021-10-03,20211003_1hdjtqgpbfmu9201r2p7h04i9c,Day of German Unity,public,,ical
+2021-10-31,20211031_uo66lefa4t5sbiu241mjh7vsv0,Daylight Saving Time ends,observance,,ical
+2021-10-31,20211031_julutugmgq1ujnh3211sl3blt4,Halloween,observance,,ical
+2021-10-31,20211031_bug4466dk6k7orrumqfq75i2d0,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2021-11-01,20211101_6qkkd9ucsl92jha9rd5odil4t0,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2021-11-11,20211111_e4f8brl1q751l40g1p690ecc64,St. Martin's Day,observance,,ical
+2021-11-14,20211114_0ckuh4b6i39ij0fss1k8ardno8,National Day of Mourning,observance,,ical
+2021-11-17,20211117_apqjleqr2oc4rmkv1maq7s81o0,Repentance Day (Saxony),regional,Saxony,ical
+2021-11-21,20211121_hr2gm8m30bqmrt1951cfogr7jg,Sunday of the Dead,observance,,ical
+2021-11-28,20211128_3f46u5i22gcobjn6uekvckmvl8,First Advent Sunday,observance,,ical
+2021-12-05,20211205_gu2bqsifo72tqlkiimd4jrec7c,Second Advent Sunday,observance,,ical
+2021-12-06,20211206_puonii5n2gprs8lfqe2rrqmmbk,Saint Nicholas Day,observance,,ical
+2021-12-12,20211212_4uvllmfn6hiofprp5ke4dmj84k,Third Advent Sunday,observance,,ical
+2021-12-19,20211219_pvghbj6629q18gp5jr6luusmjo,Fourth Advent Sunday,observance,,ical
+2021-12-24,20211224_o3vqp2lt4gcil020oph3gvdnag,Christmas Eve,half_day,,ical
+2021-12-25,20211225_l3r4phtjperlflgbs5rc4b1hi8,Christmas Day,public,,ical
+2021-12-26,20211226_bqb2t6p60uebd7nd9lm9kcsv1k,Boxing Day,public,,ical
+2021-12-31,20211231_sbijgu9voa2viu1d5912mqtufg,New Year's Eve,half_day,,ical
+2022-01-01,20220101_o24qkasc76vfjtt47v32lgkdmk,New Year's Day,public,,ical
+2022-01-06,20220106_9hmlphu8llg79kc1tmksaqp1go,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2022-02-14,20220214_84brin6mplbkjacvlu4liimp44,Valentine's Day,observance,,ical
+2022-02-28,20220228_mqo3ogpr44a8rp774d9jo2ftno,Shrove Monday,observance,,ical
+2022-03-01,20220301_9tke6v3bit1j4ttqpie9fnj9gk,Carnival Tuesday,observance,,ical
+2022-03-02,20220302_3197j2k0c4surmibihg0tnbjf8,Carnival / Ash Wednesday,observance,,ical
+2022-03-08,20220308_1lou51v0qb2a64svc1peochuk8,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2022-03-27,20220327_1k5md336aqu66smin0cgog3sjo,Daylight Saving Time starts,observance,,ical
+2022-04-10,20220410_30q240q3kmlc6ii4gnf7bauuqs,Palm Sunday,observance,,ical
+2022-04-14,20220414_ot20nt3k0ongksgbkm3688es7g,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2022-04-15,20220415_jrmr3gjbf3lvso3ee3mrphpq0g,Good Friday,public,,ical
+2022-04-16,20220416_gsejbl3os0gt1iq0oqeiq5quqc,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2022-04-17,20220417_4uvmthnvqs859k65c5fv913vqs,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2022-04-18,20220418_4llu3nvouo2qc8q2ksklol4300,Easter Monday,public,,ical
+2022-05-01,20220501_74qg49sa08a7rpuamat8qb7fu4,May Day,public,,ical
+2022-05-08,20220508_4oc4r9091dt5c5ojkjdr0ls7gs,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2022-05-08,20220508_qkpgddkb9i37bet3npbc4bplag,Mother’s Day,observance,,ical
+2022-05-26,20220526_64ilpb5svdu7ubja8kt4sp0o5c,Ascension Day,public,,ical
+2022-05-26,20220526_9ls4576v3i1d39fu0ujb0fv9vg,Father’s Day,observance,,ical
+2022-06-05,20220605_kms362867681q28v4js4cpsumg,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2022-06-06,20220606_poc3h7p9khp7vsl7lcsb0lop7c,Whit Monday,public,,ical
+2022-06-16,20220616_duemc2es3q728gvup9ronpvkbg,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2022-08-15,20220815_6q2jtm6lea6843s83ipnqa61o0,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2022-09-20,20220920_3raefeqvtc3dve4b1frcgqhh8o,German World Children's Day (Thuringia),regional,Thuringia,ical
+2022-10-03,20221003_b2qrbcv4fis6kj8nrlpskfdqts,Day of German Unity,public,,ical
+2022-10-30,20221030_6nsburf4uf2c64o6jl065nv1to,Daylight Saving Time ends,observance,,ical
+2022-10-31,20221031_83jn2omord67k4t75c3lgr1qq8,Halloween,observance,,ical
+2022-10-31,20221031_ubk4jmjs46d9km5k9fr16om0uc,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2022-11-01,20221101_nqgk302vi56reh8kc8usnks76c,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2022-11-11,20221111_kd3bhlq6fbsp3fc0272o4dg1eo,St. Martin's Day,observance,,ical
+2022-11-13,20221113_ifcjs3j504pue71bqcmimp4vc8,National Day of Mourning,observance,,ical
+2022-11-16,20221116_0tev6vn9uineef2ibendenon54,Repentance Day (Saxony),regional,Saxony,ical
+2022-11-20,20221120_t0pdnqb8tkgiicm5sibd82teho,Sunday of the Dead,observance,,ical
+2022-11-27,20221127_d39h8io2calhaph4iq9n458tos,First Advent Sunday,observance,,ical
+2022-12-04,20221204_9fnn9nkuih2o97qsq3gm458kdc,Second Advent Sunday,observance,,ical
+2022-12-06,20221206_3h5l48mkrr5rm6bdvpeeoa6je4,Saint Nicholas Day,observance,,ical
+2022-12-11,20221211_pc3t91hkl0om25v7c65djoo8i0,Third Advent Sunday,observance,,ical
+2022-12-18,20221218_5jvrn38kukm9760gqifrrrpv2k,Fourth Advent Sunday,observance,,ical
+2022-12-24,20221224_2ujs8f12e15b6vpgfk2qsnn5rk,Christmas Eve,half_day,,ical
+2022-12-25,20221225_dfmls7lt4bn4ei7s13vi98gdtg,Christmas Day,public,,ical
+2022-12-26,20221226_813gmihafd1iav7ms1e2010tgk,Boxing Day,public,,ical
+2022-12-31,20221231_j7s51snjompuq3j5ubqe62dl64,New Year's Eve,half_day,,ical
+2023-01-01,20230101_h1nq606co8pv94oslgdshejmkk,New Year's Day,public,,ical
+2023-01-06,20230106_nfl76be4skc01l1ftmd8jqu62o,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2023-02-14,20230214_vmb89jbc4l4cjdgnm231fv84bs,Valentine's Day,observance,,ical
+2023-02-20,20230220_uh2aq21v20habgklntp2hnjvig,Shrove Monday,observance,,ical
+2023-02-21,20230221_8vl08fqakane1485erqqa60dto,Carnival Tuesday,observance,,ical
+2023-02-22,20230222_4raf5obhcjocqsgi0qrc88k4e4,Carnival / Ash Wednesday,observance,,ical
+2023-03-08,20230308_er2a2dg3hmrvjg9kfufmvk8as0,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2023-03-26,20230326_uscd695re2pfdvbbkq3en6luic,Daylight Saving Time starts,observance,,ical
+2023-04-02,20230402_p8r19knr86qbq5s9dil5arh930,Palm Sunday,observance,,ical
+2023-04-06,20230406_9gv6mp2ejvdp4jk8dug41bl6fs,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2023-04-07,20230407_409idu2t3kp48gc09asgsdti7c,Good Friday,public,,ical
+2023-04-08,20230408_76m6dhb0japi7ag40j7gt70514,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2023-04-09,20230409_fmo0od97mro8b4shntdoqn7u74,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2023-04-10,20230410_fgmp6phm1t1gk2191u790er60o,Easter Monday,public,,ical
+2023-05-01,20230501_fi5je9uqngusk401s73sr092dg,May Day,public,,ical
+2023-05-08,20230508_th09pofihot4uqh0jalsed9a3c,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2023-05-14,20230514_flkmjtr4sg9p0dob2b8526fe04,Mother’s Day,observance,,ical
+2023-05-18,20230518_igt23cop3arlt7lhqqg76h0lqk,Ascension Day,public,,ical
+2023-05-18,20230518_q7cu8acl6kdilbkap20un5hdm0,Father’s Day,observance,,ical
+2023-05-28,20230528_gc92jprh7d3bva10dlmuep375o,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2023-05-29,20230529_f0tu5kk6a05bi8togpsuho5p0s,Whit Monday,public,,ical
+2023-06-08,20230608_4hrrk6o1bu1pl2ciurbndqu5jo,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2023-08-15,20230815_69o2ff4l2d39ocgrvk7s815tk0,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2023-09-20,20230920_3t8ed1ov4l5ndpj5r8iru8kug0,German World Children's Day (Thuringia),regional,Thuringia,ical
+2023-10-03,20231003_fgo3e08ms79rf3smgimd68nkek,Day of German Unity,public,,ical
+2023-10-29,20231029_uktcd0dvbm5u24aqhr2kqiqcds,Daylight Saving Time ends,observance,,ical
+2023-10-31,20231031_ohijlp33du32f2vt4n9jeulsok,Halloween,observance,,ical
+2023-10-31,20231031_91rho0u0iftvd7n3ejofl5bmao,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2023-11-01,20231101_99d56bjtndoh0rjjssj32u79g4,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2023-11-11,20231111_475j3qgnuq6pk9potcgnc0jbls,St. Martin's Day,observance,,ical
+2023-11-19,20231119_a3bt5r4kmusothha4rg7pa05es,National Day of Mourning,observance,,ical
+2023-11-22,20231122_040ivjf0ghp7fkt6l154feh4cs,Repentance Day (Saxony),regional,Saxony,ical
+2023-11-26,20231126_72pksq923ouqc1cfos9oq34bf8,Sunday of the Dead,observance,,ical
+2023-12-03,20231203_gmkvi8n4r5f64olchnb35jt048,First Advent Sunday,observance,,ical
+2023-12-06,20231206_qm5dlb1a30qt6jk6t6qdp4nrn4,Saint Nicholas Day,observance,,ical
+2023-12-10,20231210_tmgg5pgo4unset4e5mttvvo5i8,Second Advent Sunday,observance,,ical
+2023-12-17,20231217_qb5j3n83smnp2hgt3er3v0c8eo,Third Advent Sunday,observance,,ical
+2023-12-24,20231224_b1nc5tfjj4q1j4sr8o6ftlj62s,Christmas Eve,half_day,,ical
+2023-12-24,20231224_7dmvtitrns1ktm39pvbl0tj67o,Fourth Advent Sunday,observance,,ical
+2023-12-25,20231225_ko03jtv39r8pr9rhka94o9pf3g,Christmas Day,public,,ical
+2023-12-26,20231226_lsna3bcu8goq96hr1gk7gkiphk,Boxing Day,public,,ical
+2023-12-31,20231231_7srtjimrmmda9eon5olf65mfok,New Year's Eve,half_day,,ical
+2024-01-01,20240101_ceb35td3v7qu767tgmteeuiflo,New Year's Day,public,,ical
+2024-01-06,20240106_jigadl3llqisfkfpreqbou7pko,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2024-02-12,20240212_vd8m4330rhq70smd4udslq5a98,Shrove Monday,observance,,ical
+2024-02-13,20240213_j5en9pkic1st1u1cl2cmb7rmpg,Carnival Tuesday,observance,,ical
+2024-02-14,20240214_bchtc2e7ii8469mmiv0egan864,Carnival / Ash Wednesday,observance,,ical
+2024-02-14,20240214_jbg1j289d1gjsr3bofhrk81dp0,Valentine's Day,observance,,ical
+2024-03-08,20240308_44smarmakiuql19bsfolrn44h4,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2024-03-24,20240324_vkg0k7pkf937qk1cs7o0pnpvrc,Palm Sunday,observance,,ical
+2024-03-28,20240328_tqud4beqgs1cokirdl106u8988,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2024-03-29,20240329_86h98gf94q100d2sie8q5ehico,Good Friday,public,,ical
+2024-03-30,20240330_7d670tsr2m1pf14rkpnv3vu5m8,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2024-03-31,20240331_r9qfu5gmrpvngahim7uj57ims8,Daylight Saving Time starts,observance,,ical
+2024-03-31,20240331_faadah818pgjgp7jfqlp1rk650,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2024-04-01,20240401_fp44l96di68500sori2jl6erco,Easter Monday,public,,ical
+2024-05-01,20240501_0nrpec6ad6fodtb3uf9i62v9qk,May Day,public,,ical
+2024-05-08,20240508_5b1ood2asjb7f1klbei88qmjm8,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2024-05-09,20240509_e8guk43449k51uce3lar783eq0,Ascension Day,public,,ical
+2024-05-09,20240509_6c3uet6n5d61905l9kgr66ci5s,Father’s Day,observance,,ical
+2024-05-12,20240512_kc7en1t0mspqm1je9hrr8f4fvs,Mother’s Day,observance,,ical
+2024-05-19,20240519_9vh5copamnfs57lqtjjh6hoc4k,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2024-05-20,20240520_e3hvkgcolf2qrgeoaqaghdmldk,Whit Monday,public,,ical
+2024-05-30,20240530_hlpc6pgb78lsu7vcbelpbhijt8,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2024-08-15,20240815_cvillu3kekt4gomt1begfhjf3c,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2024-09-20,20240920_4e3sc81lkg16id45lg3rc79a40,German World Children's Day (Thuringia),regional,Thuringia,ical
+2024-10-03,20241003_hg7urhuobmtojs4gapipfl4hac,Day of German Unity,public,,ical
+2024-10-27,20241027_u46h02unem6legrf5o7hdf5dn4,Daylight Saving Time ends,observance,,ical
+2024-10-31,20241031_fh4es6128cbph2l3g9qraad090,Halloween,observance,,ical
+2024-10-31,20241031_fd6522utmhlo5c5slippghpcjs,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2024-11-01,20241101_tjtnjnro9dfshfrqejl8hmd7vg,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2024-11-11,20241111_gv31es6kemvq8lbgpag85dbvn4,St. Martin's Day,observance,,ical
+2024-11-17,20241117_nt1r5pe6slh06tn9vbeaflscc4,National Day of Mourning,observance,,ical
+2024-11-20,20241120_suflu55bf1denrhmq320qvjlv4,Repentance Day (Saxony),regional,Saxony,ical
+2024-11-24,20241124_ma098tp37baek3s4h0v5cnotok,Sunday of the Dead,observance,,ical
+2024-12-01,20241201_f4t2tldatl8m1lalfddgktvavo,First Advent Sunday,observance,,ical
+2024-12-06,20241206_7585ifb0ubq8lkgeeoo7iv5odk,Saint Nicholas Day,observance,,ical
+2024-12-08,20241208_te1l711d52qo7dp8q8rlso64m4,Second Advent Sunday,observance,,ical
+2024-12-15,20241215_ohf9i1c8pl4e9hbufdie90poqc,Third Advent Sunday,observance,,ical
+2024-12-22,20241222_a3ghvtoso4g1lpdf0gqmuuhgrg,Fourth Advent Sunday,observance,,ical
+2024-12-24,20241224_8rgbl99lt5vtc4d43i6rhsgs1s,Christmas Eve,half_day,,ical
+2024-12-25,20241225_648s47bi27ntpe25dqulju6f4c,Christmas Day,public,,ical
+2024-12-26,20241226_cl64e60fh3boe4mqmpft9sigqk,Boxing Day,public,,ical
+2024-12-31,20241231_23pdd7qk512sets96hrgg5moqc,New Year's Eve,half_day,,ical
+2025-01-01,20250101_srgtnfl2jbnlo6evrsvlotkmo0,New Year's Day,public,,ical
+2025-01-06,20250106_lok345gar8c6i73djrq243rlk0,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2025-02-14,20250214_53i5qv2lrsvot0u2jb4hh63gh0,Valentine's Day,observance,,ical
+2025-03-03,20250303_gb83u8ge71tufl72its1div854,Shrove Monday,observance,,ical
+2025-03-04,20250304_ep5upjg7hanmsa78vhs0fpemf8,Carnival Tuesday,observance,,ical
+2025-03-05,20250305_nhqeimu9nhgea4hqingjk2698k,Carnival / Ash Wednesday,observance,,ical
+2025-03-08,20250308_ffi6ol8v9mkf8bk9jr9qqcgdsc,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2025-03-30,20250330_me3afs67jajsphc0dd2dn9rug8,Daylight Saving Time starts,observance,,ical
+2025-04-13,20250413_fuu1nvsds0ilqu1v06cr3t38p8,Palm Sunday,observance,,ical
+2025-04-17,20250417_309ahpmphkdo0nvc0579b85pbc,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2025-04-18,20250418_50f06f3bfau0t2ul0rovhuh1g4,Good Friday,public,,ical
+2025-04-19,20250419_rta8l49eb5i2pu9ucaqq3irfmk,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2025-04-20,20250420_98g43an5jd0tp39ka3hnooq014,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2025-04-21,20250421_1254g2i3co4l8p1in8dtv0lnv4,Easter Monday,public,,ical
+2025-05-01,20250501_rqvib9kk16lq39e3ld2f7astgc,May Day,public,,ical
+2025-05-08,20250508_0fhtu9dhjr3usns0mk0iiapn8k,Anniversary of the End of World War II,observance,"Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2025-05-11,20250511_nkd4alhdpn5mkifeier6fo8d4k,Mother’s Day,observance,,ical
+2025-05-29,20250529_tlb1pnejvg8q1lv7a6bkoa9bv0,Ascension Day,public,,ical
+2025-05-29,20250529_thtu9mg366eq27d7lsb3032bjs,Father’s Day,observance,,ical
+2025-06-08,20250608_hq9rkop7cihfqaagmbs72gbrac,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2025-06-09,20250609_13hejh5usslr8fq9mroo6rm4ms,Whit Monday,public,,ical
+2025-06-19,20250619_m08viui5pr2jpgufr2q4cvg6ro,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2025-08-15,20250815_0d38l0s97bb97g120224gs0ctg,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2025-09-20,20250920_i6r6f8olliomooqntjd8o7h05g,German World Children's Day (Thuringia),regional,Thuringia,ical
+2025-10-03,20251003_r8m4no2dc0ubg4l87rcftj5f88,Day of German Unity,public,,ical
+2025-10-26,20251026_t6mk5rojvobgi2qhvkkdg0g5t0,Daylight Saving Time ends,observance,,ical
+2025-10-31,20251031_c2q3vt0s3ql4f1nqmije4bvsrg,Halloween,observance,,ical
+2025-10-31,20251031_291pranri98m86jm36ujp3l8j4,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2025-11-01,20251101_p48er6999ph0fn6jjfn4u3q3hs,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2025-11-11,20251111_lsdabm0gnlu4v1bobtopsj9q4s,St. Martin's Day,observance,,ical
+2025-11-16,20251116_bd1c2orbhe5adhf863hlr8mhgk,National Day of Mourning,observance,,ical
+2025-11-19,20251119_r99gicctno5rpmjailmdlsjfms,Repentance Day (Saxony),regional,Saxony,ical
+2025-11-23,20251123_3q44i4fe67lf10dr2apl097ffg,Sunday of the Dead,observance,,ical
+2025-11-30,20251130_0hf92k7jmvvlnnm1b5d7ol7mgs,First Advent Sunday,observance,,ical
+2025-12-06,20251206_6jq14afbuvbkfjid69ddu3j30s,Saint Nicholas Day,observance,,ical
+2025-12-07,20251207_jkbdqanr0gbvd14jgb5gn3po94,Second Advent Sunday,observance,,ical
+2025-12-14,20251214_tg3iqmanon1jm48gag0hr58snk,Third Advent Sunday,observance,,ical
+2025-12-21,20251221_msmg56lc3vudvk99n7gjacj58c,Fourth Advent Sunday,observance,,ical
+2025-12-24,20251224_73spm5u4upm31v08k04tm63pvs,Christmas Eve,half_day,,ical
+2025-12-25,20251225_s6ifvv56pm79pouspuqoulu9hc,Christmas Day,public,,ical
+2025-12-26,20251226_a4f4s8fmis1lte1pt6qu4scbks,Boxing Day,public,,ical
+2025-12-31,20251231_6kdtc42bn812ropkr9prk9sv5o,New Year's Eve,half_day,,ical
+2026-01-01,20260101_rnskebs7pa4avlaoo5uemjttj8,New Year's Day,public,,ical
+2026-01-06,20260106_4r3bobdeqsnirl6lll20djcjsg,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2026-02-14,20260214_423a36mhlmcu14sq8c2oam7nh0,Valentine's Day,observance,,ical
+2026-02-16,20260216_j70ac564us1ohpgvljg0pmeqfs,Shrove Monday,observance,,ical
+2026-02-17,20260217_do5t39noje8vm20rsoq75nq8lc,Carnival Tuesday,observance,,ical
+2026-02-18,20260218_eunodvucricvba3a980d9tig1s,Carnival / Ash Wednesday,observance,,ical
+2026-03-08,20260308_p49dvh9h58mrpqlpgj3nipumd8,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2026-03-29,20260329_c9ceiuucnbdr7u2rvq313u1u5c,Daylight Saving Time starts,observance,,ical
+2026-03-29,20260329_dqrbq8i2gh359kl5g4upatc6to,Palm Sunday,observance,,ical
+2026-04-02,20260402_m8k8dd87kpkhdlj5bje8ck6ok4,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2026-04-03,20260403_bt9m84f03ic55msc5hnf6vtbps,Good Friday,public,,ical
+2026-04-04,20260404_j3bjcp3ks8v5rnj7v68f6q6jfg,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2026-04-05,20260405_nnfinr4bq0ql0ai9mr289ckotk,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2026-04-06,20260406_5l0ted5mdmcquv089fojl7trho,Easter Monday,public,,ical
+2026-05-01,20260501_5ijhmab0knpvrprfqc6106bieg,May Day,public,,ical
+2026-05-08,20260508_feuk8a0qutb66bhj97ehi2ogh0,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2026-05-10,20260510_1jubet3i306oon4hdms4oj898c,Mother’s Day,observance,,ical
+2026-05-14,20260514_9pnjvca9v1b8v96q2k5r4g62gc,Ascension Day,public,,ical
+2026-05-14,20260514_32na2pb6ffrjshf408c5hbj7c0,Father’s Day,observance,,ical
+2026-05-24,20260524_69n6h1il6tcfu3aejaf13fghg0,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2026-05-25,20260525_gb731enpavtvtsd712ontbfi0g,Whit Monday,public,,ical
+2026-06-04,20260604_67ok3k8hl4ubft3s7gbefg08f8,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2026-08-15,20260815_k3mj9fhtlv9oa9adls2kmsahlo,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2026-09-20,20260920_q1n38cvq4qphm6srdp5n8nu648,German World Children's Day (Thuringia),regional,Thuringia,ical
+2026-10-03,20261003_9i84mjqnhan836p94csq8ed0tg,Day of German Unity,public,,ical
+2026-10-25,20261025_jlj9oc8j968jrul4vghc27mshc,Daylight Saving Time ends,observance,,ical
+2026-10-31,20261031_aestejc39fa2tb61u0ffmn5dv4,Halloween,observance,,ical
+2026-10-31,20261031_kdshhg9jfq866p30nrogrriskk,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2026-11-01,20261101_isi5h0lsp97a5enfqf4lljctn8,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2026-11-11,20261111_2u1trb78n6skno9shgeomgbr4s,St. Martin's Day,observance,,ical
+2026-11-15,20261115_4a5h1g1v51192choc0393644vc,National Day of Mourning,observance,,ical
+2026-11-18,20261118_b9vmg6vs2eqvqm70adma1fil2g,Repentance Day (Saxony),regional,Saxony,ical
+2026-11-22,20261122_rss1um0bepmmg0e4nhfrc55uvs,Sunday of the Dead,observance,,ical
+2026-11-29,20261129_11clihub2nb4lk6ik92rn982r0,First Advent Sunday,observance,,ical
+2026-12-06,20261206_1aeeankqrhra5h9dtntpd0egfs,Saint Nicholas Day,observance,,ical
+2026-12-06,20261206_k87ckcgtooalncg53b3d2mv7fs,Second Advent Sunday,observance,,ical
+2026-12-13,20261213_u14d4ngjq5nuuqojfi4hkh52gk,Third Advent Sunday,observance,,ical
+2026-12-20,20261220_s25v19mfaec0e7ckdtt27r6pc0,Fourth Advent Sunday,observance,,ical
+2026-12-24,20261224_pujda4r0arehtg4i2ddnjsrl1c,Christmas Eve,half_day,,ical
+2026-12-25,20261225_bac0vmnknb0tva42i3itijeeho,Christmas Day,public,,ical
+2026-12-26,20261226_6usclbgg25k6nsfv4h8c2sp4os,Boxing Day,public,,ical
+2026-12-31,20261231_2fleorjqqvju16llu742oq2iko,New Year's Eve,half_day,,ical
+2027-01-01,20270101_pond5ajf810o323i4ii4q57dgc,New Year's Day,public,,ical
+2027-01-06,20270106_3b9ihl1cqdr37gjbe56cj83slc,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2027-02-08,20270208_5fd15aahputpnid2uqsku6hf6s,Shrove Monday,observance,,ical
+2027-02-09,20270209_764c7hak9j43vksbia3l5mio4s,Carnival Tuesday,observance,,ical
+2027-02-10,20270210_09jq6nr77cv8m8kv0cm93dgsi4,Carnival / Ash Wednesday,observance,,ical
+2027-02-14,20270214_jqbnqkor4kvk7n9lnr05lq61jg,Valentine's Day,observance,,ical
+2027-03-08,20270308_jm79qb32o76d7qc3lvs5o68a4o,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2027-03-21,20270321_ehj7vtcbvsumn9gvoc2ouqghu0,Palm Sunday,observance,,ical
+2027-03-25,20270325_ajotjku68vkuaj5j6bpamo4q7k,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2027-03-26,20270326_2frjjricea5q9edpt3ln48pt54,Good Friday,public,,ical
+2027-03-27,20270327_78g0i82rmkinfsdog32ntb4lo4,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2027-03-28,20270328_b2160um0p2ptjb93th8pv0d6jo,Daylight Saving Time starts,observance,,ical
+2027-03-28,20270328_5bcjj5cjru15fgv3kj0vjlo6ns,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2027-03-29,20270329_gh46i0kefo6cbth16crke5db8c,Easter Monday,public,,ical
+2027-05-01,20270501_be3jeur31uu7cgmpv3htku9c0k,May Day,public,,ical
+2027-05-06,20270506_qdaa2mjfepdp8s7s04est3q4fk,Ascension Day,public,,ical
+2027-05-06,20270506_kf941ecm0ae5pgm4fmgch6r5hg,Father’s Day,observance,,ical
+2027-05-08,20270508_sp6fnfmdf3a0fdjmhl9egfis8o,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2027-05-09,20270509_6hfepsvbfs58joro92mjku5ops,Mother’s Day,observance,,ical
+2027-05-16,20270516_cnu6h696ji1obotsg0d7rdcrbk,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2027-05-17,20270517_nqmftrj6jvd6cvl6dv3mb699us,Whit Monday,public,,ical
+2027-05-27,20270527_99iaj8bp1m397nbkoo8scvtqv0,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2027-08-15,20270815_6q899bn6678ltcpbrtt7gkvcnc,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2027-09-20,20270920_rhlfmmnq1ekav5e01d469nu0i4,German World Children's Day (Thuringia),regional,Thuringia,ical
+2027-10-03,20271003_b49f9ovcfslcsu61e3m9fv03b0,Day of German Unity,public,,ical
+2027-10-31,20271031_bi9tj0b19uqb32hf2m744o5olc,Daylight Saving Time ends,observance,,ical
+2027-10-31,20271031_df3knka81bo314qnd8oj3apqvo,Halloween,observance,,ical
+2027-10-31,20271031_9tc8giepo61c0lq2637q48vg6s,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2027-11-01,20271101_d31rpkvai18qmma5dvtfcts8r8,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2027-11-11,20271111_u600mji39n2siariq2rga0a3ps,St. Martin's Day,observance,,ical
+2027-11-14,20271114_2shl7h2n7vd6f1r4dcsi9ro0n4,National Day of Mourning,observance,,ical
+2027-11-17,20271117_0uvqov0dnmds8mffeto8rr6g4k,Repentance Day (Saxony),regional,Saxony,ical
+2027-11-21,20271121_p9f0c37g4367u8hka87g0pef5o,Sunday of the Dead,observance,,ical
+2027-11-28,20271128_v15sc63mg390gsig90399fhou4,First Advent Sunday,observance,,ical
+2027-12-05,20271205_g34v766elv6pojjh4epmasbe7g,Second Advent Sunday,observance,,ical
+2027-12-06,20271206_qsm7h72hi1667djfacno4o5l2g,Saint Nicholas Day,observance,,ical
+2027-12-12,20271212_uunqkakg5k8i5sm097nl6kf814,Third Advent Sunday,observance,,ical
+2027-12-19,20271219_pfpojua2g364e9ooiauefp3t9o,Fourth Advent Sunday,observance,,ical
+2027-12-24,20271224_dharrsocpudatujs0outpc4fag,Christmas Eve,half_day,,ical
+2027-12-25,20271225_407m57fls2j9ipeah0etbtg5rs,Christmas Day,public,,ical
+2027-12-26,20271226_r1dni49ttgcre98rgecjihec4c,Boxing Day,public,,ical
+2027-12-31,20271231_ainuoj7a1nquu8d13ianunamgo,New Year's Eve,half_day,,ical
+2028-01-01,20280101_dht12pnb7bngc3i5ml51kg1dr4,New Year's Day,public,,ical
+2028-01-06,20280106_au3j67ros6msliilbud0uslq0k,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2028-02-14,20280214_7e6pspvnctusm77ibeig6ier3o,Valentine's Day,observance,,ical
+2028-02-28,20280228_7jv8va4eepdqe0gtsooe0i3gv0,Shrove Monday,observance,,ical
+2028-02-29,20280229_i0chkdte90btc7ur78mbnqhu3g,Carnival Tuesday,observance,,ical
+2028-03-01,20280301_h13tammhgnmhuvt8av9gpiqqr8,Carnival / Ash Wednesday,observance,,ical
+2028-03-08,20280308_7p64tmtde6pi86mv2sn0qjpo2g,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2028-03-26,20280326_q6f9396s08s75frckfrkm1lf5s,Daylight Saving Time starts,observance,,ical
+2028-04-09,20280409_t2950nu27ber60gbl5q8dm2pbo,Palm Sunday,observance,,ical
+2028-04-13,20280413_iv12blnliu21tmvfrdqk5focr8,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2028-04-14,20280414_mf81b4nkf2p36cigp2n29aci6k,Good Friday,public,,ical
+2028-04-15,20280415_l3dr5s807mt17hhj5ss0slu3es,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2028-04-16,20280416_jv9e5g6v4mbgf5kba571lvmcq4,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2028-04-17,20280417_bfqujebcbiq78bejjhdlset6ps,Easter Monday,public,,ical
+2028-05-01,20280501_u3ea4063m5dd1ighvro4kr4gsk,May Day,public,,ical
+2028-05-08,20280508_qvf1nfiru8fan6uihef89hu3g4,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2028-05-14,20280514_jvjab6ki553tfvvsstra879ivk,Mother’s Day,observance,,ical
+2028-05-25,20280525_3i18o52os0cdrbl5od0re45kg8,Ascension Day,public,,ical
+2028-05-25,20280525_t9gqhe235j824raf2g93f4jfn4,Father’s Day,observance,,ical
+2028-06-04,20280604_k3e39qnmi283m2e6bnt2hhlhb0,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2028-06-05,20280605_p12opmo50deaefr5jv8qulqkbk,Whit Monday,public,,ical
+2028-06-15,20280615_02ko3lktsvsh31dcuiam3no53o,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2028-08-15,20280815_4v1vb2h2ddcm834c0osj6f6jcc,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2028-09-20,20280920_p1hueai7cn5b4pa9hpra5r15d8,German World Children's Day (Thuringia),regional,Thuringia,ical
+2028-10-03,20281003_ar47bh13emu2s9dh3k4a81uvig,Day of German Unity,public,,ical
+2028-10-29,20281029_8ngnhufngjhma92vsqlvudt3m8,Daylight Saving Time ends,observance,,ical
+2028-10-31,20281031_g5cc8487v4s8k6lp5orghbc490,Halloween,observance,,ical
+2028-10-31,20281031_q7l17966316vpsrqrc82i0b5ss,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2028-11-01,20281101_9d78dtf843hhdp4qn1h15vvemo,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2028-11-11,20281111_82clbihiup2jlsgqd89r2936vk,St. Martin's Day,observance,,ical
+2028-11-19,20281119_k6rg7bcmvfi2r52kgj80p0c5eg,National Day of Mourning,observance,,ical
+2028-11-22,20281122_lih785b7u43rmjcclq9sfigug8,Repentance Day (Saxony),regional,Saxony,ical
+2028-11-26,20281126_mgfgthsmior4jt6rr7nnq5lr04,Sunday of the Dead,observance,,ical
+2028-12-03,20281203_m96teh7t93l31h9f7kenbj06us,First Advent Sunday,observance,,ical
+2028-12-06,20281206_iidr6p73vke4vl5sus492o0idg,Saint Nicholas Day,observance,,ical
+2028-12-10,20281210_44mdsu24rk9b3arsttn6c052jc,Second Advent Sunday,observance,,ical
+2028-12-17,20281217_8enifoihujuckt39lv8h74otvc,Third Advent Sunday,observance,,ical
+2028-12-24,20281224_917f1csjld67fmloodhlvpofms,Christmas Eve,half_day,,ical
+2028-12-24,20281224_a55d5t6kuev3gse8cb2tb6tgkc,Fourth Advent Sunday,observance,,ical
+2028-12-25,20281225_4d6slbu7im7d5icrcvf0rmg10s,Christmas Day,public,,ical
+2028-12-26,20281226_mq66sdt7e12pbs0n4qb4ahk6o8,Boxing Day,public,,ical
+2028-12-31,20281231_clmbrf5r3j785e06kodaf5h7ok,New Year's Eve,half_day,,ical
+2029-01-01,20290101_r9gd9eqrp70m31mn9tnj21hek4,New Year's Day,public,,ical
+2029-01-06,20290106_gquln4gbb85pcnvjucqgsr7dag,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2029-02-12,20290212_0bto53642saj1j0etb4sr1dreo,Shrove Monday,observance,,ical
+2029-02-13,20290213_ogol96si6vuvs5gu7hdjgk5jg8,Carnival Tuesday,observance,,ical
+2029-02-14,20290214_kj2a5a0vm4322136t3d42rdo9s,Carnival / Ash Wednesday,observance,,ical
+2029-02-14,20290214_i9tvpn9l9kdlbn1bmqir10jrag,Valentine's Day,observance,,ical
+2029-03-08,20290308_migjnni9cf83pgvtstvid1b8mk,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2029-03-25,20290325_ht1l9djl2ilg53cebp4vdtk7s0,Daylight Saving Time starts,observance,,ical
+2029-03-25,20290325_fu18p4agu6i387dcc2a9doash4,Palm Sunday,observance,,ical
+2029-03-29,20290329_kfsrqr6qp8v75eqppors78s0dk,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2029-03-30,20290330_ofdh3b2f15qi0b5ormhno2fh1k,Good Friday,public,,ical
+2029-03-31,20290331_nbmcjvd6vkopg41qv0acq1spmg,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2029-04-01,20290401_vtlg49vqhcb84d9bhtna46c26k,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2029-04-02,20290402_kifrf2u621ijo674279f55jftc,Easter Monday,public,,ical
+2029-05-01,20290501_92qm9aidlkjjk4a22m98oq15d4,May Day,public,,ical
+2029-05-08,20290508_su2gil4njbpgfb5msku0k35pck,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2029-05-10,20290510_6s29573at9fifr258f4mb07s38,Ascension Day,public,,ical
+2029-05-10,20290510_b46bmogkfn77771bsd07kic5bk,Father’s Day,observance,,ical
+2029-05-13,20290513_g6l3vrh2rogq270rlgh5bvmirk,Mother’s Day,observance,,ical
+2029-05-20,20290520_rl7djig9vjraoc5nb4delv9n60,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2029-05-21,20290521_t7cjtudj7t0nicb3jnrful6qh4,Whit Monday,public,,ical
+2029-05-31,20290531_qoarjukos4eiqb346thn4bh1ds,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2029-08-15,20290815_prebf9bqp3bqj18udmiffotcss,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2029-09-20,20290920_4l9es13b60un1rk2r67f54u73s,German World Children's Day (Thuringia),regional,Thuringia,ical
+2029-10-03,20291003_1592ksr4tgfkgikvmr79e8ov6c,Day of German Unity,public,,ical
+2029-10-28,20291028_djl51pvvv556t2oq8rcstus49o,Daylight Saving Time ends,observance,,ical
+2029-10-31,20291031_tje2ldlv8lsmgqbc3a0dhc8pv8,Halloween,observance,,ical
+2029-10-31,20291031_k233l0t5p4121sqk0ep9afm9uo,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2029-11-01,20291101_q544j45kroqpufrj8luttkb0go,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2029-11-11,20291111_h72tm727bdb9dkf7k6ep0m9nes,St. Martin's Day,observance,,ical
+2029-11-18,20291118_9kasd00orunkg01o08dj3036i0,National Day of Mourning,observance,,ical
+2029-11-21,20291121_8scmcrum33uvcdk03ktfdgokv8,Repentance Day (Saxony),regional,Saxony,ical
+2029-11-25,20291125_omh5g6an7tuj92s2tv2h0v8hl8,Sunday of the Dead,observance,,ical
+2029-12-02,20291202_qi4kjb7amba7vv46jk4ibs0jrg,First Advent Sunday,observance,,ical
+2029-12-06,20291206_f9v77ajv1ilcngr1d0j44glvmo,Saint Nicholas Day,observance,,ical
+2029-12-09,20291209_h3ljk5sq8239d336n2gmiun08k,Second Advent Sunday,observance,,ical
+2029-12-16,20291216_7p7cp449frumnilpku49lrjj6o,Third Advent Sunday,observance,,ical
+2029-12-23,20291223_4rsjl0jtvt72fql2avcr07pjq0,Fourth Advent Sunday,observance,,ical
+2029-12-24,20291224_aa0b8q5p87mn6bk0cnusaa2pro,Christmas Eve,half_day,,ical
+2029-12-25,20291225_1b3g4t1dpnlko4abacgq00dsoo,Christmas Day,public,,ical
+2029-12-26,20291226_sq8a5bmu55285s0ha30o0k9qo4,Boxing Day,public,,ical
+2029-12-31,20291231_608ropet3ltp7ifenbqte9erdg,New Year's Eve,half_day,,ical
+2030-01-01,20300101_cbu9qsbfehfc7v4vvtukppblr0,New Year's Day,public,,ical
+2030-01-06,20300106_mp3asvhirr0liamdcq6b0bu6so,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2030-02-14,20300214_1hdad8n3vb6ck3dkfeusi7cmfo,Valentine's Day,observance,,ical
+2030-03-04,20300304_624j9vca4us6f658b67hf43sqk,Shrove Monday,observance,,ical
+2030-03-05,20300305_nvi26gg3nln9rtktcn74k4i7eo,Carnival Tuesday,observance,,ical
+2030-03-06,20300306_4mco401ko6el53uqis5r884uoc,Carnival / Ash Wednesday,observance,,ical
+2030-03-08,20300308_d71tdtrk8rqe943dufqvkovpng,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2030-03-31,20300331_6d2pauqiur83bmvccmab5u8iv0,Daylight Saving Time starts,observance,,ical
+2030-04-14,20300414_72ruafm7om2rjn7safjqkt77a0,Palm Sunday,observance,,ical
+2030-04-18,20300418_gl9n6ud5vst1u695d8d853tomg,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2030-04-19,20300419_5mcm4hln234jhv3iipvmkhh4lc,Good Friday,public,,ical
+2030-04-20,20300420_j744dni7r08m1tf8t9ai37ndfo,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2030-04-21,20300421_dh6o5a69ms0cea99k7klc3cs28,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2030-04-22,20300422_8lvcdgrfgdii7v56guak9fcqkc,Easter Monday,public,,ical
+2030-05-01,20300501_c25iqqjurnmqmi1a7m97qsm9io,May Day,public,,ical
+2030-05-08,20300508_5fv6cmuf8on2gt7bkj9v4b7jp0,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2030-05-12,20300512_26gq228v9jp8avmh84l5hfjte0,Mother’s Day,observance,,ical
+2030-05-30,20300530_as014jna35ahp0vr8491u0v1o4,Ascension Day,public,,ical
+2030-05-30,20300530_cie2ki9hb78qgic1aemcn8bo9k,Father’s Day,observance,,ical
+2030-06-09,20300609_7ijujp3m19obpq8qujrv1hdlo4,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2030-06-10,20300610_jeup9aeje31kvgqqall1630gk4,Whit Monday,public,,ical
+2030-06-20,20300620_95jdebutq8iojc2vl0n2jk956o,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2030-08-15,20300815_ivm8o426qlhl6k3havkki9ar6s,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2030-09-20,20300920_ngfptqisrt3q0ieqj0ue9c5dq4,German World Children's Day (Thuringia),regional,Thuringia,ical
+2030-10-03,20301003_h23t0ptn4loavanabfs0slru8c,Day of German Unity,public,,ical
+2030-10-27,20301027_eneu4c6dkisqoada3t70n04des,Daylight Saving Time ends,observance,,ical
+2030-10-31,20301031_lnauk9i24sjfravtujb6jdnf1s,Halloween,observance,,ical
+2030-10-31,20301031_f2dqvvav7g2hom6jad1tr9soh4,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2030-11-01,20301101_pq3m26hsnkunft02kabmpd6vp0,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2030-11-11,20301111_9hmrnv33djgnnsl2nuhob1lua0,St. Martin's Day,observance,,ical
+2030-11-17,20301117_38i971hksvgv96qc5ao0bgjafc,National Day of Mourning,observance,,ical
+2030-11-20,20301120_l78ie0n03hlp8etqu4qk9b3p1g,Repentance Day (Saxony),regional,Saxony,ical
+2030-11-24,20301124_amtqassmcof4jvcjq1uffiokgc,Sunday of the Dead,observance,,ical
+2030-12-01,20301201_478cluc2t8u35gjks86ukovhv8,First Advent Sunday,observance,,ical
+2030-12-06,20301206_c8n32n4g8capotktp1nd2vfgu8,Saint Nicholas Day,observance,,ical
+2030-12-08,20301208_5cenicu3v26bdssnk5p4sifhb0,Second Advent Sunday,observance,,ical
+2030-12-15,20301215_c1pghi9un3kh5vctu86npk4aj0,Third Advent Sunday,observance,,ical
+2030-12-22,20301222_n6co2ck3jkipf3v2iq29dal71k,Fourth Advent Sunday,observance,,ical
+2030-12-24,20301224_53oqg8f5po21ku7v1q07j2rcbc,Christmas Eve,half_day,,ical
+2030-12-25,20301225_c4luc0bhrb9epth7ald1dqkvs8,Christmas Day,public,,ical
+2030-12-26,20301226_an5h65qck5cgjf87s5dkjq72kc,Boxing Day,public,,ical
+2030-12-31,20301231_a4kai8cmf1n1b4duiksois4i7g,New Year's Eve,half_day,,ical
+2031-01-01,20310101_tlris2uts8t2g0v0tsih47m96c,New Year's Day,public,,ical
+2031-01-06,20310106_itjbemar5p8d142vg7nr1j63jc,Epiphany,regional,"Baden-Württemberg, Bavaria, Saxony-Anhalt",ical
+2031-02-14,20310214_pmti3p70v39vm094b4l0oupchc,Valentine's Day,observance,,ical
+2031-02-24,20310224_2dvq4vjqskl75821f90339ptf8,Shrove Monday,observance,,ical
+2031-02-25,20310225_d5db7bcpeh9b60p4gthrbjjg7g,Carnival Tuesday,observance,,ical
+2031-02-26,20310226_qcfjmibbh4h3hbon4r9opdneb8,Carnival / Ash Wednesday,observance,,ical
+2031-03-08,20310308_41s1fp6nmlvrq0el01p5eha0v0,International Women's Day,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2031-03-30,20310330_ofv6d955thb53q3ksrtibd7mco,Daylight Saving Time starts,observance,,ical
+2031-04-06,20310406_53ajnfllnvst602b5kbeeqaph4,Palm Sunday,observance,,ical
+2031-04-10,20310410_2gi4g223lmv8nmidmf6l73ph78,Maundy Thursday,observance,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2031-04-11,20310411_nbufqabrrg83npth7c2hl0je10,Good Friday,public,,ical
+2031-04-12,20310412_qee9svf693a8gd6ua4kc8ljnm8,Holy Saturday,observance,"Bavaria, Hesse, Lower Saxony, Saarland, Rhineland-Palatinate",ical
+2031-04-13,20310413_oo8qpp6iaga7go8p56kitluh1s,Easter Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2031-04-14,20310414_e31649rfda02hkj4da1p8o7fd0,Easter Monday,public,,ical
+2031-05-01,20310501_noir9o9r60hrhnbht7npk14jl0,May Day,public,,ical
+2031-05-08,20310508_trqn39615sount6opteot7iqt8,Anniversary of the End of World War II,observance,"Berlin, Brandenburg, Bremen, Mecklenburg-Western Pomerania, Thuringia",ical
+2031-05-11,20310511_jbvljr5sitcrodfh2qh5n9tqq0,Mother’s Day,observance,,ical
+2031-05-22,20310522_k9g9t308210ar5l0pbee3mcm60,Ascension Day,public,,ical
+2031-05-22,20310522_i2t43qbg26mqvbc4qb4ofdgdss,Father’s Day,observance,,ical
+2031-06-01,20310601_slumrsgutcgb8iqemarr9hidus,Whit Sunday,regional,"Baden-Württemberg, Bavaria, Berlin, Brandenburg, Bremen, Hamburg, Hesse, Mecklenburg-Western Pomerania, Lower Saxony, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Saxony-Anhalt, Schleswig-Holstein, Thuringia",ical
+2031-06-02,20310602_j63pc8rvh75m3foo85rc1e0l44,Whit Monday,public,,ical
+2031-06-12,20310612_mvd8q8n0cf4geicnoa4i10j6u8,Corpus Christi,regional,"Baden-Württemberg, Bavaria, Hesse, North Rhine-Westphalia, Rhineland-Palatinate, Saarland, Saxony, Thuringia",ical
+2031-08-15,20310815_5um3h0j2klt5tv21rdbe8q871c,Assumption of Mary,regional,"Bavaria, Saarland, Saxony, Thuringia",ical
+2031-09-20,20310920_v5j962fnnkdevl8qotu65mo380,German World Children's Day (Thuringia),regional,Thuringia,ical
+2031-10-03,20311003_l7omi5egbmhe4u71shdajgqbeg,Day of German Unity,public,,ical
+2031-10-26,20311026_vancv0c3flkmdf16re2gdeub14,Daylight Saving Time ends,observance,,ical
+2031-10-31,20311031_ngh3eu3315e1k88kmc9r25ch5k,Halloween,observance,,ical
+2031-10-31,20311031_gbkfu5ll8s9c5kli3b532qhq0g,Reformation Day,regional,"Brandenburg, Mecklenburg-Western Pomerania, Saxony, Saxony-Anhalt, Thuringia, Schleswig-Holstein, Hamburg, Lower Saxony, Bremen",ical
+2031-11-01,20311101_595im7ncqo7t61posr058v2204,All Saints' Day,regional,"Baden-Württemberg, Bavaria, North Rhine-Westphalia, Rhineland-Palatinate, Saarland",ical
+2031-11-11,20311111_nkb0bfei3d7nlaaj6en7sg2lps,St. Martin's Day,observance,,ical
+2031-11-16,20311116_jeodgp7vihf6h449hmkem78v0c,National Day of Mourning,observance,,ical
+2031-11-19,20311119_l8q2iiilpv97813ad471htr4ec,Repentance Day (Saxony),regional,Saxony,ical
+2031-11-23,20311123_59f9mv01h2o3kjcfmb8q4oeqqo,Sunday of the Dead,observance,,ical
+2031-11-30,20311130_d8jabv1ml8jd72u6mp4k3ug5u0,First Advent Sunday,observance,,ical
+2031-12-06,20311206_52bsufaesu62gme5c21jvn0sk4,Saint Nicholas Day,observance,,ical
+2031-12-07,20311207_r1mal04gn2v5653ilpup8k3818,Second Advent Sunday,observance,,ical
+2031-12-14,20311214_t507mbda1rh6q7b47gmkslo6ts,Third Advent Sunday,observance,,ical
+2031-12-21,20311221_81ngp08lb1s2ai0n8pdlei4n0g,Fourth Advent Sunday,observance,,ical
+2031-12-24,20311224_8qvvf1a5psjfi1c3cmp3ivk6ig,Christmas Eve,half_day,,ical
+2031-12-25,20311225_058kaj2vq1p3oial3i1vl023co,Christmas Day,public,,ical
+2031-12-26,20311226_p5322it89jbrgo1bn9okrumbmc,Boxing Day,public,,ical
+2031-12-31,20311231_g6bn0i4im3nb0vv4as41vcpjsk,New Year's Eve,half_day,,ical
